@@ -1,74 +1,73 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-04 (end of session 1)._ Read this first, then `docs/ROADMAP.md`.
+_Last updated: 2026-11-04 (end of session 2)._ Read this first, then `docs/ROADMAP.md`.
 
 ## Where we are
 
-**Phase 1 MVP is functional on Windows** (M0–M8 done, M9 hardening in progress). The app launches, onboards a
-workspace, registers projects and Claude profiles, runs real Claude Code and shells in the integrated terminal,
-records sessions truthfully and resumes conversations.
+* `main` = reviewed baseline commit `68affc0` (Phase 1 MVP). Nothing has ever been pushed.
+* Branch **`milestone/m9-m10-reliability-cli`** holds session 2 (M9 reliability baseline, M10 CLI, M12 MCP server,
+  ADR-0013/0014). **Uncommitted** — waiting for the owner's go-ahead to commit.
+* Phases: Phase 1 ✅ · M9 ✅ · M10 ✅ · M11 partial (session hosts done; `claude agents --json` open) · M12 ✅ ·
+  M13 (hooks) next.
 
 ## Verified behaviour (2026-11-04)
 
-| What | How verified |
+| Area | Evidence |
 | --- | --- |
-| Core domain logic (DB/migrations, paths, workspaces, projects, git, profiles, policy, auth parsing, launch spec, env scrub, sessions) | 58 unit + 5 integration tests (`cargo test -p nexus-core`) |
-| Hostile repo `core.fsmonitor` is not executed by NEXUS git calls (control run proves plain git would execute it) | `tests/git_integration.rs` |
-| Launch through the real PTY: correct `CLAUDE_CONFIG_DIR` (removed for default profile), no inherited `CLAUDECODE`/`CLAUDE_CODE_*`/messaging token/`ANTHROPIC_API_KEY`/`OTEL_*`, input round trip, exit codes, terminate | 4 tests in `apps/desktop/src-tauri/tests/pty_launch.rs` (fake-claude) |
-| Real app end to end (real IPC + PTY + UI) while NEXUS itself runs inside a Claude session | `apps/desktop/e2e/smoke.mjs`: 15/15 checks |
-| Real Claude Code 2.1.311 TUI renders and accepts keyboard input in the integrated terminal | manual CDP run with a synthetic (empty) config dir |
-| Hard crash of NEXUS: Claude child does not survive as an orphan; on restart the session shows *Interrupted*, resumable only when a transcript exists | manual CDP run (taskkill) |
-| PowerShell terminal in a project dir, commands run, `CLAUDECODE` scrubbed for shells too | manual CDP run |
-| Frontend logic (fuzzy matcher, formatting, launch-dialog defaults) | 11 vitest tests; `vue-tsc` clean; production build OK |
+| Core logic (storage, workspaces, projects, git, profiles, policy, launch spec, env scrub, sessions, hosts, checkpoints, doctor) | `cargo test -p nexus-core`: 79 unit + git (5) + crash (2) + isolation (4) |
+| Migrations & recovery: v1→v2 table rebuild keeps self-references, failed migration rolls back, FK-checked rebuilds, backups rotate, real `abort()` mid-transaction, garbage/page-damaged DB quarantined (never deleted) | `db::tests`, `tests/db_crash.rs` |
+| Env isolation: every scrubbed name in any letter case; helper spawns (`auth status`, `--version`) and sessions see no parent Claude markers, messaging token, API keys or OTEL; golden argv | `env::tests`, `tests/isolation.rs`, `launch::tests`, PTY tests, CLI tests, E2E |
+| Session hosts (ADR-0014): leases, reconcile, sleep recovery, crashed predecessor, final orderly shutdown; a **really killed** `nexus launch` → interrupted | `host::tests`, `cli::a_killed_cli_host_is_reconciled_to_interrupted` |
+| CLI (`nexus`): doctor, workspaces, projects, profiles, sessions, launch (`--resume last`), exit-code propagation | `cargo test -p nexus-cli` (8 E2E + 5 MCP unit) |
+| MCP server: JSON-RPC over stdio, workspace scoping (other workspaces invisible by id/name/prefix), bounded inputs, policy-blocked → omitted with reason | MCP unit tests, stdio E2E, **official TS SDK interop** (`e2e/mcp-interop.mjs`) |
+| Desktop E2E on the production-mode build (embedded frontend + CSP): launch isolation, MCP config, resume, MCP checkpoint and `nexus launch` session appear **live** in the desktop | `e2e/run-smoke.mjs`: 18/18, 3 consecutive runs |
+| Frontend | 26 vitest (logic + LaunchDialog, ProfileDialog, SessionRow, CommandPalette, change-detection race); `vue-tsc` clean |
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` clean |
 
-Not yet verified: launching with the user's *real* profiles (deliberately avoided — the user's config dirs must not
-be touched during development). The owner should do the manual smoke checklist in `docs/TESTING.md` once.
+Not verified (deliberately): anything with the owner's real Claude profiles → `docs/MANUAL_CHECKS.md`.
+Not yet run: the GitHub Actions workflow (nothing pushed) — Windows GUI E2E on hosted runners is plausible but unproven.
 
-## Implemented components
+## Bugs found and fixed this session (all with regression coverage)
 
-* `crates/nexus-core` — all domain logic (see `docs/ARCHITECTURE.md` §1).
-* `apps/desktop/src-tauri` — ~45 IPC commands, PTY manager (binary channels, ring buffer, ConPTY handshake,
-  query-stripped replay), single instance, minimal capabilities, CSP.
-* `apps/desktop/src` — Vue 3 UI: onboarding, Home, Projects (+detail), Sessions, Claude profiles, Settings,
-  terminal panel (tabs, resize, maximize, search, copy/paste), launch dialog, command palette (Ctrl+K /
-  Ctrl+Shift+P), quit confirmation with live sessions, dark/light themes.
-* `apps/desktop/e2e` — CDP client (`cdp.mjs`) and smoke test (`smoke.mjs`).
-* `.github/workflows/ci.yml` — Rust (Windows + Ubuntu) and frontend jobs. **Unverified until first push.**
+* `tauri build` failed on an npm/crate version mismatch: the MSRV-aware resolver picked older Tauri crates under
+  `rust-version = 1.85`. MSRV is now 1.90 (CLAUDE.md rule). The earlier "release" binary was a dev-mode leftover.
+* Desktop change detection missed external writes landing between the initial load and the first poll (baseline
+  race) — found by the E2E, fixed, unit-tested.
+* SessionRow showed a made-up "0s" duration for interrupted sessions; resumed sessions are now marked.
 
 ## Known issues / decisions to revisit
 
-* portable-pty 0.9 Windows bug: kill reports success as `Err(os error 0)` — worked around in `pty.rs`.
-* Tauri `freezePrototype` is off (breaks xterm.js) — recorded in ADR-0007 and threat T15.
-* `project_inspect_path` / `project_register` hold the UI DB mutex during short git calls (~50–150 ms).
-* Session duration in lists does not tick live; running sessions show the duration at render time.
-* Light theme: the terminal switches theme only when the theme is changed through preferences (correct path).
-* `npm audit`: 5 moderate advisories in dev-only transitive deps (glob/minimatch). Not shipped.
-* Tauri identifier `dev.nexus.desktop` is provisional (affects install paths) — decide before the first release.
-* No LICENSE (owner decision). **Nothing is committed yet** — the repository has no commits; the owner decides
-  when to commit (no remote pushes were made).
-* Component tests with mocked IPC are thin (logic is covered by pure-function tests + the smoke test).
+* Release gates (owner decision): identifier `dev.nexus.desktop` provisional, no license, code signing, release
+  builds must ignore WebView2 remote debugging (T18), bundle `nexus` CLI as a Tauri sidecar (MCP needs it next to the
+  app). See `docs/ROADMAP.md` → "Gates before the first public release".
+* portable-pty 0.9 Windows `kill` reports success as an error — worked around (`pty.rs`).
+* `freezePrototype` is off (breaks xterm.js).
+* `<data dir>/sessions/<id>/mcp.json` files are not pruned yet (tiny; add housekeeping).
+* Project inspection holds the UI DB mutex during short git calls.
+* `npm audit`: moderate advisories in dev-only transitive deps.
 
 ## Next actions (in order)
 
-1. Owner: run the manual smoke checklist (`docs/TESTING.md`) with a real profile; commit the baseline.
-2. M9: `tauri-driver` WebDriver E2E for CI; component tests for LaunchDialog/ProfileDialog with mocked IPC;
-   live-ticking durations; empty/error-state review.
-3. Phase 2 (M10): `crates/nexus-cli` (`nexus doctor | profiles | projects | sessions`) on top of nexus-core.
-4. M11: reconcile sessions with `claude agents --json`; evaluate durable sessions (`claude --bg` + `attach`).
-5. M12–M13: `nexus mcp` (rmcp, stdio, scope bound by `NEXUS_SESSION_ID`) via `--mcp-config`; hooks via
-   `--settings` exec form; respect `disableSideloadFlags` / `allowManagedHooksOnly` (policy summary already
-   computed per profile in `claude::policy`).
+1. Owner: review the branch; approve committing it; run `docs/MANUAL_CHECKS.md` with the Personal profile.
+2. M13: lifecycle hooks via `--settings` (exec form → `nexus hook <event>`): SessionStart/SessionEnd/PreCompact/Stop
+   checkpoints; verify `--settings` hook merging and `allowManagedHooksOnly` behaviour on Claude Code 2.1.x.
+3. M11 remainder: reconcile with `claude agents --json`; measure `claude --bg` + `attach` for the future service host.
+4. M14: profile diagnostics in the desktop (reuse `nexus_core::doctor`), allowlist profile cloning.
+5. Phase 3: knowledge files per ADR-0013 (format, atomic writes, FTS index, conflict reporting).
 
 ## How to run
 
 ```text
-# Rust (PATH needs %USERPROFILE%\.cargo\bin)
+# Rust (PATH needs %USERPROFILE%\.cargo\bin); MSRV 1.90
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+cargo build -p nexus-cli -p fake-claude
 # Frontend / app
 cd apps/desktop && npm install
 npm test && npm run typecheck
-npm run tauri dev       # set NEXUS_DATA_DIR to an empty folder for an isolated database
-node e2e/smoke.mjs      # with the app running under CDP — see docs/TESTING.md
+npm run tauri dev                                   # NEXUS_DATA_DIR=<empty dir> for an isolated database
+npx tauri build --debug --no-bundle && node e2e/run-smoke.mjs   # real-app E2E (Windows)
+node e2e/mcp-interop.mjs                            # official MCP SDK client vs nexus mcp
+# CLI
+target/debug/nexus --help
 ```

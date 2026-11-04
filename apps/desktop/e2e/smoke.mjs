@@ -7,7 +7,7 @@
 //
 // Uses only synthetic fixtures in a temp directory; never touches real Claude profiles.
 // Native folder pickers cannot be automated, so setup calls the same IPC commands those dialogs feed.
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,20 +16,24 @@ import { connect, waitForPort } from './cdp-lib.mjs'
 
 const exe = process.platform === 'win32' ? 'fake-claude.exe' : 'fake-claude'
 const fakeClaude = fileURLToPath(new URL(`../../../target/debug/${exe}`, import.meta.url))
-const root = mkdtempSync(join(tmpdir(), 'nexus-smoke-'))
+const nexusCli = fileURLToPath(new URL(`../../../target/debug/nexus${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url))
 const js = (v) => JSON.stringify(v)
+
+/** Runs every check against the already-running app; resolves to the number of failures. */
+export async function runSmoke() {
 let failures = 0
 const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`)
   if (!ok) failures++
 }
+const root = mkdtempSync(join(tmpdir(), 'nexus-smoke-'))
 
 // Fixture repository with a secret embedded in its remote URL.
 const repo = join(root, 'repo')
 mkdirSync(join(repo, 'src'), { recursive: true })
 writeFileSync(join(repo, 'package.json'), js({ name: 'smoke', dependencies: { vue: '3' }, scripts: { dev: 'vite' } }))
 writeFileSync(join(repo, 'src', 'main.ts'), 'x\n')
-const git = (...args) => execFileSync('git', ['-c', 'user.name=S', '-c', 'user.email=s@example.invalid', ...args], { cwd: repo })
+const git = (...args) => execFileSync('git', ['-c', 'user.name=S', '-c', 'user.email=s@example.invalid', '-c', 'core.autocrlf=false', ...args], { cwd: repo })
 git('init', '-q', '-b', 'main')
 git('add', '-A')
 git('commit', '-qm', 'init')
@@ -72,6 +76,7 @@ try {
   }
   check('NEXUS assigns the Claude session id', report.args[0] === '--session-id' && /^[0-9a-f-]{36}$/.test(report.args[1]))
   check('work profile prompt appended', report.args.some((a) => a.startsWith('NEXUS work profile: PROTOTYPE')))
+  check('session-scoped NEXUS MCP config passed', report.args.includes('--mcp-config'))
 
   // Exit is recorded; a conversation without a transcript is not offered for resume.
   const session = await cdp.waitFor(`(async () => {
@@ -87,8 +92,52 @@ try {
   writeFileSync(join(root, 'cfg', 'projects', 'smoke', `${session.claudeSessionId}.jsonl`), '{}\n')
   const resumed = await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_resume', { id: ${js(session.id)}, cols: 120, rows: 30 })`)
   check('resume creates a linked session', resumed.resumedFrom === session.id && resumed.claudeSessionId === session.claudeSessionId)
+
+  // Cross-process: a checkpoint recorded through `nexus mcp` (as Claude would) appears in the running desktop.
+  const { dataDir } = await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('app_info')`)
+  const mcp = spawn(nexusCli, ['--data-dir', dataDir, 'mcp', '--session', session.id], { stdio: ['pipe', 'pipe', 'ignore'] })
+  for (const m of [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'checkpoint', arguments: { kind: 'decision', summary: 'Smoke checkpoint from MCP' } } },
+  ]) {
+    mcp.stdin.write(`${js(m)}\n`)
+  }
+  mcp.stdin.end()
+  await new Promise((r) => mcp.on('exit', r))
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}', true`)
+  const shown = await cdp.waitFor(`document.body.innerText.includes('Smoke checkpoint from MCP')`, 15000).catch(() => false)
+  check('MCP checkpoint appears in the desktop project view', !!shown)
+
+  // Cross-process: a `nexus launch` session in another terminal is shown live (owned by the CLI host).
+  const cliRun = spawn(nexusCli, ['--data-dir', dataDir, 'launch', '--project', setup.project.name, '--name', 'From a terminal', '-q'], {
+    stdio: ['pipe', 'ignore', 'pipe'],
+    env: { ...process.env, FAKE_CLAUDE_STAY: '1', FAKE_CLAUDE_REPORT: join(root, 'cli-report.json') },
+  })
+  let cliErr = ''
+  cliRun.stderr.on('data', (d) => (cliErr += d))
+  await cdp.evaluate(`location.hash = '#/sessions', true`)
+  const live = await cdp
+    .waitFor(`[...document.querySelectorAll('.page .session')].some((r) => r.innerText.includes('From a terminal') && r.innerText.includes('Running in a terminal'))`, 15000)
+    .catch(() => false)
+  const rowsNow = live ? '' : await cdp.evaluate(`[...document.querySelectorAll('.page .session')].map((r) => r.innerText.replace(/\\s+/g, ' ')).join(' | ')`)
+  let diag = ''
+  if (!live) {
+    const fromCli = execFileSync(nexusCli, ['--data-dir', dataDir, '--json', 'sessions', '--all'], { encoding: 'utf8' })
+    const titles = JSON.parse(fromCli).map((x) => `${x.title}:${x.state}:${x.host}:${x.workspaceId?.slice(0, 8)}`)
+    diag = `${rowsNow} || cli alive=${cliRun.exitCode === null} stderr=${cliErr.trim()} || db: ${titles.join(', ')}`
+  }
+  check('terminal session visible live in the desktop', !!live, diag)
+  cliRun.stdin.end('bye\n') // fake-claude reads one line and exits
+  await new Promise((r) => cliRun.on('exit', r))
 } finally {
   cdp.close()
 }
-console.log(failures === 0 ? '\nSMOKE OK' : `\nSMOKE FAILED (${failures})`)
-process.exitCode = failures === 0 ? 0 : 1
+return failures
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const failures = await runSmoke()
+  console.log(failures === 0 ? '\nSMOKE OK' : `\nSMOKE FAILED (${failures})`)
+  process.exitCode = failures === 0 ? 0 : 1
+}

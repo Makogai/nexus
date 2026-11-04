@@ -1,5 +1,6 @@
 use tauri::State;
 
+use nexus_core::checkpoint::{self, Checkpoint};
 use nexus_core::git::{self, GitStatus};
 use nexus_core::project::{self, PathInspection, Project};
 
@@ -61,4 +62,10 @@ pub async fn project_git_status(ctx: State<'_, Ctx>, id: String) -> IpcResult<Gi
         Ok(git::status(&path)?)
     })
     .await
+}
+
+/// Recent session checkpoints of a project (recorded by Claude through the NEXUS MCP server).
+#[tauri::command]
+pub fn project_checkpoints(ctx: State<'_, Ctx>, id: String, limit: Option<u32>) -> IpcResult<Vec<Checkpoint>> {
+    Ok(checkpoint::for_project(&ctx.db(), &id, limit.unwrap_or(30).min(100))?)
 }

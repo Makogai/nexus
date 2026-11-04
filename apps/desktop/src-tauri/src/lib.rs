@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use tauri::{Manager, RunEvent};
 
-use nexus_core::{db, paths, session};
+use nexus_core::host::{self, HostKind};
+use nexus_core::{db, now_ms, paths};
 
 use crate::state::{AppCtx, Ctx};
 
@@ -23,14 +24,31 @@ fn init_tracing() {
 fn open_context() -> Result<AppCtx, Box<dyn std::error::Error>> {
     let data_dir = paths::data_dir()?;
     let db_path = data_dir.join(db::DB_FILE);
-    let conn = db::open(&db_path)?;
-    let interrupted = session::reconcile_on_startup(&conn)?;
+    let (conn, recovery) = db::open_or_recover(&db_path)?;
+    // Single instance: any earlier desktop host is dead; its live sessions become interrupted (ADR-0014).
+    let me = host::register(&conn, HostKind::Desktop)?;
+    host::stop_others(&conn, HostKind::Desktop, &me.id)?;
+    let interrupted = host::reconcile(&conn, now_ms())?;
     if interrupted > 0 {
-        tracing::info!(interrupted, "sessions from a previous run are no longer attached");
+        tracing::info!(interrupted, "sessions whose host is gone are no longer attached");
     }
     let home = paths::home_dir()?;
     tracing::info!(data_dir = %data_dir.display(), "NEXUS data directory");
-    Ok(AppCtx::new(conn, home, data_dir, db_path))
+    Ok(AppCtx::new(conn, home, data_dir, db_path, me, recovery))
+}
+
+/// Keep this host's lease fresh and reconcile sessions of hosts that died (e.g. a crashed `nexus launch`).
+fn spawn_heartbeat(ctx: Ctx) {
+    let _ = std::thread::Builder::new().name("host-heartbeat".into()).spawn(move || {
+        loop {
+            std::thread::sleep(host::HEARTBEAT_INTERVAL);
+            let running = ctx.pty.running_ids();
+            let db = ctx.db();
+            if let Err(e) = host::heartbeat(&db, &ctx.host.id, &running).and_then(|_| host::reconcile(&db, now_ms())) {
+                tracing::warn!(error = %e, "host heartbeat failed");
+            }
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,6 +66,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let ctx: Ctx = Arc::new(open_context()?);
+            spawn_heartbeat(ctx.clone());
             app.manage(ctx);
             Ok(())
         })
@@ -70,6 +89,7 @@ pub fn run() {
             commands::projects::project_locate,
             commands::projects::project_refresh,
             commands::projects::project_git_status,
+            commands::projects::project_checkpoints,
             commands::claude::claude_installations,
             commands::claude::profile_list,
             commands::claude::profile_detect,
@@ -101,9 +121,12 @@ pub fn run() {
 
     app.run(|handle, event| {
         if let RunEvent::Exit = event {
-            // Children must not outlive NEXUS invisibly. Conversations are persisted by Claude itself and
-            // the sessions show as "interrupted" (resumable) on the next start.
+            // Safe shutdown (ADR-0014): record live sessions as interrupted (final), stop the host, then end the
+            // children NEXUS started — they must not outlive it invisibly. Claude keeps the conversations.
             if let Some(ctx) = handle.try_state::<Ctx>() {
+                if let Err(e) = host::shutdown(&ctx.db(), &ctx.host.id) {
+                    tracing::error!(error = %e, "could not record shutdown");
+                }
                 ctx.pty.terminate_all();
             }
         }

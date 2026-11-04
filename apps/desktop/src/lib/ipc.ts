@@ -3,6 +3,7 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import type {
   AppInfo,
   AuthStatus,
+  Checkpoint,
   ClaudeProfile,
   DetectedProfile,
   GitStatus,
@@ -71,6 +72,8 @@ export const api = {
   projectLocate: (id: string, path: string) => call<Project>('project_locate', { id, path }),
   projectRefresh: (id: string) => call<Project>('project_refresh', { id }),
   projectGitStatus: (id: string) => call<GitStatus>('project_git_status', { id }),
+  projectCheckpoints: (id: string, limit?: number) => call<Checkpoint[]>('project_checkpoints', { id, limit }),
+  dbDataVersion: () => call<number>('db_data_version'),
 
   claudeInstallations: () => call<Installation[]>('claude_installations'),
   profileList: (includeArchived = false) => call<ClaudeProfile[]>('profile_list', { includeArchived }),

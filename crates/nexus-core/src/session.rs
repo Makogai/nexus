@@ -9,6 +9,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
+use crate::host::HostKind;
 use crate::{new_id, now_ms};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -57,6 +58,11 @@ impl State {
 pub struct Session {
     pub id: String,
     pub kind: Kind,
+    /// Kind of the host process that owns (or owned) this session (ADR-0014).
+    pub host: String,
+    pub host_id: Option<String>,
+    /// JSON describing active integrations (MCP enabled/blocked), if recorded.
+    pub integrations: Option<serde_json::Value>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,
     pub profile_id: Option<String>,
@@ -82,6 +88,8 @@ pub struct Session {
 pub struct NewSession {
     pub id: Option<String>,
     pub kind: Option<Kind>,
+    pub host: Option<HostKind>,
+    pub host_id: Option<String>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,
     pub profile_id: Option<String>,
@@ -98,7 +106,7 @@ pub struct NewSession {
 
 const SELECT: &str = "SELECT id, kind, workspace_id, project_id, profile_id, claude_session_id, title, cwd, branch,
     work_profile, effort, model, program, pid, state, exit_code, error, resumed_from, started_at, ended_at,
-    archived_at FROM sessions";
+    archived_at, host, host_id, integrations FROM sessions";
 
 fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
     let kind: String = r.get(1)?;
@@ -106,6 +114,9 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
     Ok(Session {
         id: r.get(0)?,
         kind: if kind == "claude" { Kind::Claude } else { Kind::Shell },
+        host: r.get(21)?,
+        host_id: r.get(22)?,
+        integrations: r.get::<_, Option<String>>(23)?.and_then(|j| serde_json::from_str(&j).ok()),
         workspace_id: r.get(2)?,
         project_id: r.get(3)?,
         profile_id: r.get(4)?,
@@ -132,8 +143,8 @@ pub fn insert_starting(conn: &Connection, s: NewSession) -> Result<Session> {
     let id = s.id.unwrap_or_else(new_id);
     conn.execute(
         "INSERT INTO sessions(id, kind, workspace_id, project_id, profile_id, claude_session_id, title, cwd, branch,
-            work_profile, effort, model, program, state, resumed_from, started_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'starting', ?14, ?15)",
+            work_profile, effort, model, program, state, resumed_from, started_at, host, host_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'starting', ?14, ?15, ?16, ?17)",
         params![
             id,
             s.kind.unwrap_or(Kind::Claude).as_str(),
@@ -149,7 +160,9 @@ pub fn insert_starting(conn: &Connection, s: NewSession) -> Result<Session> {
             s.model,
             s.program,
             s.resumed_from,
-            now_ms()
+            now_ms(),
+            s.host.unwrap_or(HostKind::Desktop).as_str(),
+            s.host_id,
         ],
     )?;
     get(conn, &id)
@@ -176,14 +189,14 @@ pub fn mark_running(conn: &Connection, id: &str, pid: Option<u32>) -> Result<()>
     Ok(())
 }
 
+/// Record the exit of a session's process. Applies to live sessions, and to sessions a *reconciliation* marked
+/// interrupted (no `ended_at`) whose process turned out to be alive. An interruption recorded by an orderly host
+/// shutdown (`ended_at` set) is final.
 pub fn mark_exited(conn: &Connection, id: &str, exit_code: Option<i64>) -> Result<()> {
-    let now = now_ms();
-    transition(
-        conn,
-        id,
-        &["starting", "running", "interrupted"],
-        "state = 'exited', exit_code = ?2, ended_at = ?3",
-        &[&exit_code, &now],
+    conn.execute(
+        "UPDATE sessions SET state = 'exited', exit_code = ?2, ended_at = ?3
+         WHERE id = ?1 AND (state IN ('starting', 'running') OR (state = 'interrupted' AND ended_at IS NULL))",
+        params![id, exit_code, now_ms()],
     )?;
     Ok(())
 }
@@ -193,15 +206,6 @@ pub fn mark_failed(conn: &Connection, id: &str, error: &str) -> Result<()> {
     let msg: String = error.chars().take(500).collect();
     transition(conn, id, &["starting", "running"], "state = 'failed', error = ?2, ended_at = ?3", &[&msg, &now])?;
     Ok(())
-}
-
-/// At desktop startup no PTY from a previous run can still be attached: every live desktop session
-/// becomes `interrupted`. Returns how many were reconciled.
-pub fn reconcile_on_startup(conn: &Connection) -> Result<usize> {
-    Ok(conn.execute(
-        "UPDATE sessions SET state = 'interrupted' WHERE host = 'desktop' AND state IN ('starting', 'running')",
-        [],
-    )?)
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -237,6 +241,16 @@ pub fn list(conn: &Connection, f: &Filter) -> Result<Vec<Session>> {
     let refs: Vec<&dyn rusqlite::ToSql> = p.iter().map(|b| b.as_ref()).collect();
     let rows = stmt.query_map(refs.as_slice(), from_row)?.collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+/// Record which NEXUS integrations were active for a session (JSON, e.g. `claude::mcp::Integrations`).
+pub fn set_integrations<T: Serialize>(conn: &Connection, id: &str, value: &T) -> Result<()> {
+    let json = serde_json::to_string(value).map_err(|source| CoreError::Json {
+        what: "session integrations".into(),
+        source,
+    })?;
+    conn.execute("UPDATE sessions SET integrations = ?2 WHERE id = ?1", params![id, json])?;
+    Ok(())
 }
 
 pub fn rename(conn: &Connection, id: &str, title: &str) -> Result<Session> {
@@ -307,20 +321,6 @@ mod tests {
         mark_failed(&conn, &s.id, "late").unwrap();
         mark_running(&conn, &s.id, Some(1)).unwrap();
         assert_eq!(get(&conn, &s.id).unwrap().state, State::Exited);
-    }
-
-    #[test]
-    fn startup_reconcile_marks_interrupted() {
-        let conn = crate::db::open_in_memory().unwrap();
-        let a = new(&conn);
-        let b = new(&conn);
-        mark_running(&conn, &a.id, Some(1)).unwrap();
-        let done = new(&conn);
-        mark_exited(&conn, &done.id, Some(1)).unwrap();
-        assert_eq!(reconcile_on_startup(&conn).unwrap(), 2);
-        assert_eq!(get(&conn, &a.id).unwrap().state, State::Interrupted);
-        assert_eq!(get(&conn, &b.id).unwrap().state, State::Interrupted);
-        assert_eq!(get(&conn, &done.id).unwrap().state, State::Exited);
     }
 
     #[test]

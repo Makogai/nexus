@@ -122,10 +122,10 @@ fn validate_fields(input: &ProfileInput) -> Result<ValidFields> {
         prev_permission_mode = a == "--permission-mode";
     }
     let default_work_profile = opt(&input.default_work_profile);
-    if let Some(w) = &default_work_profile {
-        if workprofile::get(w).is_none() {
-            return Err(CoreError::invalid(format!("unknown work profile '{w}'")));
-        }
+    if let Some(w) = &default_work_profile
+        && workprofile::get(w).is_none()
+    {
+        return Err(CoreError::invalid(format!("unknown work profile '{w}'")));
     }
     let default_effort = opt(&input.default_effort);
     if let Some(e) = &default_effort {

@@ -36,15 +36,15 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | M6 | Desktop shell: Tauri app, layout, theming, onboarding, workspaces/projects/profiles views | `npm run build`, vitest component tests, app launches | ✅ |
 | M7 | Integrated terminal: PTY manager, xterm pool, shells, tabs, resize, ring-buffer re-attach | PTY integration test (echo round trip) | ✅ |
 | M8 | Claude sessions: launch, records, exit tracking, startup reconcile, resume, stop | `fake-claude` PTY integration test asserts argv/env; manual run with a real profile | ✅ |
-| M9 | MVP hardening: command palette, error/empty states, smoke checklist | `docs/TESTING.md` smoke checklist passes on Windows | 🚧 |
+| M9 | Reliability baseline: DB migration/recovery tests + quarantine, env-isolation regression suite, frontend component tests, release-like E2E in CI, session hosts (ADR-0014) | all suites green locally; CI job runs the smoke test on a debug release build | ✅ |
 
 ## Phase 2 — Claude integration depth
 
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
-| M10 | `nexus` CLI: `doctor`, `profiles`, `projects`, `sessions` (reuses core) | CLI integration tests with `NEXUS_DATA_DIR` |
-| M11 | Live-session reconciliation via `claude agents --json`; durable-session experiment (`--bg` + `attach`) | ADR update with measured behaviour |
-| M12 | MCP server v1 (`get_project_context`, `get_git_status`, `checkpoint_session`) via `--mcp-config`; policy-aware omission | rmcp integration test; cross-workspace rejection test |
+| M10 | `nexus` CLI: `doctor`, `workspaces`, `projects`, `profiles`, `sessions`, `launch` (reuses core; `launch` is a session host) | 5 end-to-end tests of the real binary incl. killed-host reconciliation ✅ |
+| M11 | Session hosts + leases ✅ (ADR-0014); still open: reconciliation with `claude agents --json`, durable-session experiment (`--bg` + `attach`) | ADR update with measured behaviour |
+| M12 | MCP server v1 (7 workspace-scoped tools incl. `checkpoint`) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
 | M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): SessionStart/End, PreCompact, Stop | verify merge semantics on 2.1.x; hook handler tests |
 | M14 | Profile diagnostics, allowlist clone, `ANTHROPIC_*` opt-in, settings validation | diagnostics fixture tests |
 | M15 | WSL shells; login-shell PATH resolution on macOS/Linux | per-platform CI job |
@@ -84,3 +84,15 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | M29 | Workspace Git sync UI (fetch/pull/push with outgoing-diff review) | Scenario K |
 | M30 | Packaging + GitHub Releases CI + updater signing (stable/prerelease channels) | artifacts verified on clean VMs |
 | M31 | Backup/restore, performance budget, user documentation | Scenario A on a clean machine |
+
+### Gates before the first public release (owner decision, 2026-11-04)
+
+These are deliberately open and must be closed before anything is published:
+
+1. **Application identifier** — `dev.nexus.desktop` is provisional. It determines the WebView2 user-data folder,
+   installer/registry identity and updater identity, so it cannot change after release without a migration.
+2. **License** — none yet; no LICENSE file is added until the owner decides.
+3. **Code signing** — Windows Authenticode / macOS notarization certificates (Tauri updater key is separate).
+4. **Release builds must not honour WebView2 remote debugging** (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), which the
+   development E2E tooling uses (threat T18).
+5. Manual check with a real profile (`docs/MANUAL_CHECKS.md`) passed on the release candidate.

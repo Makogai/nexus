@@ -16,6 +16,8 @@ import {
   TriangleAlert,
 } from '@lucide/vue'
 import { relativeTime } from '../lib/format'
+import { api } from '../lib/ipc'
+import type { Checkpoint } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
@@ -32,12 +34,28 @@ const refreshing = ref(false)
 const project = computed(() => projects.byId[props.id] ?? null)
 const git = computed(() => projects.git[props.id])
 const projectSessions = computed(() => sessions.list.filter((s) => s.projectId === props.id && !s.archivedAt))
+const checkpoints = ref<Checkpoint[]>([])
+
+async function loadCheckpoints() {
+  checkpoints.value = await api.projectCheckpoints(props.id, 20).catch(() => checkpoints.value)
+}
 
 function loadGit(force = false) {
   if (project.value?.available) projects.gitStatus(props.id, force)
 }
-watch(() => props.id, () => loadGit(), { immediate: true })
-onActivated(() => loadGit())
+watch(
+  () => props.id,
+  () => {
+    loadGit()
+    loadCheckpoints()
+  },
+  { immediate: true },
+)
+watch(() => app.externalChanges, loadCheckpoints)
+onActivated(() => {
+  loadGit()
+  loadCheckpoints()
+})
 
 async function refresh() {
   refreshing.value = true
@@ -140,6 +158,18 @@ async function unregister() {
       </section>
     </div>
 
+    <h2 class="section-title">Checkpoints <span class="count">{{ checkpoints.length }}</span></h2>
+    <div v-if="checkpoints.length" class="list">
+      <div v-for="c in checkpoints" :key="c.id" class="list-row checkpoint">
+        <span class="badge" :class="{ 'badge-ok': c.kind === 'done', 'badge-warn': c.kind === 'blocker', 'badge-accent': c.kind === 'decision' }">{{ c.kind }}</span>
+        <span class="cp-summary selectable">{{ c.summary }}</span>
+        <span class="faint cp-meta">{{ c.sessionTitle }} · {{ relativeTime(c.createdAt) }}</span>
+      </div>
+    </div>
+    <div v-else class="empty">
+      <p>No checkpoints yet. In a NEXUS-launched session Claude can record decisions, blockers and progress with the NEXUS <code>checkpoint</code> tool. They appear here.</p>
+    </div>
+
     <h2 class="section-title">Sessions <span class="count">{{ projectSessions.length }}</span></h2>
     <div v-if="projectSessions.length" class="list">
       <SessionRow v-for="s in projectSessions" :key="s.id" :session="s" :show-project="false" />
@@ -239,6 +269,17 @@ async function unregister() {
   width: 72px;
   color: var(--text-faint);
   font-size: 12px;
+}
+.checkpoint {
+  align-items: flex-start;
+}
+.cp-summary {
+  flex: 1;
+  white-space: pre-wrap;
+}
+.cp-meta {
+  font-size: 12px;
+  flex: none;
 }
 .danger-title {
   color: var(--red);

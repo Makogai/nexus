@@ -30,14 +30,32 @@ const showContent = computed(() => !(sessions.focusMode && app.prefs.terminalOpe
 async function boot() {
   try {
     await app.load()
+    if (app.info?.recovery) {
+      app.toast(
+        'error',
+        `NEXUS's database could not be read and was kept as ${app.info.recovery.quarantinedTo}. A fresh database was ` +
+          'created — reopen your workspaces from Settings (their projects and portable data live in the workspace folders).',
+        60_000,
+      )
+    }
+    await app.markDataBaseline()
     await Promise.all([workspaces.load(), profiles.load(), sessions.subscribe()])
     await sessions.load()
     if (workspaces.active) await projects.load(workspaces.active.id)
+    app.watchExternalChanges()
     ready.value = true
   } catch (e) {
     fatal.value = toIpcError(e).message
   }
 }
+
+// Sessions started by `nexus launch` and checkpoints recorded through MCP come from other processes.
+watch(
+  () => app.externalChanges,
+  () => {
+    sessions.load().catch(() => undefined)
+  },
+)
 
 watch(
   () => workspaces.active?.id,

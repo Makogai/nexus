@@ -53,3 +53,32 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npx vite build
+
+  e2e:
+    name: E2E (Windows, real app)
+    # Drives the real app (embedded production frontend + CSP, real IPC and PTY) over the WebView2 DevTools
+    # protocol with a fake-claude profile. See docs/TESTING.md.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Build test double and CLI (desktop sessions start `nexus mcp`)
+        run: cargo build -p fake-claude -p nexus-cli
+      - name: Build app (debug, embedded frontend)
+        working-directory: apps/desktop
+        run: npx tauri build --debug --no-bundle
+      - name: End-to-end smoke test
+        working-directory: apps/desktop
+        run: node e2e/run-smoke.mjs
+      - name: MCP interoperability (official TypeScript SDK client)
+        working-directory: apps/desktop
+        run: node e2e/mcp-interop.mjs

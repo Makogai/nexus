@@ -35,6 +35,8 @@ pub struct LaunchRequest<'a> {
     pub nexus_session_id: &'a str,
     pub workspace_id: Option<&'a str>,
     pub project_id: Option<&'a str>,
+    /// Session-scoped NEXUS MCP config (`--mcp-config`), when policy allows it (see `claude::mcp`).
+    pub mcp_config: Option<&'a Path>,
 }
 
 /// Everything needed to spawn the process. `env` is the *complete* environment (the spawner clears the
@@ -110,6 +112,12 @@ pub fn build(req: &LaunchRequest<'_>, base_env: &[(String, String)]) -> Result<L
     }
     if let Some(wp) = req.work_profile {
         args.extend(["--append-system-prompt".to_string(), wp.prompt.to_string()]);
+    }
+    if let Some(cfg) = req.mcp_config {
+        if !cfg.is_absolute() {
+            return Err(CoreError::invalid("MCP config path must be absolute"));
+        }
+        args.extend(["--mcp-config".to_string(), cfg.display().to_string()]);
     }
 
     let mut extra = vec![
@@ -189,6 +197,7 @@ mod tests {
             nexus_session_id: "nx-1",
             workspace_id: Some("ws-1"),
             project_id: Some("pr-1"),
+            mcp_config: None,
         }
     }
 
@@ -232,6 +241,34 @@ mod tests {
         let joined = spec.args.join(" ");
         assert!(joined.contains(&format!("--resume {SID}")));
         assert!(!joined.contains("--session-id"), "never both flags");
+    }
+
+    /// Golden argv: any change to what NEXUS passes to Claude must be deliberate (update this test with it).
+    #[test]
+    fn argv_is_exactly_as_specified() {
+        let t = tempfile::tempdir().unwrap();
+        let p = profile(Some("/cfg"));
+        let mcp = t.path().join("mcp.json");
+        let mut r = request(&p, t.path(), Mode::New);
+        r.model = Some("opus");
+        r.mcp_config = Some(&mcp);
+        let spec = build(&r, &base_env()).unwrap();
+        let prompt = workprofile::get("prototype").unwrap().prompt;
+        let mcp_arg = mcp.display().to_string();
+        assert_eq!(
+            spec.args,
+            [
+                "--permission-mode", "acceptEdits",
+                "--session-id", SID,
+                "--name", "Fix login bug",
+                "--effort", "high",
+                "--model", "opus",
+                "--append-system-prompt", prompt,
+                "--mcp-config", mcp_arg.as_str(),
+            ]
+        );
+        assert_eq!(spec.program, Path::new("claude"));
+        assert_eq!(spec.cwd, t.path());
     }
 
     #[test]

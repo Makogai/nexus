@@ -8,6 +8,7 @@ export interface AppInfo {
   schemaVersion: number
   gitVersion: string | null
   homeDir: string
+  recovery: { quarantinedTo: string; reason: string } | null
 }
 
 export interface Workspace {
@@ -184,6 +185,8 @@ export type SessionState = 'starting' | 'running' | 'exited' | 'interrupted' | '
 export interface SessionView {
   id: string
   kind: SessionKind
+  host: 'desktop' | 'cli' | 'service'
+  hostId: string | null
   workspaceId: string | null
   projectId: string | null
   profileId: string | null
@@ -205,6 +208,8 @@ export interface SessionView {
   archivedAt: number | null
   attached: boolean
   running: boolean
+  liveElsewhere: boolean
+  integrations: { mcp: { state: 'enabled' | 'blocked' | 'unavailable'; reason?: string; config?: string } } | null
   conversationRecorded: boolean | null
   resumable: boolean
 }
@@ -247,3 +252,13 @@ export interface UiPreferences {
 }
 
 export type ProfileDialogMode = 'register' | 'create' | 'edit'
+
+export interface Checkpoint {
+  id: string
+  sessionId: string
+  sessionTitle: string
+  kind: 'progress' | 'decision' | 'blocker' | 'done' | 'note'
+  summary: string
+  source: 'claude' | 'human' | 'nexus'
+  createdAt: number
+}

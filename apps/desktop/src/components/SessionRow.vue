@@ -105,6 +105,10 @@ async function archive() {
           <span>·</span>
           <span class="row branch"><GitBranch />{{ s.branch }}</span>
         </template>
+        <template v-if="s.kind === 'claude' && s.integrations?.mcp && s.integrations.mcp.state !== 'enabled'">
+          <span>·</span>
+          <span class="faint" :title="s.integrations.mcp.reason">NEXUS tools off</span>
+        </template>
         <template v-if="s.kind === 'claude' && !s.running && s.conversationRecorded === false">
           <span>·</span>
           <span class="faint">no conversation recorded</span>
@@ -117,6 +121,7 @@ async function archive() {
         <button class="btn btn-sm btn-ghost" title="Send Ctrl+C" @click="interrupt">Ctrl+C</button>
         <button class="btn btn-sm btn-ghost btn-icon" title="Terminate…" @click="terminate"><Square /></button>
       </template>
+      <span v-else-if="s.liveElsewhere" class="faint small">open in its own terminal</span>
       <template v-else>
         <button v-if="s.resumable" class="btn btn-sm btn-primary" title="claude --resume" @click="resume"><RotateCcw /> Resume</button>
         <button v-else-if="s.attached" class="btn btn-sm" @click="focus">Output</button>
@@ -185,6 +190,9 @@ async function archive() {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+}
+.small {
+  font-size: 12px;
 }
 .actions {
   display: flex;

@@ -25,15 +25,15 @@ flowchart TB
     PRJ["project<br/>registry · stack detection"]
     GIT["git<br/>git CLI · porcelain v2"]
     CL["claude<br/>install discovery · profiles · policy · auth · launch spec"]
-    SES["session<br/>records · state machine · reconcile"]
+    SES["session · host · checkpoint<br/>records · host leases · reconcile · checkpoints"]
     WP["workprofile<br/>rigor definitions"]
     ENV["env<br/>child-environment hygiene"]
   end
 
-  subgraph CLI["crates/nexus-cli — `nexus` binary (Phase 2+)"]
-    CLIC["CLI commands<br/>doctor · profiles · projects"]
+  subgraph CLI["crates/nexus-cli — `nexus` binary"]
+    CLIC["CLI commands<br/>doctor · workspaces · projects · profiles · sessions · launch"]
     MCP["`nexus mcp`<br/>stdio MCP server"]
-    HOOK["`nexus hook <event>`<br/>exec-form hook handler"]
+    HOOK["`nexus hook <event>`<br/>exec-form hook handler (planned)"]
   end
 
   CMD --> Core
@@ -103,9 +103,11 @@ machine it is a row in SQLite; if another tool owns it NEXUS only reads it** (AD
   child processes it starts (Claude sessions, shells; later dev servers).
 * **Claude sessions** — each is a child process attached to a PTY (ConPTY on Windows). Launched directly
   (no shell string), with an explicit argument vector and a scrubbed environment (ADR-0003).
-* **`nexus` CLI / MCP / hook processes** (Phase 2) — short-lived or Claude-owned children that open the
-  same SQLite file (WAL, busy timeout). The desktop notices their commits by polling
-  `PRAGMA data_version` (a few-byte read) instead of running a network endpoint (ADR-0009).
+* **`nexus` CLI** — `nexus launch` runs Claude in the user's own terminal and is a *session host* like the desktop
+  (ADR-0014): it registers in `session_hosts`, keeps a 15 s lease, and its sessions become `interrupted` if it dies.
+* **`nexus mcp`** — started by Claude from the per-session `--mcp-config`; bound to one NEXUS session; opens the same
+  SQLite file (WAL, busy timeout). The desktop notices commits from these processes by polling `PRAGMA data_version`
+  (a few-byte read) instead of running a network endpoint (ADR-0009).
 * NEXUS exposes **no TCP/HTTP listener**. There is nothing to authenticate against on localhost.
 
 ## 4. Claude session launch pipeline
@@ -186,7 +188,9 @@ claude_profiles(id PK, name UNIQUE, description, color, config_dir NULL /*NULL =
                 default_model, created_at, updated_at, last_used_at, archived_at)
 projects(id PK /*same id as manifest*/, workspace_id FK, name, local_path, remote_url, stack_json,
          created_at, last_opened_at)
-sessions(id PK, kind CHECK(claude|shell), workspace_id, project_id NULL, profile_id NULL,
+session_hosts(id PK, kind CHECK(desktop|cli|service), pid, version, started_at, heartbeat_at, stopped_at)  -- v2
+session_events(id PK, session_id FK, kind, summary, source, created_at)                             -- v3
+sessions(id PK, kind CHECK(claude|shell), host, host_id FK, integrations JSON, workspace_id, project_id NULL, profile_id NULL,
          claude_session_id NULL, title, cwd, branch, work_profile, effort, model, program, pid,
          state CHECK(starting|running|exited|interrupted|failed), exit_code, error,
          resumed_from NULL, started_at, ended_at, archived_at)
@@ -227,7 +231,7 @@ every filesystem/process operation goes through a purpose-built, validated comma
 | Native effort/model | `--effort`, `--model` | 1 | — |
 | Live session list | `claude agents --json` reconciliation | 2 | older CLI |
 | Auth status | `claude auth status --json` (per profile env) | 1 | CLI absent |
-| NEXUS tools | `--mcp-config <generated file>` → `nexus mcp` | 2 | `disableSideloadFlags`, `allowManagedMcpServersOnly` |
+| NEXUS tools | `--mcp-config <generated file>` → `nexus mcp --session <id>` (implemented) | 2 ✅ | `disableSideloadFlags`, `allowManagedMcpServersOnly`, `strictPluginOnlyCustomization` |
 | Lifecycle capture | `--settings <generated file>` exec-form hooks → `nexus hook` | 2 | `allowManagedHooksOnly`, `disableAllHooks` |
 | Skills / AI Kits | `--plugin-dir <kit>` per session (no copying into config dirs) | 4–5 | `disableSideloadFlags`, `strictPluginOnlyCustomization` |
 | Usage | OTel (personal profiles only, opt-in), transcript compat layer (labelled) | 5 | org-managed telemetry, format drift |

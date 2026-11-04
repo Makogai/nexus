@@ -1,6 +1,6 @@
 # ADR-0005 — Portable files vs machine-local SQLite
 
-Status: Accepted (2026-11-04)
+Status: Accepted (2026-11-04); refined by [ADR-0013](0013-portable-knowledge-format.md) (owner-approved)
 
 ## Context
 The spec makes SQLite authoritative for project registrations, tasks and memory, but also requires that a
