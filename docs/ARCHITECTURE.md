@@ -207,6 +207,7 @@ knowledge_items(path PK, workspace_id NULL /*NULL = global*/, id, kind, title, s
                 stacks, applies, privacy, updated, content_hash, size, mtime_ms, valid, error, conflict)      -- v5
 knowledge_fts(path, title, body)  /* FTS5 */                                                          -- v5
 knowledge_approvals(path PK, content_hash, approved_at)                                               -- v5
+-- v6: sessions.task_id (session launched for a task, ADR-0018); knowledge_items.branch, commit_sha (branch-aware)
 ```
 
 Timestamps are Unix milliseconds (INTEGER). Foreign keys enforced (`PRAGMA foreign_keys=ON`).
@@ -228,7 +229,8 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Work profiles | `work_profile_list` |
 | Sessions | `session_list`, `session_start_claude`, `session_resume`, `session_open_shell`, `session_attach`, `session_write`, `session_resize`, `session_stop`, `session_rename`, `session_archive` |
 | Shell | `shell_list` |
-| Knowledge | `knowledge_overview` (refresh or rebuild + health), `knowledge_read`, `knowledge_search`, `knowledge_create`, `knowledge_update_task` (expected hash), `knowledge_approve` |
+| Knowledge | `knowledge_overview` (refresh or rebuild + health), `knowledge_read`, `knowledge_search`, `knowledge_create`, `knowledge_update_task` (status, log, checklist, expected hash), `knowledge_approve`, `knowledge_task`, `project_knowledge` (open tasks + branch-relevant notes) |
+| Instructions | `instructions_inspect` (Claude's own instruction layers + NEXUS append, read-only) |
 
 Tauri capabilities grant only `core:default`, `dialog:allow-open` (folder picker) and
 `opener:allow-open-path`/`allow-reveal-item-in-dir`. There is **no** generic filesystem or shell plugin:
@@ -243,6 +245,8 @@ every filesystem/process operation goes through a purpose-built, validated comma
 | Engineering rigor | `--append-system-prompt` (frozen per conversation by the system-prompt snapshot) | 1 | — |
 | Always-on rules | approved always-on rules appended after the work profile, ≤ 1,500 chars (ADR-0017) | 3 ✅ | — |
 | Lazy knowledge | MCP `get_context_index`, `search_knowledge`, `get_document`, task and memory tools; SessionStart adds a one-line count pointer | 3 ✅ | MCP blocked by policy → only always-on rules reach Claude |
+| Task sessions | task brief (≤ 900 chars, no history) appended at launch; current task state at SessionStart after resume/compaction; `get_task`/`update_task` (ADR-0018) | 4 ✅ | hooks blocked → no resume line; MCP blocked → brief only |
+| Instructions inspector | read-only model of Claude's CLAUDE.md/rules/import loading, verified against `InstructionsLoaded` (ADR-0019) | 4 ✅ | — |
 | Native effort/model | `--effort`, `--model` | 1 | — |
 | Live session list | `claude agents --json` reconciliation | 2 | older CLI |
 | Auth status | `claude auth status --json` (per profile env) | 1 | CLI absent |

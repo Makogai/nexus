@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Lock } from '@lucide/vue'
+import { Lock, Sparkles } from '@lucide/vue'
 import { STATUS_LABELS, TASK_STATUSES, boardColumns } from '../lib/knowledge'
 import type { KnowledgeItem, TaskStatus } from '../lib/types'
 
 const props = defineProps<{ tasks: KnowledgeItem[]; projectNames?: Record<string, string> }>()
-const emit = defineEmits<{ move: [task: KnowledgeItem, status: TaskStatus]; open: [task: KnowledgeItem] }>()
+const emit = defineEmits<{ move: [task: KnowledgeItem, status: TaskStatus]; open: [task: KnowledgeItem]; launch: [task: KnowledgeItem] }>()
 
 const columns = computed(() => boardColumns(props.tasks))
 const dragging = ref<KnowledgeItem | null>(null)
@@ -55,7 +55,9 @@ function onSelect(task: KnowledgeItem, e: Event) {
           <span v-if="t.priority && t.priority !== 'medium'" class="badge" :class="{ 'badge-error': t.priority === 'urgent', 'badge-warn': t.priority === 'high' }">{{ t.priority }}</span>
           <span v-if="t.projectId && projectNames?.[t.projectId]" class="chip">{{ projectNames[t.projectId] }}</span>
           <Lock v-if="t.privacy === 'local-only'" class="ic" aria-label="Local only" />
+          <span v-if="t.branch" class="chip mono" :title="`Branch ${t.branch}`">{{ t.branch }}</span>
           <span class="spacer" />
+          <button v-if="t.status !== 'done'" class="btn btn-ghost btn-icon btn-sm launch" :title="`Launch Claude for “${t.title}”`" :aria-label="`Launch Claude for ${t.title}`" @click="emit('launch', t)"><Sparkles /></button>
           <select class="select status" :value="t.status ?? 'backlog'" :aria-label="`Status of ${t.title}`" @change="onSelect(t, $event)">
             <option v-for="o in TASK_STATUSES" :key="o" :value="o">{{ STATUS_LABELS[o] }}</option>
           </select>

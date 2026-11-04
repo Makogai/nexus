@@ -1,12 +1,14 @@
 //! `nexus knowledge …` and `nexus tasks …` — portable workspace knowledge (ADR-0013/0017) from the terminal. Thin
 //! layer over `nexus_core::knowledge::service`; people are the author here, so every kind can be created.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use nexus_core::knowledge::branches::{self, GitRef};
 use nexus_core::knowledge::index::{self as kindex, Item};
+use nexus_core::knowledge::tasks::{self, TaskUpdate};
 use nexus_core::knowledge::service::{self as knowledge, Author, CreateInput, ItemView};
 use nexus_core::knowledge::{Kind, MAX_FILE_BYTES, context};
 use nexus_core::project::{self, Project};
@@ -30,6 +32,9 @@ pub enum KnowledgeCmd {
         /// Also list files that failed validation or share an id (index health).
         #[arg(long)]
         invalid: bool,
+        /// Only documents for this project (and unscoped ones), with their relevance for its checked-out branch.
+        #[arg(long)]
+        project: Option<String>,
     },
     /// Full-text search.
     Search {
@@ -39,7 +44,7 @@ pub enum KnowledgeCmd {
         #[arg(long, default_value_t = 10)]
         limit: u32,
     },
-    /// Show one document (id, unique id prefix or exact title).
+    /// Show one document (id, its last digits, or exact title).
     Show { id: String },
     /// Rules that apply to a project, and what a Claude launch receives in its system prompt.
     Rules {
@@ -85,6 +90,10 @@ pub struct NewArgs {
     status: Option<String>,
     #[arg(long = "label", value_name = "LABEL")]
     labels: Vec<String>,
+    /// Tie the document to a Git branch: a branch name, or `current` for the project's checked-out branch (also
+    /// records its HEAD commit). Requires --project.
+    #[arg(long, requires = "project")]
+    branch: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -114,7 +123,12 @@ pub enum TasksCmd {
         status: String,
         #[arg(long)]
         log: Option<String>,
+        /// Tick checklist items (1-based numbers, repeatable).
+        #[arg(long = "check", value_name = "N")]
+        check: Vec<usize>,
     },
+    /// Show a task: status, checklist, recent log and the sessions that worked on it.
+    Show { id: String },
 }
 
 fn kinds(names: &[String]) -> nexus_core::Result<Vec<Kind>> {
@@ -129,16 +143,18 @@ fn find_project(conn: &nexus_core::db::Connection, ws: &Workspace, q: &str) -> n
     resolve_ref(&list, q, |p| &p.id, |p| &p.name, "project").cloned()
 }
 
-/// Resolve an id, unique id prefix or exact title to a document id (duplicates are reported by the service).
+/// Resolve an id, unique end/start of an id, or exact title to a document id (duplicates are reported by the service).
 fn find_id(conn: &nexus_core::db::Connection, ws: &Workspace, q: &str) -> nexus_core::Result<String> {
     let items: Vec<Item> = knowledge::list(conn, ws, &[], false)?.into_iter().filter(|i| i.id.is_some()).collect();
-    let found = resolve_ref(&items, q, |i| i.id.as_deref().unwrap_or_default(), |i| &i.title, "document")?;
-    Ok(found.id.clone().unwrap_or_default())
+    Ok(knowledge::resolve(&items, q)?.id.clone().unwrap_or_default())
 }
 
 fn rows(items: &[ItemView]) -> Vec<Vec<String>> {
-    items
-        .iter()
+    items.iter().map(rows_for).collect()
+}
+
+fn rows_for(v: &ItemView) -> Vec<String> {
+    [v].into_iter()
         .map(|v| {
             let i = &v.item;
             let state = match (&i.error, &i.conflict) {
@@ -148,9 +164,10 @@ fn rows(items: &[ItemView]) -> Vec<Vec<String>> {
                 _ => i.status.clone().unwrap_or_else(|| "-".into()),
             };
             let title = if i.valid { i.title.clone() } else { i.path.display().to_string() };
-            vec![i.kind.clone().unwrap_or_else(|| "?".into()), out::short_id(i.id.as_deref().unwrap_or("-")), v.scope.into(), state, title]
+            vec![i.kind.clone().unwrap_or_else(|| "?".into()), knowledge::short_id(i.id.as_deref().unwrap_or("-")), v.scope.into(), state, title]
         })
-        .collect()
+        .next()
+        .unwrap_or_default()
 }
 
 pub fn cmd_knowledge(ctx: &Ctx, cmd: KnowledgeCmd) -> nexus_core::Result<()> {
@@ -174,15 +191,51 @@ pub fn cmd_knowledge(ctx: &Ctx, cmd: KnowledgeCmd) -> nexus_core::Result<()> {
                 );
             }
         }
-        KnowledgeCmd::List { kinds: k, invalid } => {
+        KnowledgeCmd::List { kinds: k, invalid, project } => {
             let wanted = kinds(&k)?;
             let o = knowledge::overview(&conn, &ctx.data_dir, &ws, false)?;
+            let p = project.as_deref().map(|q| find_project(&conn, &ws, q)).transpose()?;
             let items: Vec<ItemView> = o
                 .items
                 .into_iter()
                 .filter(|v| invalid || (v.item.valid && v.item.conflict.is_none()))
                 .filter(|v| wanted.is_empty() || wanted.iter().any(|w| v.item.kind.as_deref() == Some(w.as_str())))
+                .filter(|v| p.as_ref().is_none_or(|p| v.item.project_id.is_none() || v.item.project_id.as_ref() == Some(&p.id)))
                 .collect();
+            if let Some(p) = &p {
+                // Branch relevance from the project's live Git state (Git stays authoritative).
+                let repo = p.local_path.clone().unwrap_or_default();
+                let git = GitRef::of(&repo);
+                let history = branches::history(&repo);
+                #[derive(Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Row<'a> {
+                    #[serde(flatten)]
+                    view: &'a ItemView,
+                    relevance: branches::Relevance,
+                }
+                let rows: Vec<Row> = items.iter().map(|v| Row { relevance: branches::relevance(&v.item, &git, &history), view: v }).collect();
+                if ctx.json {
+                    out::json(&rows);
+                } else {
+                    println!("{} on {}", p.name, git.branch.as_deref().unwrap_or("(no branch)"));
+                    let table: Vec<Vec<String>> = rows
+                        .iter()
+                        .map(|r| {
+                            let mut row = rows_for(r.view);
+                            row.insert(3, match r.relevance {
+                                branches::Relevance::Unbound => String::new(),
+                                branches::Relevance::ThisBranch => "this branch".into(),
+                                branches::Relevance::Inherited => format!("from {}", r.view.item.branch.as_deref().unwrap_or("history")),
+                                branches::Relevance::OtherBranch => format!("other branch ({})", r.view.item.branch.as_deref().unwrap_or("?")),
+                            });
+                            row
+                        })
+                        .collect();
+                    out::table(&["KIND", "ID", "SCOPE", "BRANCH", "STATUS", "TITLE"], &table);
+                }
+                return Ok(());
+            }
             if ctx.json {
                 out::json(&items);
             } else if items.is_empty() {
@@ -200,7 +253,7 @@ pub fn cmd_knowledge(ctx: &Ctx, cmd: KnowledgeCmd) -> nexus_core::Result<()> {
                 return Ok(());
             }
             for h in &hits {
-                println!("{} {:<8} {}", out::short_id(h.item.id.as_deref().unwrap_or("-")), h.item.kind.as_deref().unwrap_or("?"), h.item.title);
+                println!("{} {:<8} {}", knowledge::short_id(h.item.id.as_deref().unwrap_or("-")), h.item.kind.as_deref().unwrap_or("?"), h.item.title);
                 println!("         {}", h.snippet.replace('\n', " "));
             }
             if hits.is_empty() {
@@ -255,7 +308,7 @@ pub fn cmd_knowledge(ctx: &Ctx, cmd: KnowledgeCmd) -> nexus_core::Result<()> {
                     } else {
                         "on demand (MCP)"
                     };
-                    vec![out::short_id(v.item.id.as_deref().unwrap_or("-")), v.scope.into(), applies.into(), state.into(), v.item.title.clone()]
+                    vec![knowledge::short_id(v.item.id.as_deref().unwrap_or("-")), v.scope.into(), applies.into(), state.into(), v.item.title.clone()]
                 })
                 .collect();
             if table.is_empty() {
@@ -288,7 +341,19 @@ pub fn cmd_knowledge(ctx: &Ctx, cmd: KnowledgeCmd) -> nexus_core::Result<()> {
                 }
                 None => a.body.clone(),
             };
-            let project_id = a.project.as_deref().map(|q| find_project(&conn, &ws, q).map(|p| p.id)).transpose()?;
+            let proj = a.project.as_deref().map(|q| find_project(&conn, &ws, q)).transpose()?;
+            let (branch, commit) = match (a.branch.as_deref(), &proj) {
+                (Some("current"), Some(p)) => {
+                    let g = GitRef::of(p.local_path.as_deref().unwrap_or(Path::new("")));
+                    if g.branch.is_none() {
+                        return Err(CoreError::invalid(format!("{} has no checked-out branch", p.name)));
+                    }
+                    (g.branch, g.head)
+                }
+                (Some(name), _) => (Some(name.to_string()), None),
+                (None, _) => (None, None),
+            };
+            let project_id = proj.map(|p| p.id);
             let input = CreateInput {
                 kind: a.kind,
                 title: a.title,
@@ -301,6 +366,8 @@ pub fn cmd_knowledge(ctx: &Ctx, cmd: KnowledgeCmd) -> nexus_core::Result<()> {
                 stacks: a.stacks,
                 labels: a.labels,
                 global: a.global,
+                branch,
+                commit,
             };
             let item = knowledge::create(&conn, &ctx.data_dir, &ws, &input, Author::Human)?;
             if ctx.json {
@@ -342,7 +409,7 @@ pub fn cmd_tasks(ctx: &Ctx, cmd: TasksCmd) -> nexus_core::Result<()> {
                 .iter()
                 .map(|t| {
                     vec![
-                        out::short_id(t.item.id.as_deref().unwrap_or("-")),
+                        knowledge::short_id(t.item.id.as_deref().unwrap_or("-")),
                         t.item.status.clone().unwrap_or_default(),
                         t.item.priority.clone().unwrap_or_default(),
                         t.item.title.clone(),
@@ -362,17 +429,58 @@ pub fn cmd_tasks(ctx: &Ctx, cmd: TasksCmd) -> nexus_core::Result<()> {
             if ctx.json {
                 out::json(&item);
             } else {
-                println!("added task {} “{}”", out::short_id(item.id.as_deref().unwrap_or("-")), item.title);
+                println!("added task {} “{}”", knowledge::short_id(item.id.as_deref().unwrap_or("-")), item.title);
             }
         }
-        TasksCmd::Move { id, status, log } => {
+        TasksCmd::Move { id, status, log, check } => {
             knowledge::refresh(&conn, &ctx.data_dir, &ws)?;
             let id = find_id(&conn, &ws, &id)?;
-            let item = knowledge::update_task(&conn, &ctx.data_dir, &ws, &id, Some(&status), log.as_deref(), None)?;
+            let u = TaskUpdate { status: Some(&status), log: log.as_deref(), check: &check, ..Default::default() };
+            let item = tasks::update(&conn, &ctx.data_dir, &ws, &id, &u, Author::Human)?;
             if ctx.json {
                 out::json(&item);
             } else {
                 println!("“{}” → {}", item.title, item.status.as_deref().unwrap_or("?"));
+            }
+        }
+        TasksCmd::Show { id } => {
+            knowledge::refresh(&conn, &ctx.data_dir, &ws)?;
+            let id = find_id(&conn, &ws, &id)?;
+            let v = tasks::view(&conn, &ws, &id, 20_000)?;
+            let sessions: Vec<nexus_core::session::Session> = nexus_core::session::list(
+                &conn,
+                &nexus_core::session::Filter { workspace_id: Some(ws.id.clone()), include_archived: true, limit: Some(500), ..Default::default() },
+            )?
+            .into_iter()
+            .filter(|s| s.task_id.as_deref() == Some(v.id.as_str()))
+            .collect();
+            if ctx.json {
+                #[derive(Serialize)]
+                struct ShowOut<'a> {
+                    task: &'a tasks::TaskView,
+                    sessions: &'a [nexus_core::session::Session],
+                }
+                out::json(&ShowOut { task: &v, sessions: &sessions });
+                return Ok(());
+            }
+            println!("{} — {}{}", v.title, v.status, v.priority.as_deref().map(|p| format!(" · {p}")).unwrap_or_default());
+            if let Some(b) = &v.branch {
+                println!("branch {b}{}", v.commit.as_deref().map(|c| format!(" @ {}", &c[..c.len().min(10)])).unwrap_or_default());
+            }
+            if !v.description.is_empty() {
+                println!("\n{}", v.description);
+            }
+            if !v.recent_log.is_empty() {
+                println!("\nrecent log ({} of {}):", v.recent_log.len(), v.log_entries);
+                for l in &v.recent_log {
+                    println!("  {l}");
+                }
+            }
+            if !sessions.is_empty() {
+                println!("\nsessions:");
+                for s in &sessions {
+                    println!("  {} {:<11} {} {}", out::short_id(&s.id), format!("{:?}", s.state).to_lowercase(), out::ago(Some(s.started_at)), s.title);
+                }
             }
         }
     }

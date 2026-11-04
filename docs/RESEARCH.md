@@ -58,6 +58,21 @@ Recorded 2026-11-04. Re-verify when Claude Code's minor version changes signific
 * Skills: progressive disclosure (descriptions only until invoked); locations: managed, user, project,
   `--add-dir` dirs, plugins.
 
+* Instruction loading (docs + **verified 2026-11-04 on 2.1.311** with the `InstructionsLoaded` hook in synthetic,
+  signed-out profiles; payload `file_path`, `memory_type` User/Project/Local, `load_reason` session_start/include):
+  * user memory `<CLAUDE_CONFIG_DIR>/CLAUDE.md` and `<CLAUDE_CONFIG_DIR>/rules/*.md` follow the config dir;
+  * every ancestor of the cwd is read — past the Git root and the home folder — for `CLAUDE.md`,
+    `.claude/CLAUDE.md`, `.claude/rules/**` and `CLAUDE.local.md`; both project files load when both exist;
+  * with `CLAUDE_CONFIG_DIR` set, `~/.claude/CLAUDE.md` and `~/.claude/rules/*` of the *default* profile still load
+    as **project** memory for projects under the home folder (threat T21);
+  * `@imports` load (`load_reason: include`, relative to the importing file); an import inside a code span does not;
+  * `claudeMdExcludes` (glob on absolute paths) from `--settings` and from project `.claude/settings.json` is
+    honoured; rules with `paths:` and subdirectory CLAUDE.md files are not loaded at start;
+  * AGENTS.md was not loaded in any probe, even with no CLAUDE.md in the chain (documented fallback, unobserved);
+  * the order of `InstructionsLoaded` events is not the documented concatenation order (root → cwd);
+  * managed `CLAUDE.md` (`C:\Program Files\ClaudeCode\CLAUDE.md`) and managed `claudeMd` were not probed (need
+    admin rights); taken from the docs. `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` disables all memory (docs).
+
 ## Stack versions selected (2026-11-04)
 
 Tauri 2.x (CLI 2.12.4; 3.0 is alpha), Vue 3.5, Vite 8, vitest 5, Pinia 4, vue-router 5, TypeScript 5.9,

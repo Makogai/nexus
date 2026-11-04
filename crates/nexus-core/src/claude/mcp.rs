@@ -31,6 +31,9 @@ pub struct Integrations {
     /// Always-on rules included in the system prompt (and those pending approval or over budget).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rules: Option<crate::knowledge::context::LaunchRules>,
+    /// The task this session was launched for and the brief it received (ADR-0018).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<super::prepare::TaskLaunch>,
 }
 
 impl IntegrationStatus {

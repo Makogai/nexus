@@ -3,9 +3,11 @@
 pub mod auth;
 pub mod hooks;
 pub mod install;
+pub mod instructions;
 pub mod launch;
 pub mod mcp;
 pub mod policy;
+pub mod prepare;
 pub mod profile;
 
 /// Native reasoning-effort levels accepted by `claude --effort` (Claude Code 2.1.x help text).

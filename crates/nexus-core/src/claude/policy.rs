@@ -25,6 +25,12 @@ pub struct PolicySummary {
     pub allow_managed_permission_rules_only: bool,
     pub bypass_permissions_disabled: bool,
     pub managed_telemetry: bool,
+    /// Managed settings carry organisation instructions (`claudeMd`). Only the presence is recorded, never the text.
+    pub managed_claude_md: bool,
+    /// Instruction-loading settings from managed sources (ADR-0019): `claudeMdExcludes` glob patterns and the
+    /// AGENTS.md mode (`pluginConfigs["cc-plugin-agents-md@builtin"].options.instructionFiles`).
+    pub claude_md_excludes: Vec<String>,
+    pub instruction_files: Option<String>,
     /// Sources that exist but could not be parsed (names only).
     pub unreadable: Vec<String>,
 }
@@ -165,6 +171,38 @@ pub fn absorb_value(s: &mut PolicySummary, v: &Value) {
     if let Some(env) = v.get("env").and_then(Value::as_object) {
         s.managed_telemetry |= env.keys().any(|k| k == "CLAUDE_CODE_ENABLE_TELEMETRY" || k.starts_with("OTEL_"));
     }
+    s.managed_claude_md |= v.get("claudeMd").and_then(Value::as_str).is_some_and(|t| !t.trim().is_empty());
+    let (excludes, mode) = instruction_settings(v);
+    s.claude_md_excludes.extend(excludes);
+    if mode.is_some() {
+        s.instruction_files = mode;
+    }
+}
+
+/// Instruction-loading keys of any settings document (managed, user, project, local): `claudeMdExcludes` (bounded
+/// list of glob patterns) and the AGENTS.md mode, if it is one of the documented values. Nothing else is read.
+pub fn instruction_settings(v: &Value) -> (Vec<String>, Option<String>) {
+    let excludes = v
+        .get("claudeMdExcludes")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).filter(|p| p.len() <= 400).take(100).map(str::to_string).collect())
+        .unwrap_or_default();
+    let mode = v
+        .pointer("/pluginConfigs/cc-plugin-agents-md@builtin/options/instructionFiles")
+        .and_then(Value::as_str)
+        .filter(|m| INSTRUCTION_FILE_MODES.contains(m))
+        .map(str::to_string);
+    (excludes, mode)
+}
+
+/// Documented values of the "Project instructions" setting (default first).
+pub const INSTRUCTION_FILE_MODES: &[&str] = &["claude-md-or-agents-md", "claude-md-and-agents-md", "claude-md", "managed-only"];
+
+impl MachinePolicyLocations {
+    /// Folder of the machine-wide managed files (`managed-settings.json`, `CLAUDE.md`).
+    pub fn managed_dir(&self) -> Option<&Path> {
+        self.files.first().and_then(|f| f.parent())
+    }
 }
 
 #[cfg(windows)]
@@ -222,6 +260,7 @@ mod tests {
         assert!(s.bypass_permissions_disabled && s.managed_telemetry);
         let dump = serde_json::to_string(&s).unwrap();
         assert!(!dump.contains("SECRET") && !dump.contains("corporate"), "values must not survive");
+        assert!(s.managed_claude_md, "only the presence of managed instructions is recorded");
     }
 
     #[test]

@@ -34,7 +34,13 @@ export const useAppStore = defineStore('app', () => {
   const toasts = ref<Toast[]>([])
   const confirmRequest = ref<ConfirmRequest | null>(null)
   const paletteOpen = ref(false)
-  const launchDialog = ref<{ open: boolean; projectId?: string | null; profileId?: string | null }>({ open: false })
+  const launchDialog = ref<{
+    open: boolean
+    projectId?: string | null
+    profileId?: string | null
+    /** Launch for a knowledge task (ADR-0018). */
+    task?: { id: string; title: string; projectId: string | null } | null
+  }>({ open: false })
   /** Increments when another process (nexus CLI, MCP server) committed to the database (ADR-0009). */
   const externalChanges = ref(0)
   let toastSeq = 0
@@ -128,8 +134,8 @@ export const useAppStore = defineStore('app', () => {
     }, intervalMs)
   }
 
-  function openLaunch(projectId?: string | null, profileId?: string | null) {
-    launchDialog.value = { open: true, projectId, profileId }
+  function openLaunch(projectId?: string | null, profileId?: string | null, task?: { id: string; title: string; projectId: string | null } | null) {
+    launchDialog.value = { open: true, projectId: task?.projectId ?? projectId, profileId, task: task ?? null }
   }
 
   return {

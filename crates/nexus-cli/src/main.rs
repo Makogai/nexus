@@ -2,6 +2,7 @@
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
 mod hook;
+mod instructions;
 mod knowledge;
 mod launch;
 mod mcp;
@@ -55,6 +56,9 @@ enum Command {
     /// Tasks of the active workspace (Markdown files under tasks/).
     #[command(subcommand)]
     Tasks(knowledge::TasksCmd),
+    /// Show the instruction files Claude loads for a profile and project (CLAUDE.md layers, rules, imports) and what
+    /// NEXUS appends. Read-only.
+    Instructions(instructions::InstructionsArgs),
     /// Start Claude Code in this terminal with a profile's own configuration.
     Launch(launch::LaunchArgs),
     /// NEXUS MCP server over stdio, bound to one NEXUS session (started by Claude from the session's --mcp-config).
@@ -189,6 +193,7 @@ fn main() -> ExitCode {
         Command::Sessions(a) => cmd_sessions(&ctx, a).map(|_| 0),
         Command::Knowledge(c) => knowledge::cmd_knowledge(&ctx, c).map(|_| 0),
         Command::Tasks(c) => knowledge::cmd_tasks(&ctx, c).map(|_| 0),
+        Command::Instructions(a) => instructions::run(&ctx, a).map(|_| 0),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),

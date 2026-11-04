@@ -45,7 +45,14 @@
     "Which NEXUS rules apply?" → Claude names the rule. Ask "Create a NEXUS task to add a README" → the task appears
     on the board with source `claude`. Edit that rule's file in `<workspace>\rules\` with a text editor
     → the Knowledge view asks for approval again and the next session does not get it until you approve.
-15. Re-run the snapshot from step 1 → still unchanged (hooks and MCP are session-scoped flags, not profile edits).
+15. **Task flow** (session 4): on the project page, *Launch* an open task → the dialog names the task → in Claude ask
+    "Which NEXUS task am I on?" → Claude names it without reading files. Ask Claude to tick the first checklist item
+    and move the task to review → the board shows it; the task file changed. Close NEXUS, reopen, *Resume* → Claude
+    continues the same conversation and knows the task is in review.
+16. **Effective instructions**: project page → *Effective instructions* with Personal selected → the list matches
+    what `/memory` shows in Claude. If a "belongs to the default Claude profile" warning appears, your
+    `~\.claude\CLAUDE.md` reaches Personal sessions for projects inside your home folder (Claude behaviour).
+17. Re-run the snapshot from step 1 → still unchanged (hooks and MCP are session-scoped flags, not profile edits).
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

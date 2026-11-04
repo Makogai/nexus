@@ -62,7 +62,7 @@ async function load(rebuild = false) {
 async function move(task: KnowledgeItem, status: TaskStatus) {
   if (!wsId.value || !task.id) return
   try {
-    await api.knowledgeUpdateTask(wsId.value, task.id, status, null, task.hash)
+    await api.knowledgeUpdateTask(wsId.value, task.id, { status, expectedHash: task.hash })
   } catch (e) {
     const err = toIpcError(e)
     app.toast('error', err.code === 'conflict' ? `“${task.title}” changed on disk — reloaded, try again` : `Could not move the task: ${err.message}`)
@@ -82,6 +82,10 @@ watch(query, (q) => {
     hits.value = await api.knowledgeSearch(wsId.value, q).catch(() => [])
   }, 220)
 })
+
+function launchTask(t: KnowledgeItem) {
+  if (t.id) app.openLaunch(t.projectId, null, { id: t.id, title: t.title, projectId: t.projectId })
+}
 
 function openHit(h: KnowledgeHit) {
   viewing.value = items.value.find((i) => i.path === h.path) ?? { ...h, scope: 'workspace', needsApproval: false }
@@ -177,7 +181,7 @@ watch(broken, (b) => {
           </button>
         </div>
 
-        <TaskBoard v-if="tab === 'task'" :tasks="ofKind" :project-names="projectNames" @move="move" @open="viewing = $event" />
+        <TaskBoard v-if="tab === 'task'" :tasks="ofKind" :project-names="projectNames" @move="move" @open="viewing = $event" @launch="launchTask" />
 
         <div v-else-if="tab === 'health'" class="list">
           <div v-for="p in broken" :key="p.path" class="list-row problem">
@@ -216,7 +220,7 @@ watch(broken, (b) => {
     </template>
 
     <KnowledgeDialog v-if="wsId" :open="creating" :workspace-id="wsId" :projects="projects.list" :initial-kind="tab === 'health' ? 'task' : tab" @close="creating = false" @created="load()" />
-    <KnowledgeDocDialog v-if="wsId" :item="viewing" :workspace-id="wsId" @close="viewing = null" @approved="load()" />
+    <KnowledgeDocDialog v-if="wsId" :item="viewing" :workspace-id="wsId" @close="viewing = null" @approved="load()" @changed="load()" @launch="(t) => { viewing = null; launchTask(t) }" />
   </div>
 </template>
 

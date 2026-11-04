@@ -212,6 +212,7 @@ export interface SessionView {
   integrations: {
     mcp: IntegrationStatus
     hooks?: IntegrationStatus
+    task?: { id: string; title: string; status: string; briefChars: number }
   } | null
   turns: number
   prompts: number
@@ -221,6 +222,7 @@ export interface SessionView {
   attention: string | null
   endReason: string | null
   transcriptPath: string | null
+  taskId: string | null
   conversationRecorded: boolean | null
   resumable: boolean
 }
@@ -248,6 +250,10 @@ export interface StartClaude {
   effort?: string | null
   model?: string | null
   title?: string | null
+  /** Work on this knowledge task (its project is used when none is given). */
+  taskId?: string | null
+  /** Move a backlog/ready task to in-progress (default true). */
+  startTask?: boolean
   cols?: number
   rows?: number
 }
@@ -298,6 +304,9 @@ export interface KnowledgeEntry {
   priority: 'low' | 'medium' | 'high' | 'urgent' | null
   stacks: string[]
   applies: 'always' | 'on-demand' | null
+  /** Git branch the document is about, and the commit it was recorded at (ADR-0018). */
+  branch: string | null
+  commit: string | null
   privacy: 'shared' | 'local-only'
   updated: string | null
   hash: string
@@ -349,4 +358,89 @@ export interface KnowledgeCreate {
   stacks?: string[]
   labels?: string[]
   global?: boolean
+}
+
+// --- Tasks, branch-aware knowledge, effective instructions (ADR-0018/0019) -------------------------------------
+
+export interface ChecklistItem {
+  index: number
+  text: string
+  done: boolean
+}
+
+export interface TaskView {
+  id: string
+  title: string
+  status: TaskStatus
+  priority: string | null
+  projectId: string | null
+  branch: string | null
+  commit: string | null
+  labels: string[]
+  acceptance: string[]
+  description: string
+  truncated: boolean
+  checklist: ChecklistItem[]
+  recentLog: string[]
+  logEntries: number
+  hash: string
+}
+
+export interface TaskUpdateInput {
+  status?: string | null
+  log?: string | null
+  expectedHash?: string | null
+  check?: number[]
+  uncheck?: number[]
+}
+
+export type Relevance = 'unbound' | 'this-branch' | 'inherited' | 'other-branch'
+
+export interface ProjectKnowledge {
+  git: { branch: string | null; head: string | null }
+  tasks: KnowledgeItem[]
+  notes: (KnowledgeItem & { relevance: Relevance })[]
+  hiddenOtherBranch: number
+}
+
+export interface InstructionLayer {
+  scope: 'managed' | 'user' | 'project' | 'local'
+  kind: 'claude-md' | 'rule' | 'import' | 'agents-md' | 'managed-setting'
+  path: string | null
+  load: 'at-start' | 'on-demand' | 'excluded' | 'not-loaded' | 'fallback'
+  reason: string | null
+  chars: number
+  lines: number
+  importedFrom: string | null
+  paths: string[]
+}
+
+export interface LaunchRules {
+  text?: string | null
+  included: string[]
+  pendingApproval: string[]
+  overBudget: string[]
+  alreadyLoaded?: string[]
+}
+
+export interface InstructionsPreview {
+  claude: {
+    layers: InstructionLayer[]
+    filesAtStart: number
+    charsAtStart: number
+    excludes: string[]
+    agentsMode: string
+    disabled: boolean
+    warnings: string[]
+  }
+  nexus: {
+    workProfile: string | null
+    workProfileChars: number
+    rules: LaunchRules | null
+    task: string | null
+    taskBriefChars: number
+    appendedChars: number
+    mcp: string | null
+    hooks: string | null
+  }
 }

@@ -29,7 +29,19 @@ struct Env {
 
 impl Env {
     fn new() -> Env {
-        let tmp = tempfile::tempdir().unwrap();
+        Env::new_in(None)
+    }
+
+    /// `base` = where the temp dir lives (tests whose result depends on ancestor folders use Cargo's target tmp dir,
+    /// which is not inside the user's home folder).
+    fn new_in(base: Option<&Path>) -> Env {
+        let tmp = match base {
+            Some(b) => {
+                std::fs::create_dir_all(b).unwrap();
+                tempfile::tempdir_in(b).unwrap()
+            }
+            None => tempfile::tempdir().unwrap(),
+        };
         let root = dunce(tmp.path());
         let repo = root.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
@@ -296,7 +308,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 15);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 16);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -455,7 +467,7 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     let path = PathBuf::from(task["path"].as_str().unwrap());
     assert!(path.starts_with(ws_dir(&e).join("tasks")) && path.ends_with(format!("{id}.md")), "file name = id");
 
-    let moved = e.ok(&["tasks", "move", &id[..8], "in-progress", "--log", "Started on the form"]);
+    let moved = e.ok(&["tasks", "move", &id[id.len() - 8..], "in-progress", "--log", "Started on the form"]);
     assert!(moved.contains("in-progress"), "{moved}");
     let on_disk = std::fs::read_to_string(&path).unwrap();
     assert!(on_disk.contains("status: in-progress") && on_disk.contains("## Log") && on_disk.contains("Started on the form"));
@@ -575,4 +587,174 @@ fn mcp_knowledge_is_scoped_to_the_sessions_workspace() {
     assert_eq!(r[5]["structuredContent"]["summary"]["openTasks"], 2);
     let other_task = std::fs::read_to_string(secret["path"].as_str().unwrap()).unwrap();
     assert!(other_task.contains("status: backlog"), "the other workspace was not touched");
+}
+
+// --- Task-driven sessions, branch-aware memory, instructions inspector (ADR-0018/0019) -----------------------------
+
+fn git_commit(repo: &Path, msg: &str) {
+    let ok = Command::new("git")
+        .args(["-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", msg])
+        .current_dir(repo)
+        .status()
+        .unwrap();
+    assert!(ok.success());
+}
+
+fn hook_context(e: &Env, session: &str, payload: &str) -> String {
+    let out = hook(e, session, "session-start", payload);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
+    v["hookSpecificOutput"]["additionalContext"].as_str().unwrap_or_default().to_string()
+}
+
+#[test]
+fn task_flow_launch_update_through_mcp_persist_and_resume() {
+    let e = Env::new();
+    e.setup();
+    git_commit(&e.repo, "init");
+    let body = "Login form for the web app.\n- [ ] Email field\n- [ ] Password field\n";
+    let task = e.json(&["tasks", "add", "Ship login", "--project", "repo", "--priority", "high", "--body", body]);
+    let tid = task["id"].as_str().unwrap().to_string();
+
+    // Select the task → launch Claude: project, profile, work profile and task brief are applied.
+    let report_path = e.data.parent().unwrap().join("task-launch.json");
+    let out = e.cmd(&["launch", "--task", "Ship login", "-q"]).env("FAKE_CLAUDE_REPORT", &report_path).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = read_report(&report_path);
+    let session = e.json(&["sessions"])[0].clone();
+    let sid = session["id"].as_str().unwrap().to_string();
+    assert_eq!(session["taskId"], tid.as_str());
+    assert_eq!(session["title"], "Ship login");
+    assert!(nexus_core::paths::same_path(Path::new(session["cwd"].as_str().unwrap()), &e.repo), "the task's project");
+    assert_eq!(report["env"]["CLAUDE_CONFIG_DIR"], e.cfg.to_str().unwrap(), "the chosen profile");
+    let prompt = appended_prompt(&report);
+    assert!(prompt.starts_with("NEXUS work profile: PROTOTYPE"), "the profile's work profile");
+    assert!(prompt.contains(&format!("NEXUS task for this session (id {tid}): Ship login\nStatus: in-progress · priority high")), "{prompt}");
+    assert!(prompt.contains("[ ] 1. Email field") && !prompt.contains("## Log"), "brief, not history");
+    assert_eq!(session["integrations"]["task"]["status"], "in-progress");
+    let file = PathBuf::from(task["path"].as_str().unwrap());
+    assert!(std::fs::read_to_string(&file).unwrap().contains("Started in a NEXUS session"));
+
+    // Claude records progress through the NEXUS MCP server (defaults to the session's task).
+    let r = mcp_calls(
+        &e,
+        &sid,
+        &[
+            ("get_task", serde_json::json!({})),
+            ("update_task", serde_json::json!({ "status": "review", "log": "Login form done", "check": [1, 2], "linkBranch": true })),
+            ("get_session_context", serde_json::json!({})),
+            ("get_checkpoints", serde_json::json!({})),
+            ("record_memory", serde_json::json!({ "kind": "note", "title": "Login uses the session cookie", "body": "Set by the API gateway.", "scope": "branch" })),
+            ("update_task", serde_json::json!({ "check": [7] })),
+            ("get_context_index", serde_json::json!({})),
+        ],
+    );
+    assert_eq!(r[0]["structuredContent"]["sessionTask"], true);
+    assert_eq!(r[0]["structuredContent"]["checklist"].as_array().unwrap().len(), 2);
+    let updated = &r[1]["structuredContent"]["updated"];
+    assert_eq!((updated["status"].as_str(), updated["branch"].as_str()), (Some("review"), Some("main")), "{:#}", r[1]);
+    assert_eq!(updated["checklist"]["done"], 2);
+    assert_eq!(r[2]["structuredContent"]["task"]["status"], "review");
+    assert_eq!(r[3]["structuredContent"]["checkpoints"][0]["summary"], "Task “Ship login” → review: Login form done");
+    let note = &r[4]["structuredContent"]["recorded"];
+    assert_eq!(note["branch"], "main");
+    assert_eq!(note["commit"].as_str().unwrap().len(), 40, "stable Git identifier recorded");
+    assert_eq!(r[5]["isError"], true, "checklist numbers are validated");
+    assert_eq!(r[6]["structuredContent"]["branchNotes"][0]["title"], "Login uses the session cookie");
+
+    // Persisted in the task file (authoritative) — readable by a fresh process.
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("status: review") && text.contains("- [x] Email field") && text.contains("[claude] Login form done"));
+    assert!(text.contains("branch: main") && text.contains("commit: "));
+    let shown = e.json(&["tasks", "show", &tid[tid.len() - 8..]]);
+    assert_eq!(shown["task"]["status"], "review");
+    assert_eq!(shown["sessions"].as_array().unwrap().len(), 1);
+
+    // Resume work later: same conversation, same task, current task state.
+    let csid = session["claudeSessionId"].as_str().unwrap();
+    std::fs::create_dir_all(e.cfg.join("projects").join("repo")).unwrap();
+    std::fs::write(e.cfg.join("projects").join("repo").join(format!("{csid}.jsonl")), "{}\n").unwrap();
+    let resume_report = e.data.parent().unwrap().join("task-resume.json");
+    let out = e
+        .cmd(&["launch", "--resume", "last", "--cwd", e.repo.to_str().unwrap(), "-q"])
+        .env("FAKE_CLAUDE_REPORT", &resume_report)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = read_report(&resume_report);
+    let args: Vec<String> = serde_json::from_value(report["args"].clone()).unwrap();
+    assert!(args.windows(2).any(|w| w[0] == "--resume" && w[1] == csid));
+    assert!(appended_prompt(&report).contains("Status: review"), "the brief is built from the file at resume time");
+    let resumed = e.json(&["sessions"])[0].clone();
+    assert_eq!((resumed["taskId"].as_str(), resumed["resumedFrom"].as_str()), (Some(tid.as_str()), Some(sid.as_str())));
+    assert!(std::fs::read_to_string(&file).unwrap().contains("status: review"), "resuming does not restart a task under review");
+
+    // A resumed conversation keeps its original system prompt — SessionStart brings the task's current state.
+    let ctx = hook_context(&e, resumed["id"].as_str().unwrap(), &format!(r#"{{"hook_event_name":"SessionStart","source":"resume","session_id":"{csid}"}}"#));
+    assert!(ctx.contains("NEXUS task: Ship login — now review, 2/2 checklist items done; last progress:"), "{ctx}");
+    assert!(ctx.chars().count() <= 1200);
+}
+
+#[test]
+fn instructions_inspector_shows_claude_layers_and_avoids_duplicates() {
+    let e = Env::new_in(Some(&Path::new(env!("CARGO_TARGET_TMPDIR")).join("nexus-cli")));
+    e.setup();
+    std::fs::create_dir_all(&e.cfg).unwrap();
+    std::fs::write(e.cfg.join("CLAUDE.md"), "User memory of the profile.\n").unwrap();
+    std::fs::write(e.repo.join("CLAUDE.md"), "# Repo\n- Keep commits small and focused.\n@docs/style.md\n").unwrap();
+    std::fs::create_dir_all(e.repo.join("docs")).unwrap();
+    std::fs::write(e.repo.join("docs").join("style.md"), "Style guide.\n").unwrap();
+    std::fs::create_dir_all(e.repo.join(".claude").join("rules")).unwrap();
+    std::fs::write(e.repo.join(".claude").join("rules").join("rust.md"), "---\npaths: [\"src/**/*.rs\"]\n---\nUse clippy.\n").unwrap();
+    std::fs::write(e.repo.join("CLAUDE.local.md"), "Local notes.\n").unwrap();
+    std::fs::write(e.repo.join(".claude").join("settings.json"), r#"{"claudeMdExcludes": ["**/repo/CLAUDE.local.md"]}"#).unwrap();
+    e.ok(&["knowledge", "new", "rule", "--title", "Small commits", "--applies", "always", "--body", "Keep commits small and focused."]);
+    e.ok(&["knowledge", "new", "rule", "--title", "Tests", "--applies", "always", "--body", "Every change ships with a test."]);
+
+    let r = e.json(&["instructions", "--project", "repo"]);
+    let layers = r["claude"]["layers"].as_array().unwrap();
+    let find = |suffix: &str| layers.iter().find(|l| l["path"].as_str().is_some_and(|p| p.replace('\\', "/").ends_with(suffix))).cloned();
+    assert_eq!(find("cfg/CLAUDE.md").unwrap()["scope"], "user", "user memory follows CLAUDE_CONFIG_DIR");
+    assert_eq!(find("repo/CLAUDE.md").unwrap()["load"], "at-start");
+    assert_eq!(find("docs/style.md").unwrap()["kind"], "import");
+    assert_eq!(find("rules/rust.md").unwrap()["load"], "on-demand");
+    assert_eq!(find("repo/CLAUDE.local.md").unwrap()["load"], "excluded");
+    let pos = |suffix: &str| layers.iter().position(|l| l["path"].as_str().is_some_and(|p| p.replace('\\', "/").ends_with(suffix))).unwrap();
+    assert!(pos("cfg/CLAUDE.md") < pos("repo/CLAUDE.md"), "user before project (Claude's order)");
+    assert_eq!(r["nexus"]["rules"]["alreadyLoaded"][0], "Small commits (in CLAUDE.md)");
+    assert_eq!(r["nexus"]["rules"]["included"][0], "Tests");
+    assert!(!r.to_string().contains("User memory of the profile"), "file contents are never shown");
+
+    let (report, _) = launch_report(&e, &[], "inspect-launch.json");
+    let prompt = appended_prompt(&report);
+    assert!(prompt.contains("Every change ships with a test.") && !prompt.contains("Keep commits small"), "{prompt}");
+    let human = e.ok(&["instructions", "--project", "repo"]);
+    assert!(human.contains("already in CLAUDE.md (skipped): Small commits"), "{human}");
+}
+
+#[test]
+fn branch_aware_notes_follow_the_live_git_history() {
+    let e = Env::new();
+    e.setup();
+    git_commit(&e.repo, "init");
+    let git = |args: &[&str]| assert!(Command::new("git").args(args).current_dir(&e.repo).status().unwrap().success());
+    git(&["checkout", "-q", "-b", "feature/login"]);
+    git_commit(&e.repo, "login work");
+    e.ok(&["knowledge", "new", "note", "--project", "repo", "--branch", "current", "--title", "Login half-migrated", "--body", "Do not touch auth.rs yet."]);
+    e.ok(&["knowledge", "new", "note", "--project", "repo", "--title", "General note", "--body", "Unbound."]);
+    let rel = |e: &Env| -> Vec<(String, String)> {
+        e.json(&["knowledge", "list", "--project", "repo", "--kind", "note"])
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| (i["title"].as_str().unwrap().to_string(), i["relevance"].as_str().unwrap().to_string()))
+            .collect()
+    };
+    let on_feature = rel(&e);
+    assert!(on_feature.contains(&("Login half-migrated".into(), "this-branch".into())), "{on_feature:?}");
+    assert!(on_feature.contains(&("General note".into(), "unbound".into())));
+
+    git(&["checkout", "-q", "main"]);
+    assert!(rel(&e).contains(&("Login half-migrated".into(), "other-branch".into())), "Git decides: main does not contain the work");
+    git(&["merge", "-q", "--no-ff", "--no-edit", "feature/login"]);
+    assert!(rel(&e).contains(&("Login half-migrated".into(), "inherited".into())), "after the merge the commit is in main's history");
 }

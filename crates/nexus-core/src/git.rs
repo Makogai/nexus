@@ -124,6 +124,14 @@ pub fn remote_url(repo: &Path) -> Option<String> {
     out.success().then(|| redact_url(out.stdout_str().trim()))
 }
 
+/// Commit ids reachable from HEAD, newest first, at most `max` (for branch-aware knowledge, ADR-0018). `None` when the
+/// folder is not a repository or has no commits.
+pub fn history(repo: &Path, max: usize) -> Option<Vec<String>> {
+    let n = format!("--max-count={}", max.clamp(1, 20_000));
+    let out = run_git(Some(repo), &["rev-list", &n, "HEAD"]).ok()?;
+    out.success().then(|| out.stdout_str().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+}
+
 pub fn last_commit(repo: &Path) -> Option<CommitInfo> {
     let out = run_git(Some(repo), &["log", "-1", "--format=%H%x00%ct%x00%s"]).ok()?;
     if !out.success() {

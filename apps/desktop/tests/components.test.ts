@@ -128,6 +128,7 @@ function session(over: Partial<SessionView> = {}): SessionView {
     attention: null,
     endReason: null,
     transcriptPath: null,
+    taskId: null,
     conversationRecorded: true,
     resumable: true,
     ...over,
@@ -198,6 +199,23 @@ describe('LaunchDialog', () => {
     expect(app.launchDialog.open).toBe(false)
     expect(app.prefs.lastLaunch).toEqual({ profileId: 'game', workProfile: 'prototype', effort: null })
     expect(useSessionStore().tabs).toContain('new')
+  })
+
+  it('launches for a task: its project is fixed, the task id and start choice are sent', async () => {
+    seed()
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-1', title: 'Ship login', projectId: 'p1' })
+    await flushPromises()
+    expect(w.find('[data-launch-task]').text()).toContain('Ship login')
+    expect(w.find('#launch-project').attributes('disabled')).toBeDefined()
+    expect((w.find('#launch-project').element as HTMLSelectElement).value).toBe('p1')
+    expect(w.find('#launch-title').attributes('placeholder')).toBe('Ship login')
+    await w.find('[data-launch-task] input[type=checkbox]').setValue(false)
+    api.sessionStartClaude.mockResolvedValue(session({ id: 'new', running: true, state: 'running' }))
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ projectId: 'p1', taskId: 'task-1', startTask: false, title: null })
   })
 
   it('switching profile applies that profile’s defaults', async () => {
@@ -379,6 +397,6 @@ describe('CommandPalette', () => {
     expect(first.text()).toContain('Launch Claude in Game')
     await w.find('.palette input').trigger('keydown', { key: 'Enter' })
     expect(app.paletteOpen).toBe(false)
-    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined })
+    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null })
   })
 })

@@ -30,6 +30,9 @@ pub struct Item {
     pub priority: Option<String>,
     pub stacks: Vec<String>,
     pub applies: Option<String>,
+    /// Git branch name the document is about (frontmatter `branch`), and the commit it was recorded at (`commit`).
+    pub branch: Option<String>,
+    pub commit: Option<String>,
     pub privacy: String,
     pub updated: Option<String>,
     pub hash: String,
@@ -145,14 +148,14 @@ fn index_file(conn: &Connection, root: &Root, root_key: &str, workspace_id: Opti
     let stacks = fm.map(|f| f.list("stacks")).unwrap_or_default();
     conn.execute(
         "INSERT INTO knowledge_items(path, root, workspace_id, id, kind, title, status, project_id, priority, stacks, applies,
-            privacy, updated, content_hash, size, mtime_ms, valid, error, conflict, indexed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?19)
+            privacy, updated, content_hash, size, mtime_ms, valid, error, conflict, indexed_at, branch, commit_sha)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?19, ?20, ?21)
          ON CONFLICT(path) DO UPDATE SET root = excluded.root, workspace_id = excluded.workspace_id, id = excluded.id,
             kind = excluded.kind, title = excluded.title, status = excluded.status, project_id = excluded.project_id,
             priority = excluded.priority, stacks = excluded.stacks, applies = excluded.applies, privacy = excluded.privacy,
             updated = excluded.updated, content_hash = excluded.content_hash, size = excluded.size,
             mtime_ms = excluded.mtime_ms, valid = excluded.valid, error = excluded.error, conflict = NULL,
-            indexed_at = excluded.indexed_at",
+            indexed_at = excluded.indexed_at, branch = excluded.branch, commit_sha = excluded.commit_sha",
         params![
             key,
             root_key,
@@ -173,6 +176,8 @@ fn index_file(conn: &Connection, root: &Root, root_key: &str, workspace_id: Opti
             validation.is_ok(),
             validation.err(),
             now_ms(),
+            get("branch"),
+            get("commit"),
         ],
     )?;
     conn.execute("DELETE FROM knowledge_fts WHERE path = ?1", [&key])?;
@@ -202,7 +207,7 @@ fn mark_conflicts(conn: &Connection) -> Result<usize> {
 }
 
 const SELECT: &str = "SELECT id, workspace_id, path, kind, title, status, project_id, priority, stacks, applies, privacy,
-    updated, content_hash, valid, error, conflict FROM knowledge_items";
+    updated, content_hash, valid, error, conflict, branch, commit_sha FROM knowledge_items";
 
 fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
     let stacks: String = r.get(8)?;
@@ -223,6 +228,8 @@ fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item> {
         valid: r.get(13)?,
         error: r.get(14)?,
         conflict: r.get(15)?,
+        branch: r.get(16)?,
+        commit: r.get(17)?,
     })
 }
 
@@ -280,7 +287,7 @@ pub fn search(conn: &Connection, workspace_id: &str, query: &str, kinds: &[Kind]
     };
     let sql = format!(
         "SELECT k.id, k.workspace_id, k.path, k.kind, k.title, k.status, k.project_id, k.priority, k.stacks, k.applies,
-                k.privacy, k.updated, k.content_hash, k.valid, k.error, k.conflict,
+                k.privacy, k.updated, k.content_hash, k.valid, k.error, k.conflict, k.branch, k.commit_sha,
                 snippet(knowledge_fts, 2, '[', ']', '…', 12)
          FROM knowledge_fts f JOIN knowledge_items k ON k.path = f.path
          WHERE knowledge_fts MATCH ?2 AND (k.workspace_id = ?1 OR k.workspace_id IS NULL) AND k.valid = 1{kind_filter}
@@ -289,7 +296,7 @@ pub fn search(conn: &Connection, workspace_id: &str, query: &str, kinds: &[Kind]
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
-        .query_map(params![workspace_id, terms.join(" ")], |r| Ok(Hit { item: from_row(r)?, snippet: r.get(16)? }))?
+        .query_map(params![workspace_id, terms.join(" ")], |r| Ok(Hit { item: from_row(r)?, snippet: r.get(18)? }))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
 }

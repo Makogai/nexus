@@ -11,21 +11,29 @@ const api = vi.hoisted(() => ({
   knowledgeCreate: vi.fn(),
   knowledgeUpdateTask: vi.fn(),
   knowledgeApprove: vi.fn(),
+  knowledgeTask: vi.fn(),
+  instructionsInspect: vi.fn(),
 }))
 
 vi.mock('../src/lib/ipc', () => ({
   api,
+  SESSION_EVENT: 'nexus://session',
   toIpcError: (e: unknown) => {
     const o = e as { code?: string; message?: string }
     return { code: o?.code ?? 'internal', message: String(o?.message ?? e) }
   },
 }))
-vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir: vi.fn() }))
+vi.mock('@tauri-apps/plugin-opener', () => ({ revealItemInDir: vi.fn(), openUrl: vi.fn() }))
+vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => undefined) }))
 
 import { boardColumns, problems, rulesInOrder } from '../src/lib/knowledge'
 import TaskBoard from '../src/components/TaskBoard.vue'
 import KnowledgeDialog from '../src/components/KnowledgeDialog.vue'
 import KnowledgeView from '../src/views/KnowledgeView.vue'
+import KnowledgeDocDialog from '../src/components/KnowledgeDocDialog.vue'
+import InstructionsPanel from '../src/components/InstructionsPanel.vue'
+import { useProfileStore } from '../src/stores/profiles'
+import type { ClaudeProfile, InstructionsPreview, TaskView } from '../src/lib/types'
 import { useAppStore } from '../src/stores/app'
 import { useWorkspaceStore } from '../src/stores/workspaces'
 
@@ -41,6 +49,8 @@ function item(title: string, over: Partial<KnowledgeItem> = {}): KnowledgeItem {
     priority: null,
     stacks: [],
     applies: null,
+    branch: null,
+    commit: null,
     privacy: 'shared',
     updated: '2026-01-01T00:00:00Z',
     hash: `h-${title}`,
@@ -155,7 +165,7 @@ describe('KnowledgeView', () => {
     await flushPromises()
     await w.find('[data-status="backlog"] select').setValue('done')
     await flushPromises()
-    expect(api.knowledgeUpdateTask).toHaveBeenCalledWith('ws', 'id-Ship login', 'done', null, 'h-Ship login')
+    expect(api.knowledgeUpdateTask).toHaveBeenCalledWith('ws', 'id-Ship login', { status: 'done', expectedHash: 'h-Ship login' })
     expect(useAppStore().toasts.at(-1)?.message).toContain('changed on disk')
   })
 
@@ -170,5 +180,73 @@ describe('KnowledgeView', () => {
     expect(w.findAll('.doc').map((d) => d.text())).toEqual([expect.stringContaining('Decide')])
     await w.find('[data-tab="health"]').trigger('click')
     expect(w.text()).toContain('`id` is required')
+  })
+})
+
+describe('task workflow UI', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('offers Launch on open tasks only', async () => {
+    const w = mount(TaskBoard, { props: { tasks: [item('Open'), item('Finished', { status: 'done' })] } })
+    expect(w.findAll('.launch')).toHaveLength(1)
+    await w.find('.launch').trigger('click')
+    expect(w.emitted('launch')?.[0]?.[0]).toMatchObject({ title: 'Open' })
+  })
+
+  it('task dialog toggles checklist items with the content hash and offers Launch', async () => {
+    const view: TaskView = {
+      id: 'id-Ship login', title: 'Ship login', status: 'in-progress', priority: 'high', projectId: null, branch: 'feature/login',
+      commit: null, labels: [], acceptance: [], description: 'Form.\n- [ ] Email\n- [x] Password', truncated: false,
+      checklist: [{ index: 1, text: 'Email', done: false }, { index: 2, text: 'Password', done: true }],
+      recentLog: ['2026-11-04 [claude] Form started'], logEntries: 1, hash: 'h1',
+    }
+    api.knowledgeTask.mockResolvedValue(view)
+    api.knowledgeUpdateTask.mockResolvedValue(item('Ship login'))
+    const w = mount(KnowledgeDocDialog, {
+      props: { item: item('Ship login', { status: 'in-progress' }), workspaceId: 'ws' },
+      global: { stubs: { teleport: true, transition: false, RouterLink: true } },
+    })
+    await flushPromises()
+    expect(w.text()).toContain('[claude] Form started')
+    expect(w.text()).toContain('feature/login')
+    const boxes = w.findAll('[data-checklist] input')
+    expect(boxes).toHaveLength(2)
+    await boxes[0]!.setValue(true)
+    await flushPromises()
+    expect(api.knowledgeUpdateTask).toHaveBeenCalledWith('ws', 'id-Ship login', { check: [1], uncheck: [], expectedHash: 'h1' })
+    expect(w.emitted('changed')).toBeTruthy()
+    await w.find('[data-launch]').trigger('click')
+    expect(w.emitted('launch')?.[0]?.[0]).toMatchObject({ title: 'Ship login' })
+  })
+
+  it('instructions panel lists Claude’s own layers in order and what NEXUS adds', async () => {
+    useProfileStore().list = [{ id: 'p', name: 'Personal' } as ClaudeProfile]
+    const preview: InstructionsPreview = {
+      claude: {
+        layers: [
+          { scope: 'user', kind: 'claude-md', path: '/cfg/CLAUDE.md', load: 'at-start', reason: null, chars: 10, lines: 1, importedFrom: null, paths: [] },
+          { scope: 'project', kind: 'claude-md', path: '/home/.claude/CLAUDE.md', load: 'at-start', reason: "the default profile's CLAUDE.md — loaded as project memory", chars: 5, lines: 1, importedFrom: null, paths: [] },
+          { scope: 'project', kind: 'rule', path: '/repo/.claude/rules/rust.md', load: 'on-demand', reason: null, chars: 3, lines: 1, importedFrom: null, paths: ['src/**/*.rs'] },
+          { scope: 'local', kind: 'claude-md', path: '/repo/CLAUDE.local.md', load: 'excluded', reason: 'claudeMdExcludes: **/CLAUDE.local.md', chars: 2, lines: 1, importedFrom: null, paths: [] },
+        ],
+        filesAtStart: 2, charsAtStart: 15, excludes: [], agentsMode: 'claude-md-or-agents-md', disabled: false,
+        warnings: ['/home/.claude/CLAUDE.md belongs to the default Claude profile but also reaches this profile’s sessions'],
+      },
+      nexus: {
+        workProfile: 'Balanced', workProfileChars: 100, task: null, taskBriefChars: 0, appendedChars: 160, mcp: null, hooks: null,
+        rules: { included: ['Tests'], pendingApproval: [], overBudget: [], alreadyLoaded: ['Small commits (in CLAUDE.md)'] },
+      },
+    }
+    api.instructionsInspect.mockResolvedValue(preview)
+    const w = mount(InstructionsPanel, { props: { projectId: 'proj' } })
+    await flushPromises()
+    expect(api.instructionsInspect).toHaveBeenCalledWith({ profileId: 'p', projectId: 'proj' })
+    expect(w.findAll('.layer').map((l) => l.attributes('data-load'))).toEqual(['at-start', 'at-start', 'on-demand', 'excluded'])
+    expect(w.text()).toContain('when Claude touches src/**/*.rs')
+    expect(w.find('.notice-warn').text()).toContain('default Claude profile')
+    expect(w.find('[data-already]').text()).toContain('Small commits (in CLAUDE.md)')
   })
 })

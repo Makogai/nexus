@@ -1,12 +1,14 @@
 //! Portable workspace knowledge (ADR-0013, ADR-0017): rules, tasks, decisions, notes, specs and workflows as
 //! Markdown files with strict frontmatter. Files are authoritative; SQLite holds a rebuildable index.
 
+pub mod branches;
 pub mod context;
 pub mod frontmatter;
 pub mod index;
 pub mod service;
 pub mod skills;
 pub mod store;
+pub mod tasks;
 
 use std::path::{Path, PathBuf};
 
@@ -197,6 +199,18 @@ impl Doc {
         if kind == Kind::Rule {
             one_of(fm, "applies", &["always", "on-demand"], false)?;
         }
+        if let Some(v) = fm.get("branch").filter(|v| **v != Value::Null) {
+            match v.as_str() {
+                Some(b) if valid_branch_name(b) => {}
+                _ => return Err("`branch` must be a Git branch name".into()),
+            }
+        }
+        if let Some(v) = fm.get("commit").filter(|v| **v != Value::Null) {
+            match v.as_str() {
+                Some(c) if is_commit_id(c) => {}
+                _ => return Err("`commit` must be a full Git commit id (40 or 64 hex digits)".into()),
+            }
+        }
         let privacy = one_of(fm, "privacy", &["shared", "local-only"], false)?.unwrap_or("shared");
         if root_privacy == Privacy::Shared && privacy != "shared" {
             return Err(format!("`privacy: {privacy}` documents belong in {LOCAL_DIR}/, not in the shared workspace"));
@@ -204,6 +218,25 @@ impl Doc {
         check_portable(fm, &self.body)?;
         Ok(kind)
     }
+}
+
+/// A conservative subset of `git check-ref-format --branch`: no spaces, control characters, `..`, `~^:?*[\\`, no
+/// leading `-` or `/`, no trailing `/`, `.` or `.lock`, at most 200 characters.
+pub fn valid_branch_name(b: &str) -> bool {
+    !b.is_empty()
+        && b.len() <= 200
+        && !b.starts_with(['-', '/'])
+        && !b.ends_with(['/', '.'])
+        && !b.ends_with(".lock")
+        && !b.contains("..")
+        && !b.contains("//")
+        && !b.contains("@{")
+        && b.chars().all(|c| !c.is_control() && !c.is_whitespace() && !"~^:?*[\\".contains(c))
+}
+
+/// Full SHA-1 (40) or SHA-256 (64) object id, lowercase hex.
+pub fn is_commit_id(c: &str) -> bool {
+    (c.len() == 40 || c.len() == 64) && c.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn one_of<'a>(fm: &'a Frontmatter, key: &str, allowed: &[&str], required: bool) -> Result<Option<&'a str>, String> {

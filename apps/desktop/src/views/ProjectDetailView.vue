@@ -9,6 +9,8 @@ import {
   GitBranch,
   GitCommitHorizontal,
   Link,
+  ListTodo,
+  NotebookPen,
   RefreshCw,
   Sparkles,
   SquareTerminal,
@@ -17,12 +19,14 @@ import {
 } from '@lucide/vue'
 import { relativeTime } from '../lib/format'
 import { api } from '../lib/ipc'
-import type { Checkpoint } from '../lib/types'
+import { STATUS_LABELS } from '../lib/knowledge'
+import type { Checkpoint, KnowledgeItem, ProjectKnowledge, TaskStatus } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
 import GitSummary from '../components/GitSummary.vue'
 import SessionRow from '../components/SessionRow.vue'
+import InstructionsPanel from '../components/InstructionsPanel.vue'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
@@ -35,6 +39,16 @@ const project = computed(() => projects.byId[props.id] ?? null)
 const git = computed(() => projects.git[props.id])
 const projectSessions = computed(() => sessions.list.filter((s) => s.projectId === props.id && !s.archivedAt))
 const checkpoints = ref<Checkpoint[]>([])
+const knowledge = ref<ProjectKnowledge | null>(null)
+
+async function loadKnowledge() {
+  if (!project.value?.available) return
+  knowledge.value = await api.projectKnowledge(props.id).catch(() => knowledge.value)
+}
+
+function launchTask(t: KnowledgeItem) {
+  if (t.id) app.openLaunch(props.id, null, { id: t.id, title: t.title, projectId: t.projectId })
+}
 
 async function loadCheckpoints() {
   checkpoints.value = await api.projectCheckpoints(props.id, 20).catch(() => checkpoints.value)
@@ -48,13 +62,21 @@ watch(
   () => {
     loadGit()
     loadCheckpoints()
+    loadKnowledge()
   },
   { immediate: true },
 )
-watch(() => app.externalChanges, loadCheckpoints)
+watch(
+  () => app.externalChanges,
+  () => {
+    loadCheckpoints()
+    loadKnowledge()
+  },
+)
 onActivated(() => {
   loadGit()
   loadCheckpoints()
+  loadKnowledge()
 })
 
 async function refresh() {
@@ -158,6 +180,36 @@ async function unregister() {
       </section>
     </div>
 
+    <h2 class="section-title"><ListTodo class="title-ic" /> Open tasks <span class="count">{{ knowledge?.tasks.length ?? 0 }}</span></h2>
+    <div v-if="knowledge?.tasks.length" class="list" data-project-tasks>
+      <div v-for="t in knowledge.tasks" :key="t.path" class="list-row task-row" :data-task="t.id">
+        <span class="badge">{{ STATUS_LABELS[t.status as TaskStatus] ?? t.status }}</span>
+        <span class="task-title">{{ t.title }}</span>
+        <span v-if="t.priority && t.priority !== 'medium'" class="badge" :class="{ 'badge-warn': t.priority === 'high', 'badge-error': t.priority === 'urgent' }">{{ t.priority }}</span>
+        <span v-if="t.branch" class="chip mono">{{ t.branch }}</span>
+        <button class="btn btn-sm btn-primary" :disabled="!project.available" @click="launchTask(t)"><Sparkles /> Launch</button>
+      </div>
+    </div>
+    <div v-else class="empty">
+      <p>No open tasks for this project. Add tasks in <RouterLink to="/knowledge">Knowledge</RouterLink>, or let Claude create them with the NEXUS tools.</p>
+    </div>
+
+    <h2 class="section-title"><NotebookPen class="title-ic" /> Notes for {{ knowledge?.git.branch ?? 'this project' }} <span class="count">{{ knowledge?.notes.length ?? 0 }}</span></h2>
+    <div v-if="knowledge?.notes.length" class="list" data-project-notes>
+      <div v-for="n in knowledge.notes" :key="n.path" class="list-row">
+        <span class="badge">{{ n.kind }}</span>
+        <span class="task-title">{{ n.title }}</span>
+        <span v-if="n.relevance === 'this-branch'" class="chip mono">this branch</span>
+        <span v-else-if="n.relevance === 'inherited'" class="chip mono" :title="`Recorded on ${n.branch}; its commit is part of this branch`">from {{ n.branch }}</span>
+      </div>
+    </div>
+    <p v-if="knowledge?.hiddenOtherBranch" class="faint">{{ knowledge.hiddenOtherBranch }} note(s) of other branches are hidden — Git decides: their commits are not in the checked-out branch.</p>
+    <div v-if="!knowledge?.notes.length && !knowledge?.hiddenOtherBranch" class="empty">
+      <p>No notes yet. Claude can record branch-specific memory with <code>record_memory</code> (scope <code>branch</code>).</p>
+    </div>
+
+    <InstructionsPanel v-if="project.available" :project-id="project.id" class="instructions-card" />
+
     <h2 class="section-title">Checkpoints <span class="count">{{ checkpoints.length }}</span></h2>
     <div v-if="checkpoints.length" class="list">
       <div v-for="c in checkpoints" :key="c.id" class="list-row checkpoint">
@@ -195,6 +247,24 @@ async function unregister() {
 <style scoped>
 .back {
   margin: -8px 0 10px -8px;
+}
+.task-row .btn {
+  margin-left: auto;
+}
+.task-title {
+  font-weight: 550;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.title-ic {
+  width: 16px;
+  height: 16px;
+  vertical-align: -2px;
+}
+.instructions-card {
+  margin-top: 22px;
 }
 .title-block {
   display: flex;

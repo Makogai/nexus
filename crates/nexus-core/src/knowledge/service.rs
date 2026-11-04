@@ -7,10 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use super::frontmatter::Value;
 use super::index::{self, Filter, Item, RefreshReport};
-use super::{Kind, NewDoc, Privacy, global_root, roots, store, timestamp};
+use super::{Kind, NewDoc, Privacy, global_root, roots, store};
 use crate::error::{CoreError, Result};
 use crate::workspace::Workspace;
-use crate::now_ms;
 
 /// Who is writing: humans (desktop, CLI) may create any kind; Claude (MCP) may create tasks, notes and decisions only —
 /// rules and workflows are human-governed (threat T19).
@@ -37,6 +36,9 @@ pub struct CreateInput {
     pub labels: Vec<String>,
     /// Global knowledge (constitutions) in the NEXUS data dir: applies to every workspace on this machine.
     pub global: bool,
+    /// Branch-aware knowledge (ADR-0018): the Git branch this is about and the commit it was recorded at.
+    pub branch: Option<String>,
+    pub commit: Option<String>,
 }
 
 pub fn refresh(conn: &Connection, data_dir: &Path, ws: &Workspace) -> Result<RefreshReport> {
@@ -67,6 +69,8 @@ pub fn create(conn: &Connection, data_dir: &Path, ws: &Workspace, input: &Create
         }
     };
     put("status", input.status.as_ref());
+    put("branch", input.branch.as_ref());
+    put("commit", input.commit.as_ref());
     if kind == Kind::Task {
         put("priority", input.priority.as_ref());
     }
@@ -102,7 +106,8 @@ pub fn create(conn: &Connection, data_dir: &Path, ws: &Workspace, input: &Create
     Ok(item)
 }
 
-/// Change a task's status (and optionally append a dated log line) with optimistic concurrency.
+/// Change a task's status (and optionally append a dated log line) with optimistic concurrency. Shorthand for
+/// [`super::tasks::update`] by a person.
 pub fn update_task(
     conn: &Connection,
     data_dir: &Path,
@@ -112,32 +117,8 @@ pub fn update_task(
     log: Option<&str>,
     expected_hash: Option<&str>,
 ) -> Result<Item> {
-    refresh(conn, data_dir, ws)?;
-    let item = index::get(conn, &ws.id, id)?;
-    if item.kind.as_deref() != Some("task") {
-        return Err(CoreError::invalid("only tasks can be updated this way"));
-    }
-    if let Some(s) = status
-        && !Kind::Task.statuses().contains(&s)
-    {
-        return Err(CoreError::invalid(format!("status must be one of {}", Kind::Task.statuses().join(", "))));
-    }
-    let privacy = index::root_privacy(conn, &item.path)?;
-    store::update(&item.path, expected_hash, privacy, |doc| {
-        if let Some(s) = status {
-            doc.fm.set("status", Value::Str(s.into()));
-        }
-        if let Some(line) = log.map(str::trim).filter(|l| !l.is_empty()) {
-            let line: String = line.chars().filter(|c| *c != '\n' && *c != '\r').take(500).collect();
-            if !doc.body.contains("\n## Log") && !doc.body.starts_with("## Log") {
-                doc.body = format!("{}\n\n## Log\n", doc.body.trim_end());
-            }
-            doc.body = format!("{}\n- {} {}\n", doc.body.trim_end(), &timestamp(now_ms())[..10], line);
-        }
-        Ok(())
-    })?;
-    refresh(conn, data_dir, ws)?;
-    index::get(conn, &ws.id, id)
+    let u = super::tasks::TaskUpdate { status, log, expected_hash, ..Default::default() };
+    super::tasks::update(conn, data_dir, ws, id, &u, Author::Human)
 }
 
 /// Approve the current version of an always-on rule for this machine.
@@ -187,6 +168,39 @@ pub fn read(conn: &Connection, ws: &Workspace, id: &str, max_body_chars: usize) 
 
 pub fn list(conn: &Connection, ws: &Workspace, kinds: &[Kind], include_invalid: bool) -> Result<Vec<Item>> {
     index::list(conn, &ws.id, &Filter { kinds: kinds.to_vec(), include_invalid, ..Default::default() })
+}
+
+/// Find a document by exact id, exact title (case-insensitive), or a unique end or start of its id (at least 4
+/// characters). Ids are UUIDv7 and time-ordered, so their *last* digits are the distinctive part (ADR-0013).
+pub fn resolve<'a>(items: &'a [Item], query: &str) -> Result<&'a Item> {
+    let q = query.trim().to_ascii_lowercase();
+    let id = |i: &Item| i.id.clone().unwrap_or_default();
+    if let Some(i) = items.iter().find(|i| id(i) == q) {
+        return Ok(i);
+    }
+    let by_title: Vec<&Item> = items.iter().filter(|i| i.title.eq_ignore_ascii_case(query.trim())).collect();
+    match by_title.len() {
+        1 => return Ok(by_title[0]),
+        n if n > 1 => return Err(CoreError::Conflict(format!("{n} documents are titled '{}'; use the id", query.trim()))),
+        _ => {}
+    }
+    if q.len() >= 4 {
+        for matcher in [|i: &str, q: &str| i.ends_with(q), |i: &str, q: &str| i.starts_with(q)] {
+            let found: Vec<&Item> = items.iter().filter(|i| matcher(&id(i), &q)).collect();
+            match found.len() {
+                1 => return Ok(found[0]),
+                n if n > 1 => return Err(CoreError::Conflict(format!("'{q}' matches {n} documents; use more characters"))),
+                _ => {}
+            }
+        }
+    }
+    Err(CoreError::not_found(format!("no document matches '{}'", query.trim())))
+}
+
+/// Short display form of a document id: its last 8 hex digits (the first ones are a timestamp).
+pub fn short_id(id: &str) -> String {
+    let hex: String = id.chars().filter(|c| *c != '-').collect();
+    hex[hex.len().saturating_sub(8)..].to_string()
 }
 
 /// Where a document sits in the context hierarchy (ADR-0017): `global`, `workspace`, `stack` or `project`.
@@ -270,6 +284,24 @@ mod tests {
         assert_eq!(view.fields["verification"], "unverified");
         assert_eq!(view.fields["source"], "claude");
         assert!(view.relative_path.starts_with(".nexus-local/knowledge/notes/"));
+    }
+
+    #[test]
+    fn documents_resolve_by_the_distinctive_end_of_their_id() {
+        let t = tempfile::tempdir().unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        let w = ws(&t, &conn);
+        let data = t.path().join("data");
+        let mk = |title: &str| create(&conn, &data, &w, &CreateInput { kind: "task".into(), title: title.into(), ..Default::default() }, Author::Human).unwrap();
+        let (a, b) = (mk("Alpha"), mk("Beta"));
+        let items = list(&conn, &w, &[], false).unwrap();
+        let (ida, idb) = (a.id.unwrap(), b.id.unwrap());
+        assert_eq!(&ida[..8], &idb[..8], "UUIDv7 ids created together share their start");
+        assert!(resolve(&items, &ida[..8]).is_err(), "an ambiguous prefix is refused");
+        assert_eq!(resolve(&items, &short_id(&idb)).unwrap().title, "Beta");
+        assert_eq!(resolve(&items, "alpha").unwrap().title, "Alpha");
+        assert_eq!(resolve(&items, &ida).unwrap().title, "Alpha");
+        assert!(resolve(&items, "zzzz").is_err());
     }
 
     #[test]
