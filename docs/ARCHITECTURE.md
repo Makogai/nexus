@@ -209,6 +209,8 @@ knowledge_fts(path, title, body)  /* FTS5 */                                    
 knowledge_approvals(path PK, content_hash, approved_at)                                               -- v5
 -- v6: sessions.task_id (session launched for a task, ADR-0018); knowledge_items.branch, commit_sha (branch-aware)
 -- v7: claude_profiles.isolate_instructions (ADR-0020)
+-- v9: kits(id, name, source_kind, location, git_ref, subdir, kind, version, content_hash, approved_hash, commit_sha, …),
+--     kit_profiles(kit_id FK, profile_id FK, skills_json, agents, commands, hooks, mcp, enabled_at) (ADR-0024)
 -- v8: memory_proposals(id, workspace_id, project_id, session_id FK, kind, title, body, source, branch, fingerprint, status, document_id, …) (ADR-0022)
 ```
 
@@ -235,6 +237,8 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Instructions | `instructions_inspect` (Claude's own instruction layers + NEXUS append, read-only) |
 | Resume | `project_resume` (verified Git state, saved history, next action — ADR-0021) |
 | Proposals | `knowledge_proposals` (extract + list pending), `knowledge_proposal_approve` (with edits/scope), `knowledge_proposal_reject` (ADR-0022) |
+| Diagnostics | `profile_diagnostics` (ADR-0023) |
+| Kits | `kit_list`, `kit_register` (local/Git), `kit_approve`, `kit_update`, `kit_remove`, `kit_enable` (selection), `kit_disable`, `kit_validate` (ADR-0024) |
 
 Tauri capabilities grant only `core:default`, `dialog:allow-open` (folder picker) and
 `opener:allow-open-path`/`allow-reveal-item-in-dir`. There is **no** generic filesystem or shell plugin:
@@ -258,7 +262,7 @@ every filesystem/process operation goes through a purpose-built, validated comma
 | Auth status | `claude auth status --json` (per profile env) | 1 | CLI absent |
 | NEXUS tools | `--mcp-config <generated file>` → `nexus mcp --session <id>` (implemented) | 2 ✅ | `disableSideloadFlags`, `allowManagedMcpServersOnly`, `strictPluginOnlyCustomization` |
 | Lifecycle capture | `--settings <generated file>` exec-form hooks → `nexus hook` (implemented, additive to user hooks — verified) | 2 ✅ | `allowManagedHooksOnly`, `disableAllHooks` |
-| Skills / AI Kits | `--plugin-dir <kit>` per session (no copying into config dirs) | 4–5 | `disableSideloadFlags`, `strictPluginOnlyCustomization` |
+| Skills / AI Kits | `--plugin-dir <overlay>` per session for profiles the kit is enabled for; overlay holds only selected skills; hooks/MCP opt-in (ADR-0024) | 4 ✅ | `disableSideloadFlags`, `strictPluginOnlyCustomization` (kits withheld); managed MCP/hook rules drop those parts |
 | Usage | OTel (personal profiles only, opt-in), transcript compat layer (labelled) | 5 | org-managed telemetry, format drift |
 
 Core features never depend on hooks or MCP. When policy blocks a surface, NEXUS shows *why* and keeps

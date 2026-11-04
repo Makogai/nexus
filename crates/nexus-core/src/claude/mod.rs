@@ -1,12 +1,14 @@
 //! Claude Code integration: installations, profiles, organisation policy, auth status and launch specs.
 
 pub mod auth;
+pub mod diagnostics;
 pub mod hooks;
 pub mod install;
 pub mod instructions;
 pub mod isolation;
 pub mod launch;
 pub mod mcp;
+pub mod plugin;
 pub mod policy;
 pub mod prepare;
 pub mod profile;

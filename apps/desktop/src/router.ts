@@ -10,6 +10,8 @@ export const router = createRouter({
     { path: '/knowledge', name: 'knowledge', component: () => import('./views/KnowledgeView.vue') },
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
     { path: '/profiles', name: 'profiles', component: () => import('./views/ProfilesView.vue') },
+    { path: '/profiles/:id', name: 'profile-diagnostics', component: () => import('./views/ProfileDiagnosticsView.vue'), props: true },
+    { path: '/kits', name: 'kits', component: () => import('./views/KitsView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

@@ -1,8 +1,10 @@
 //! `nexus` — the NEXUS command-line interface. Every command is a thin layer over `nexus-core`; nothing here
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
+mod diagnose;
 mod hook;
 mod instructions;
+mod kits;
 mod knowledge;
 mod launch;
 mod mcp;
@@ -56,6 +58,9 @@ enum Command {
     /// Tasks of the active workspace (Markdown files under tasks/).
     #[command(subcommand)]
     Tasks(knowledge::TasksCmd),
+    /// AI Kits: Claude Code plugins or skill folders, enabled per profile for NEXUS sessions.
+    #[command(subcommand)]
+    Kits(kits::KitCmd),
     /// Show the instruction files Claude loads for a profile and project (CLAUDE.md layers, rules, imports) and what
     /// NEXUS appends. Read-only.
     Instructions(instructions::InstructionsArgs),
@@ -129,6 +134,8 @@ enum ProfileCmd {
     Add(ProfileAddArgs),
     /// Show the sign-in status of a profile (`claude auth status` with the profile's environment).
     Status { profile: String },
+    /// What the profile's configuration contains: skills, agents, MCP servers, hooks, plugins, kits, settings, policy.
+    Diagnose { profile: String },
     /// Keep the default profile's personal instructions (~/.claude/CLAUDE.md, ~/.claude/rules) out of this profile's
     /// NEXUS sessions (session-scoped claudeMdExcludes; organisation-managed instructions are never affected).
     Isolate {
@@ -210,6 +217,7 @@ fn main() -> ExitCode {
         Command::Sessions(a) => cmd_sessions(&ctx, a).map(|_| 0),
         Command::Knowledge(c) => knowledge::cmd_knowledge(&ctx, c).map(|_| 0),
         Command::Tasks(c) => knowledge::cmd_tasks(&ctx, c).map(|_| 0),
+        Command::Kits(c) => kits::run(&ctx, c).map(|_| 0),
         Command::Instructions(a) => instructions::run(&ctx, a).map(|_| 0),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
@@ -576,6 +584,7 @@ fn cmd_profiles(ctx: &Ctx, cmd: ProfileCmd) -> nexus_core::Result<()> {
                 println!("{}: isolation off — Claude loads the default profile's home-folder instructions again", updated.name);
             }
         }
+        ProfileCmd::Diagnose { profile: q } => diagnose::run(ctx, &q)?,
         ProfileCmd::Status { profile: q } => {
             let list = profile::list(&conn, false)?;
             let p = resolve_ref(&list, &q, |p| &p.id, |p| &p.name, "profile")?;

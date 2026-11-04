@@ -124,6 +124,64 @@ pub fn remote_url(repo: &Path) -> Option<String> {
     out.success().then(|| redact_url(out.stdout_str().trim()))
 }
 
+/// Git URLs NEXUS clones kits from: `https://`, `ssh://`, `git@host:path` and `file://`. Transports that can run
+/// commands (`ext::`, `fd::`) and option-like values are refused.
+pub fn clone_url_allowed(url: &str) -> bool {
+    let u = url.trim();
+    !u.starts_with('-')
+        && !u.contains("::")
+        && !u.chars().any(|c| c.is_whitespace() || c.is_control())
+        && (u.starts_with("https://") || u.starts_with("ssh://") || u.starts_with("file://") || (u.starts_with("git@") && u.contains(':')))
+}
+
+fn git_long(repo: Option<&Path>, args: &[&str]) -> Result<proc::Output> {
+    let mut cmd = git_cmd(repo)?;
+    // Never execute transports that run commands, never prompt.
+    cmd.args(["-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never"]);
+    cmd.args(args);
+    proc::run(cmd, Duration::from_secs(180))
+}
+
+/// Shallow clone of `url` (one branch, no submodules) into `dest` (must not exist).
+pub fn clone_shallow(url: &str, dest: &Path, git_ref: Option<&str>) -> Result<()> {
+    if !clone_url_allowed(url) {
+        return Err(CoreError::invalid("only https://, ssh://, git@host:path and file:// Git URLs are supported"));
+    }
+    let dest_s = dest.to_string_lossy().into_owned();
+    let mut args = vec!["clone", "--quiet", "--depth", "1", "--single-branch", "--no-recurse-submodules"];
+    if let Some(r) = git_ref {
+        if r.starts_with('-') || r.contains("..") || r.chars().any(char::is_whitespace) {
+            return Err(CoreError::invalid("not a valid branch or tag name"));
+        }
+        args.extend(["--branch", r]);
+    }
+    args.extend(["--", url, &dest_s]);
+    let out = git_long(None, &args)?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git clone".into(), message: redact_url(&first_line(&out.stderr_str())) });
+    }
+    Ok(())
+}
+
+/// Fetch the followed ref of a NEXUS-owned checkout and move it there (the checkout is NEXUS's, not the user's).
+pub fn fetch_reset(dir: &Path, git_ref: Option<&str>) -> Result<String> {
+    let r = git_ref.unwrap_or("HEAD");
+    let out = git_long(Some(dir), &["fetch", "--quiet", "--depth", "1", "origin", r])?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git fetch".into(), message: redact_url(&first_line(&out.stderr_str())) });
+    }
+    let out = git_long(Some(dir), &["reset", "--quiet", "--hard", "FETCH_HEAD"])?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git reset".into(), message: first_line(&out.stderr_str()) });
+    }
+    head(dir).ok_or_else(|| CoreError::External { program: "git".into(), message: "no HEAD after update".into() })
+}
+
+pub fn head(dir: &Path) -> Option<String> {
+    let out = run_git(Some(dir), &["rev-parse", "HEAD"]).ok()?;
+    out.success().then(|| out.stdout_str().trim().to_string())
+}
+
 /// Commit ids reachable from HEAD, newest first, at most `max` (for branch-aware knowledge, ADR-0018). `None` when the
 /// folder is not a repository or has no commits.
 pub fn history(repo: &Path, max: usize) -> Option<Vec<String>> {

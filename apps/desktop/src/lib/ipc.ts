@@ -16,6 +16,11 @@ import type {
   InstructionsPreview,
   ProjectKnowledge,
   ResumeSummary,
+  Diagnostics,
+  KitProfileRow,
+  KitSelection,
+  KitValidation,
+  KitView,
   MemoryApproval,
   MemoryProposal,
   TaskUpdateInput,
@@ -138,6 +143,18 @@ export const api = {
   knowledgeProposalApprove: (workspaceId: string, id: string, approval: MemoryApproval) =>
     call<KnowledgeEntry>('knowledge_proposal_approve', { workspaceId, id, approval }),
   knowledgeProposalReject: (id: string) => call<void>('knowledge_proposal_reject', { id }),
+
+  profileDiagnostics: (profileId: string) => call<Diagnostics>('profile_diagnostics', { profileId }),
+  kitList: () => call<KitView[]>('kit_list'),
+  kitRegister: (args: { source: string; git: boolean; gitRef?: string | null; subdir?: string | null; plugin?: string | null }) =>
+    call<KitView>('kit_register', args),
+  kitApprove: (id: string) => call<KitView>('kit_approve', { id }),
+  kitUpdate: (id: string) => call<KitView>('kit_update', { id }),
+  kitRemove: (id: string) => call<void>('kit_remove', { id }),
+  kitEnable: (kitId: string, profileId: string, selection: KitSelection | null) =>
+    call<KitProfileRow>('kit_enable', { kitId, profileId, selection }),
+  kitDisable: (kitId: string, profileId: string) => call<void>('kit_disable', { kitId, profileId }),
+  kitValidate: (id: string, profileId?: string | null) => call<KitValidation>('kit_validate', { id, profileId }),
   instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),

@@ -37,6 +37,9 @@ pub struct Integrations {
     /// Profile instruction isolation applied to this session (ADR-0020).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub isolation: Option<super::prepare::Isolation>,
+    /// AI Kits given to (or withheld from) this session (ADR-0024).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kits: Vec<crate::kits::KitLaunch>,
 }
 
 impl IntegrationStatus {

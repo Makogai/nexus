@@ -27,3 +27,5 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0020](0020-profile-instruction-isolation-and-task-data.md) | Profile instruction isolation and task text as untrusted data | Accepted, implemented |
 | [0021](0021-resume-project.md) | Resume project: verified state, saved history, one evidence-based next step | Accepted, implemented |
 | [0022](0022-proposed-memories.md) | Proposed memories: deterministic extraction, human approval before knowledge | Accepted, implemented |
+| [0023](0023-profile-diagnostics.md) | Claude profile diagnostics: read-only, allowlisted, verified against Claude | Accepted, implemented |
+| [0024](0024-ai-kits.md) | AI Kits: reviewed plugins enabled per profile through session-scoped `--plugin-dir` | Accepted, implemented |

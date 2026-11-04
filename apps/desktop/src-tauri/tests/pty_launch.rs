@@ -99,6 +99,7 @@ fn launch(
             mcp_config: None,
             settings: None,
             context_prompt: None,
+            plugin_dirs: &[],
         },
         base,
     )

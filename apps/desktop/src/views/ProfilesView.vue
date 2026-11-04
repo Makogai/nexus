@@ -14,7 +14,9 @@ import {
   ScanSearch,
   ShieldAlert,
   Sparkles,
+  Stethoscope,
 } from '@lucide/vue'
+import { useRouter } from 'vue-router'
 import type { ClaudeProfile, DetectedProfile, PolicySummary, ProfileDialogMode } from '../lib/types'
 import { relativeTime, shortPath } from '../lib/format'
 import { useAppStore } from '../stores/app'
@@ -23,6 +25,7 @@ import ProfileDialog from '../components/ProfileDialog.vue'
 
 const app = useAppStore()
 const profiles = useProfileStore()
+const router = useRouter()
 
 const dialog = ref<{ open: boolean; mode: ProfileDialogMode; profile: ClaudeProfile | null; detected: DetectedProfile | null }>({
   open: false,
@@ -180,6 +183,7 @@ async function archive(p: ClaudeProfile) {
         <footer class="row">
           <span class="faint small">{{ p.defaultWorkProfile ? `Default rigor: ${p.defaultWorkProfile}` : '' }}</span>
           <span class="spacer" />
+          <button class="btn btn-sm" :data-diagnose="p.id" @click="router.push(`/profiles/${p.id}`)"><Stethoscope /> Diagnostics</button>
           <button class="btn btn-sm btn-primary" @click="app.openLaunch(null, p.id)">
             <Sparkles /> Launch with this profile
           </button>

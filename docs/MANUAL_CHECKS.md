@@ -61,7 +61,12 @@
     or launches as described.
 19. **Proposed memory**: in a session ask Claude to "record a NEXUS checkpoint of kind decision: we use X for Y",
     then `/exit` → *Knowledge → Proposals* shows it; nothing appears under *Decisions* until you approve it.
-20. Re-run the snapshot from step 1 → still unchanged (hooks, MCP and isolation are session-scoped, not profile edits).
+20. **Diagnostics** (read-only): *Claude profiles → Personal → Diagnostics* → skills, agents, MCP servers and plugins
+    match what `/mcp`, `/agents` and `/plugin` show in Claude; no secret values appear anywhere on the page.
+21. **AI Kit** (optional): register a local plugin folder in *AI Kits*, approve it, enable one skill for Personal →
+    a new NEXUS session of Personal lists `<kit>:<skill>` in `/skills`; a session of another profile does not; plain
+    `claude` outside NEXUS does not.
+22. Re-run the snapshot from step 1 → still unchanged (hooks, MCP, isolation and kits are session-scoped, not profile edits).
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

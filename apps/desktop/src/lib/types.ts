@@ -148,6 +148,9 @@ export interface PolicySummary {
   allowManagedPermissionRulesOnly: boolean
   bypassPermissionsDisabled: boolean
   managedTelemetry: boolean
+  managedClaudeMd?: boolean
+  claudeMdExcludes?: string[]
+  instructionFiles?: string | null
   unreadable: string[]
 }
 
@@ -520,5 +523,153 @@ export interface MemoryApproval {
   body?: string
   scope?: 'workspace' | 'project' | 'branch'
   localOnly?: boolean
+}
+
+// --- Profile diagnostics (ADR-0023) and AI Kits (ADR-0024) --------------------------------------------------------
+
+export interface InvEntry {
+  name: string
+  description: string
+  listingChars: number
+}
+
+export interface HookGroupInfo {
+  event: string
+  handlers: number
+  types: string[]
+  programs: string[]
+}
+
+export interface McpServerInfo {
+  name: string
+  transport: string
+  target: string
+  envVars: number
+  headers: number
+}
+
+export interface KitInventory {
+  name: string
+  version: string | null
+  description: string | null
+  kind: 'plugin' | 'skills'
+  skills: InvEntry[]
+  agents: InvEntry[]
+  commands: InvEntry[]
+  outputStyles: string[]
+  hooks: HookGroupInfo[]
+  mcpServers: McpServerInfo[]
+  files: number
+  bytes: number
+  problems: string[]
+}
+
+export interface DiagItem extends InvEntry {
+  source: 'user' | 'plugin' | 'kit'
+  origin: string | null
+}
+
+export interface Diagnostics {
+  profileId: string
+  profileName: string
+  configDir: string
+  defaultLocation: boolean
+  configExists: boolean
+  managedByNexus: boolean
+  isolateInstructions: boolean
+  executable: string | null
+  version: string | null
+  executableError: string | null
+  policy: PolicySummary
+  policyEffects: string[]
+  settings: {
+    path: string
+    exists: boolean
+    parseError: string | null
+    model: string | null
+    defaultPermissionMode: string | null
+    outputStyle: string | null
+    permissionRules: [number, number, number]
+    additionalDirectories: number
+    envNames: string[]
+    sensitiveEnvNames: string[]
+    apiKeyHelper: boolean
+    cloudCredentialHelper: boolean
+    statusLine: boolean
+    disableAllHooks: boolean
+    claudeMdExcludes: number
+    enabledPlugins: string[]
+    disabledPlugins: string[]
+    extraMarketplaces: string[]
+    otherKeys: string[]
+  }
+  memory: { claudeMdLines: number; claudeMdChars: number; rules: number; rulesChars: number }
+  skills: DiagItem[]
+  agents: DiagItem[]
+  commands: DiagItem[]
+  outputStyles: string[]
+  mcpServers: (McpServerInfo & { qualifiedName: string; scope: 'user' | 'local' | 'plugin' | 'managed' | 'kit'; origin: string | null })[]
+  hooks: (HookGroupInfo & { source: 'user' | 'plugin' | 'kit'; origin: string | null })[]
+  plugins: {
+    id: string
+    name: string
+    marketplace: string | null
+    version: string | null
+    scope: string | null
+    enabled: boolean
+    installed: boolean
+    installPath: string | null
+    skills: number
+    agents: number
+    commands: number
+    hooks: number
+    mcpServers: number
+    listingTokens: number
+    runsCode: boolean
+  }[]
+  marketplaces: { name: string; kind: string; location: string }[]
+  kits: { kitId: string; inventory: KitInventory; blocked: string | null }[]
+  context: { skillsTokens: number; agentsTokens: number; commandsTokens: number; memoryTokens: number; totalTokens: number }
+  warnings: string[]
+}
+
+export interface KitSelection {
+  skills: string[] | null
+  agents: boolean
+  commands: boolean
+  hooks: boolean
+  mcp: boolean
+}
+
+export interface KitProfileRow extends KitSelection {
+  kitId: string
+  profileId: string
+  enabledAt: number
+}
+
+export interface KitView {
+  id: string
+  name: string
+  sourceKind: 'local' | 'git'
+  location: string
+  gitRef: string | null
+  subdir: string
+  kind: 'plugin' | 'skills'
+  version: string | null
+  contentHash: string
+  approvedHash: string | null
+  commitSha: string | null
+  registeredAt: number
+  updatedAt: number
+  status: 'approved' | 'needs-review' | 'changed' | 'missing'
+  contentDir: string
+  inventory: KitInventory
+  profiles: KitProfileRow[]
+}
+
+export interface KitValidation {
+  ok: boolean
+  exitCode: number | null
+  output: string
 }
 

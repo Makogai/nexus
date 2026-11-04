@@ -46,7 +46,7 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | M11 | Session hosts + leases ✅ (ADR-0014); still open: reconciliation with `claude agents --json`, durable-session experiment (`--bg` + `attach`) | ADR update with measured behaviour |
 | M12 | MCP server v1 (workspace-scoped tools incl. `checkpoint`; 17 tools after M16–M19 + M18) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
 | M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): start/end, compaction recovery, activity counters, files, command categories, attention; policy-aware | merge semantics verified on 2.1.311; unit + CLI + desktop E2E + real-Claude hook test ✅ |
-| M14 | Profile diagnostics, allowlist clone, `ANTHROPIC_*` opt-in, settings validation | diagnostics fixture tests |
+| M14 | Profile diagnostics (ADR-0023): executable/version, policy effects, settings (allowlisted), memory, skills, agents, commands, MCP servers, hooks, plugins, marketplaces, kits, context estimate, warnings; desktop view + `nexus profiles diagnose` — allowlist clone ☐ | fixture tests + real-CLI comparison with the init event ✅ |
 | M15 | WSL shells; login-shell PATH resolution on macOS/Linux | per-platform CI job |
 
 ## Phase 3 — Knowledge and continuity
@@ -63,14 +63,14 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | --- | --- | --- |
 | M19 | Tasks as Markdown files + Kanban board; launch Claude from a task (project, profile, work profile, brief; desktop + `nexus launch --task`); MCP `get_task`/`update_task` (status, log, checklist, branch link) with optimistic concurrency; resume keeps the task (ADR-0018) | CLI E2E + desktop E2E with a NEXUS restart (`e2e/task-flow.mjs`) ✅ |
 | M20 | Effective-instructions inspector (ADR-0019): managed/user/ancestor/project/local CLAUDE.md, rules, imports, excludes in Claude's order; NEXUS append with duplicate suppression; `nexus instructions`, desktop panel | fixture tests + real-CLI comparison (`e2e/instructions-real-claude.mjs`) ✅ |
-| M21 | NEXUS Claude plugin (skills) via `--plugin-dir`; static workflows as skills + checkpoints — skills catalog in `get_context_index` ✅ | `claude plugin validate` in CI |
+| M21 | AI Kit & Skill Manager (ADR-0024; includes M23): local/Git kits, inventory, Claude validator, hash approval, per-profile enablement with skill selection, hooks/MCP opt-in, conflicts, policy-aware session-scoped `--plugin-dir` overlays; desktop view + `nexus kits` — NEXUS's own workflow skills ☐ | unit + CLI E2E + desktop E2E + real-CLI per-profile check ✅ |
 | M22 | Project creation wizard + stack templates | template snapshot tests |
 
 ## Phase 5 — Advanced integration
 
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
-| M23 | AI Kit registry: preview, per-profile association, session-scoped loading | Scenario C walkthrough |
+| M23 | ~~AI Kit registry~~ — delivered in M21 | — |
 | M24 | Process manager: approved (hash-pinned) commands, logs, process trees (Job Objects / process groups) | Scenario J; T6 tests |
 | M25 | Graphify adapter (detect graph, freshness, `graphify update`, MCP pass-through) | fixture graph |
 | M26 | Codex review adapter (`codex review` in isolated worktree) | Scenario M |
