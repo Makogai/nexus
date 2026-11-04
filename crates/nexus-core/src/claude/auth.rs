@@ -34,9 +34,14 @@ pub fn parse(stdout: &str) -> Option<AuthStatus> {
 }
 
 pub fn status(executable: &Path, profile: &ClaudeProfile) -> Result<AuthStatus> {
+    status_with_env(executable, profile, &env::current())
+}
+
+/// Same as [`status`] with an explicit parent environment (it is scrubbed exactly like a session launch).
+pub fn status_with_env(executable: &Path, profile: &ClaudeProfile, base_env: &[(String, String)]) -> Result<AuthStatus> {
     let mut cmd = proc::command(executable);
     cmd.args(["auth", "status", "--json"]);
-    let (child_env, _) = profile_env(profile, &env::current(), &[]);
+    let (child_env, _) = profile_env(profile, base_env, &[]);
     env::apply(&mut cmd, &child_env);
     let out = proc::run(cmd, Duration::from_secs(25))?;
     // A logged-out profile may exit non-zero but still print JSON.

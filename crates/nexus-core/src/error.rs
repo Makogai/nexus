@@ -14,6 +14,8 @@ pub enum CoreError {
     Unsupported(String),
     #[error("database error: {0}")]
     Db(#[from] rusqlite::Error),
+    #[error("database integrity problem: {0}")]
+    Corrupt(String),
     #[error("{action} {path}: {source}")]
     Io {
         action: &'static str,
@@ -40,6 +42,7 @@ impl CoreError {
             CoreError::Conflict(_) => "conflict",
             CoreError::Unsupported(_) => "unsupported",
             CoreError::Db(_) => "database",
+            CoreError::Corrupt(_) => "corrupt",
             CoreError::Io { .. } => "io",
             CoreError::Json { .. } => "json",
             CoreError::External { .. } => "external",

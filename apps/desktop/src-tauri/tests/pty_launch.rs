@@ -95,6 +95,7 @@ fn launch(
             nexus_session_id: id,
             workspace_id: Some("ws-1"),
             project_id: Some("pr-1"),
+            mcp_config: None,
         },
         base,
     )
@@ -121,10 +122,10 @@ fn launch(
 fn read_report(path: &Path) -> serde_json::Value {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        if let Ok(raw) = std::fs::read_to_string(path) {
-            if let Ok(v) = serde_json::from_str(&raw) {
-                return v;
-            }
+        if let Ok(raw) = std::fs::read_to_string(path)
+            && let Ok(v) = serde_json::from_str(&raw)
+        {
+            return v;
         }
         assert!(Instant::now() < deadline, "fake-claude never wrote its report");
         std::thread::sleep(Duration::from_millis(50));

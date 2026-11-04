@@ -121,9 +121,14 @@ pub fn inspect(path: &Path, source: InstallSource) -> Installation {
 
 /// `claude --version` → "2.1.311".
 pub fn version_of(path: &Path) -> Option<String> {
+    version_with_env(path, &env::current())
+}
+
+/// `claude --version` with an explicit parent environment (scrubbed with the Claude policy before use).
+pub fn version_with_env(path: &Path, base_env: &[(String, String)]) -> Option<String> {
     let mut cmd = proc::command(path);
     cmd.arg("--version");
-    let (env, _) = env::compose(&env::current(), &[], Policy::CLAUDE);
+    let (env, _) = env::compose(base_env, &[], Policy::CLAUDE);
     env::apply(&mut cmd, &env);
     let out = proc::run(cmd, Duration::from_secs(15)).ok()?;
     if !out.success() {

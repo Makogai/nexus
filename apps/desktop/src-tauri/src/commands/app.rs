@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tauri::State;
 
+use nexus_core::db::Recovery;
 use nexus_core::{db, git, settings};
 
 use crate::error::{IpcError, IpcResult, blocking};
@@ -16,6 +17,8 @@ pub struct AppInfo {
     pub schema_version: i64,
     pub git_version: Option<String>,
     pub home_dir: String,
+    /// The database was unreadable at startup and was moved aside (shown once to the user).
+    pub recovery: Option<Recovery>,
 }
 
 #[tauri::command]
@@ -31,6 +34,7 @@ pub async fn app_info(ctx: State<'_, Ctx>) -> IpcResult<AppInfo> {
             schema_version,
             git_version: git::version(),
             home_dir: ctx.home.display().to_string(),
+            recovery: ctx.recovery.clone(),
         })
     })
     .await

@@ -9,9 +9,12 @@ company repositories or the user's real NEXUS database in automated tests; every
 | --- | --- | --- | --- |
 | Rust unit | `cargo test -p nexus-core` | path validation, migrations, manifest I/O, stack detection, porcelain parsing, profile detection, policy parsing, launch-spec building, env scrubbing, session state transitions | `tempfile` dirs; synthetic homes/config dirs passed explicitly (no global `HOME` mutation) |
 | Rust integration | `cargo test -p nexus-core --test '*'`, `cargo test -p nexus-desktop` | real `git` against temp repos; real PTY spawn (echo round trip); full launch through the PTY of the `fake-claude` binary that prints argv + selected env as JSON | temp dirs, `NEXUS_DATA_DIR`-style explicit paths |
-| Frontend unit/component | `vitest` + `@vue/test-utils` + `happy-dom` | stores, formatting, fuzzy matcher, components with mocked IPC (`@tauri-apps/api/mocks`) | no Tauri runtime |
+| Frontend unit/component | `vitest` + `@vue/test-utils` + `happy-dom` | pure logic (fuzzy, format, launch defaults); LaunchDialog, ProfileDialog, SessionRow, CommandPalette mounted with real Pinia stores and a mocked `lib/ipc` boundary | no Tauri runtime |
 | Desktop E2E | `apps/desktop/e2e/smoke.mjs` over the WebView2 DevTools protocol (Windows, today); `tauri-driver` WebDriver for CI later | workspace → project → profile → UI launch → env isolation → exit → resume, against the real app | empty `NEXUS_DATA_DIR`, `fake-claude` profile, temp fixtures |
-| Security | part of unit/integration suites | hostile paths, injection strings in names, scrub list, malicious `core.fsmonitor`, policy-parser allowlist, newer-DB refusal | fixtures only |
+| Security | part of unit/integration suites | hostile paths, injection strings in names, scrub list in every letter case, helper spawns (`auth status`, `--version`) under a hostile parent env (`tests/isolation.rs`), golden argv, malicious `core.fsmonitor`, policy-parser allowlist, newer-DB refusal | fixtures only |
+| CLI end-to-end | `cargo test -p nexus-cli` | the real `nexus` binary: setup, launch isolation under a hostile parent env, exit-code propagation, `--resume last`, killed-host reconciliation, MCP binding, policy-blocked MCP, JSON-RPC over stdio | temp data dirs, fake-claude |
+| MCP interoperability | `node e2e/mcp-interop.mjs` | the official MCP TypeScript SDK client against `nexus mcp`: handshake, tools/list, annotations, calls, errors | temp data dir |
+| Storage reliability | `cargo test -p nexus-core db:: --test db_crash` | incremental migration with data, failed migration rolls back, FK-checked table rebuilds, backup + rotation, real-process crash (abort mid-transaction), garbage and page-damaged files quarantined | temp dirs |
 | Manual smoke | checklist below | things automation cannot see (TUI rendering, real auth) | user's real profiles, read-only, by the developer |
 
 ## The `fake-claude` test double
@@ -24,19 +27,25 @@ the real PTY code and assert on the JSON. This verifies profile-aware launching 
 ## End-to-end against the real app (Windows)
 
 WebView2 exposes the Chrome DevTools protocol when started with a debugging port, so the real app (real IPC,
-real PTY, real UI) can be driven without extra drivers. **Development only** — never enable this in production.
+real PTY, real UI) can be driven without extra drivers. **Development/CI only** — release builds must not honour it
+(release gate, threat T18).
+
+Self-contained run (what CI does) — production-mode frontend and CSP embedded in a debug build:
 
 ```bash
 cargo build -p fake-claude
 cd apps/desktop
-# Git Bash; use an EMPTY data dir so the smoke run starts from onboarding
-NEXUS_DATA_DIR="$TEMP/nexus-smoke" WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333 npm run tauri dev
-node e2e/smoke.mjs                      # 15 checks, prints SMOKE OK / SMOKE FAILED
-node e2e/cdp.mjs shot out.png           # ad-hoc: screenshot, eval, wait, send (keys), console
+npx tauri build --debug --no-bundle     # check the exit code: it fails on npm/crate version mismatches
+node e2e/run-smoke.mjs                  # starts the app with an empty temp database, 15 checks, stops the app
 ```
 
+Against a running dev app (for iterating on UI): start `npm run tauri dev` with an **empty** `NEXUS_DATA_DIR` and
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`, then `node e2e/smoke.mjs`.
+Ad hoc: `node e2e/cdp.mjs eval|wait|shot|send|console …`.
+
 Native folder pickers cannot be automated; the smoke test calls the same IPC commands they feed and drives
-everything else through the UI. Last run: 2026-11-04, 15/15 passed.
+everything else through the UI. It also checks cross-process behaviour: a checkpoint written by `nexus mcp` and a
+`nexus launch` session appear live in the running desktop. Last run: 2026-11-04, 18/18 passed (3 consecutive runs).
 
 ## Commands
 

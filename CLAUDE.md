@@ -9,8 +9,10 @@ milestone you are on. Open other docs only when the task touches them.
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cd apps/desktop && npm test && npm run typecheck && npx vite build
+cargo build -p nexus-cli                    # desktop sessions start `nexus mcp` from next to nexus-desktop.exe
 cd apps/desktop && npm run tauri dev        # use NEXUS_DATA_DIR=<empty dir> for an isolated database
-cd apps/desktop && node e2e/smoke.mjs       # needs the dev app running with CDP (docs/TESTING.md)
+cd apps/desktop && npx tauri build --debug --no-bundle && node e2e/run-smoke.mjs   # real-app E2E (Windows)
+cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `nexus mcp`
 ```
 
 ## Architecture rules
@@ -23,6 +25,10 @@ cd apps/desktop && node e2e/smoke.mjs       # needs the dev app running with CDP
 * New schema → append a migration in `crates/nexus-core/src/db/migrations/` (never edit a released one).
 * Claude integration is session-scoped CLI flags only (ADR-0004). Never write into a Claude config dir NEXUS did
   not create.
+* Every process that owns sessions is a session host (ADR-0014): register, heartbeat, `host::shutdown` on exit.
+* MCP tools stay workspace-scoped, bounded and free of exec/file/network access (ADR-0009).
+* Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
+  older Tauri crates than the npm packages and `tauri build` fails its version check.
 
 ## Security rules (non-negotiable)
 

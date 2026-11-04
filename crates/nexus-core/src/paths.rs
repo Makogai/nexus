@@ -61,7 +61,7 @@ pub fn validate_user_path(raw: &str, expect: Expect) -> Result<PathBuf> {
     if cfg!(windows) && normalized_seps.starts_with("\\\\") {
         return Err(CoreError::invalid("network (UNC) paths are not supported"));
     }
-    let path = PathBuf::from(raw);
+    let path = expand_home(raw)?;
     if !path.is_absolute() {
         return Err(CoreError::invalid("path must be absolute"));
     }
@@ -103,6 +103,17 @@ pub fn validate_user_path(raw: &str, expect: Expect) -> Result<PathBuf> {
             Ok(parent.join(name))
         }
     }
+}
+
+/// `~`, `~/x` and `~\x` → the home directory (shells like PowerShell do not expand `~` for native programs).
+fn expand_home(raw: &str) -> Result<PathBuf> {
+    if raw == "~" {
+        return home_dir();
+    }
+    if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
+        return Ok(home_dir()?.join(rest));
+    }
+    Ok(PathBuf::from(raw))
 }
 
 /// Resolve a relative path from untrusted content (e.g. a workspace manifest) inside `root`.
@@ -199,6 +210,15 @@ mod tests {
         let got = validate_user_path(&dotted, Expect::ExistingDir).unwrap();
         assert!(same_path(&got, &dunce::canonicalize(&sub).unwrap()));
         assert!(!got.to_string_lossy().starts_with(r"\\?\"));
+    }
+
+    #[test]
+    fn tilde_expands_to_home() {
+        let home = dunce::canonicalize(home_dir().unwrap()).unwrap();
+        assert!(same_path(&validate_user_path("~", Expect::ExistingDir).unwrap(), &home));
+        let p = validate_user_path("~/nexus-test-does-not-exist", Expect::DirOrCreatable).unwrap();
+        assert!(p.starts_with(&home));
+        assert!(validate_user_path("~user/x", Expect::DirOrCreatable).is_err(), "~user is not supported");
     }
 
     #[test]

@@ -35,6 +35,8 @@ export const useAppStore = defineStore('app', () => {
   const confirmRequest = ref<ConfirmRequest | null>(null)
   const paletteOpen = ref(false)
   const launchDialog = ref<{ open: boolean; projectId?: string | null; profileId?: string | null }>({ open: false })
+  /** Increments when another process (nexus CLI, MCP server) committed to the database (ADR-0009). */
+  const externalChanges = ref(0)
   let toastSeq = 0
 
   const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)')
@@ -102,6 +104,30 @@ export const useAppStore = defineStore('app', () => {
     confirmRequest.value = null
   }
 
+  let lastDataVersion: number | null = null
+  let watching: ReturnType<typeof setInterval> | undefined
+  /**
+   * Record the current `PRAGMA data_version` *before* the initial data load, so a write by another process
+   * between loading and the first poll is still detected (at worst one extra reload).
+   */
+  async function markDataBaseline() {
+    lastDataVersion = await api.dbDataVersion().catch(() => null)
+  }
+  /** Poll `PRAGMA data_version` (a few bytes) while the window is visible. */
+  function watchExternalChanges(intervalMs = 2000) {
+    if (watching) return
+    watching = setInterval(async () => {
+      if (document.visibilityState !== 'visible') return
+      try {
+        const v = await api.dbDataVersion()
+        if (lastDataVersion === null || v !== lastDataVersion) externalChanges.value++
+        lastDataVersion = v
+      } catch {
+        /* transient */
+      }
+    }, intervalMs)
+  }
+
   function openLaunch(projectId?: string | null, profileId?: string | null) {
     launchDialog.value = { open: true, projectId, profileId }
   }
@@ -115,6 +141,9 @@ export const useAppStore = defineStore('app', () => {
     confirmRequest,
     paletteOpen,
     launchDialog,
+    externalChanges,
+    markDataBaseline,
+    watchExternalChanges,
     load,
     toast,
     dismiss,

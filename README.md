@@ -22,9 +22,26 @@ native terminal experience.
 * Shell terminals (PowerShell, cmd, Git Bash, login shells on Unix) with tabs, resize, search and copy/paste.
 * Sessions survive NEXUS restarts as truthful records (*exited*, *interrupted*, …) and resume with
   `claude --resume` under the same profile and directory.
+* Claude gets NEXUS tools through a per-session MCP server (`nexus mcp`): workspace/project/session context, Git
+  status and checkpoints that appear live in the desktop. Omitted automatically when organisation policy forbids it.
 
 NEXUS never edits Claude configurations it did not create, never stores credentials and never runs repository
 scripts on its own.
+
+## Command line
+
+`nexus` (crate `crates/nexus-cli`) works without the desktop app and shares its database and rules:
+
+```bash
+nexus doctor                                   # health of NEXUS, git, Claude installs, profiles, workspace
+nexus workspaces create ~/nexus-personal --name Personal
+nexus projects add ~/code/my-game
+nexus profiles detect                          # read-only scan for ~/.claude and ~/.claude-*
+nexus profiles add --name Personal --config-dir ~/.claude-personal
+nexus launch -p Personal -w prototype          # Claude in this terminal, isolated like the desktop does it
+nexus launch --resume last                     # continue the last conversation in this folder
+nexus sessions                                 # desktop and terminal sessions; add --json for scripts
+```
 
 ## Build and run
 

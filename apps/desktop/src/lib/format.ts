@@ -55,20 +55,21 @@ export const stateLabel: Record<SessionState, string> = {
 /** One-line human description of where a session stands. */
 export function sessionStatus(s: SessionView): string {
   if (s.running) return 'Running'
+  if (s.liveElsewhere) return s.host === 'cli' ? 'Running in a terminal (nexus launch)' : `Running (${s.host})`
   switch (s.state) {
     case 'exited':
       return s.exitCode === 0 || s.exitCode === null ? 'Exited' : `Exited (code ${s.exitCode})`
     case 'failed':
       return s.error ? `Failed: ${s.error}` : 'Failed to start'
     case 'interrupted':
-      return 'Interrupted (NEXUS closed)'
+      return s.host === 'desktop' ? 'Interrupted (NEXUS closed)' : 'Interrupted (its terminal closed)'
     default:
       return stateLabel[s.state]
   }
 }
 
 export function sessionTone(s: SessionView): 'live' | 'ok' | 'warn' | 'error' | 'muted' {
-  if (s.running) return 'live'
+  if (s.running || s.liveElsewhere) return 'live'
   if (s.state === 'failed') return 'error'
   if (s.state === 'interrupted') return 'warn'
   if (s.state === 'exited' && s.exitCode !== 0 && s.exitCode !== null) return 'warn'

@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod install;
 pub mod launch;
+pub mod mcp;
 pub mod policy;
 pub mod profile;
 

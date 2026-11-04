@@ -173,10 +173,10 @@ fn read_registry_policies() -> Vec<(String, String)> {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     let mut out = Vec::new();
     for (hive, label) in [(HKEY_LOCAL_MACHINE, "HKLM"), (HKEY_CURRENT_USER, "HKCU")] {
-        if let Ok(key) = RegKey::predef(hive).open_subkey(r"SOFTWARE\Policies\ClaudeCode") {
-            if let Ok(value) = key.get_value::<String, _>("Settings") {
-                out.push((format!(r"{label}\SOFTWARE\Policies\ClaudeCode"), value));
-            }
+        if let Ok(key) = RegKey::predef(hive).open_subkey(r"SOFTWARE\Policies\ClaudeCode")
+            && let Ok(value) = key.get_value::<String, _>("Settings")
+        {
+            out.push((format!(r"{label}\SOFTWARE\Policies\ClaudeCode"), value));
         }
     }
     out

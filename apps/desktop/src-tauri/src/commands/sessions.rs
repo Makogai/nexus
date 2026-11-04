@@ -8,11 +8,14 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
 
 use nexus_core::claude::install;
+use nexus_core::claude::mcp::{self, Integrations, McpStatus};
+use nexus_core::claude::policy;
 use nexus_core::claude::launch::{self, LaunchRequest, Mode};
 use nexus_core::claude::profile::{self, ClaudeProfile};
-use nexus_core::env::{self, Policy, Reason};
+use nexus_core::env;
 use nexus_core::paths::{self, Expect};
 use nexus_core::session::{self, Kind, NewSession, Session};
+use nexus_core::host::HostKind;
 use nexus_core::{git, new_id, project, workprofile, workspace};
 
 use crate::error::{IpcError, IpcResult, blocking};
@@ -30,6 +33,8 @@ pub struct SessionView {
     /// A PTY for this session exists in this NEXUS process (its output can be attached).
     pub attached: bool,
     pub running: bool,
+    /// Live, but owned by another session host (e.g. `nexus launch` in a terminal): visible, not attachable here.
+    pub live_elsewhere: bool,
     /// Claude sessions: whether Claude recorded a conversation that `--resume` can continue.
     pub conversation_recorded: Option<bool>,
     pub resumable: bool,
@@ -43,10 +48,12 @@ fn view(ctx: &Ctx, s: Session, profiles: &HashMap<String, ClaudeProfile>) -> Ses
             .map(|p| session::conversation_recorded(&p.effective_config_dir(&ctx.home), csid)),
         _ => None,
     };
-    let resumable = !running && conversation_recorded == Some(true) && s.cwd.is_dir();
+    let live_elsewhere = !running && s.state.is_live() && s.host_id.as_deref() != Some(ctx.host.id.as_str());
+    let resumable = !running && !live_elsewhere && conversation_recorded == Some(true) && s.cwd.is_dir();
     SessionView {
         attached: running || ctx.pty.is_attached(&s.id),
         running,
+        live_elsewhere,
         conversation_recorded,
         resumable,
         session: s,
@@ -138,6 +145,16 @@ fn resolve_target(ctx: &Ctx, project_id: Option<&str>, cwd: Option<&str>) -> Ipc
     })
 }
 
+/// Session-scoped NEXUS MCP server, when the profile's organisation policy allows it (ADR-0004, ADR-0009).
+fn session_mcp(ctx: &Ctx, profile: &ClaudeProfile, nexus_id: &str) -> IpcResult<McpStatus> {
+    let pol = policy::evaluate(&profile.effective_config_dir(&ctx.home), &ctx.machine_policy);
+    let status = mcp::prepare(&pol, mcp::nexus_next_to_current_exe().as_deref(), &ctx.data_dir, nexus_id)?;
+    if let McpStatus::Blocked { reason } | McpStatus::Unavailable { reason } = &status {
+        tracing::info!(profile = %profile.name, %reason, "NEXUS MCP tools not enabled for this session");
+    }
+    Ok(status)
+}
+
 fn pty_size(cols: Option<u16>, rows: Option<u16>) -> (u16, u16) {
     (cols.unwrap_or(120), rows.unwrap_or(32))
 }
@@ -169,6 +186,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
 
         let nexus_id = new_id();
         let claude_session_id = uuid::Uuid::new_v4().to_string();
+        let mcp_status = session_mcp(&ctx, &profile, &nexus_id)?;
         let spec = launch::build(
             &LaunchRequest {
                 profile: &profile,
@@ -183,6 +201,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 nexus_session_id: &nexus_id,
                 workspace_id: target.workspace_id.as_deref(),
                 project_id: target.project_id.as_deref(),
+                mcp_config: mcp_status.config_path(),
             },
             &env::current(),
         )?;
@@ -195,6 +214,8 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 NewSession {
                     id: Some(nexus_id),
                     kind: Some(Kind::Claude),
+                    host: Some(HostKind::Desktop),
+                    host_id: Some(ctx.host.id.clone()),
                     workspace_id: target.workspace_id,
                     project_id: target.project_id.clone(),
                     profile_id: Some(profile.id.clone()),
@@ -209,6 +230,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                     resumed_from: None,
                 },
             )?;
+            session::set_integrations(&db, &s.id, &Integrations { mcp: mcp_status.clone() })?;
             profile::touch_used(&db, &profile.id)?;
             if let Some(pid) = &target.project_id {
                 project::touch_opened(&db, pid)?;
@@ -257,6 +279,7 @@ pub async fn session_resume(
         let exe = install::resolve(profile.executable.as_deref(), &ctx.home)?;
         let wp = prev.work_profile.as_deref().and_then(workprofile::get);
         let nexus_id = new_id();
+        let mcp_status = session_mcp(&ctx, &profile, &nexus_id)?;
         let spec = launch::build(
             &LaunchRequest {
                 profile: &profile,
@@ -271,6 +294,7 @@ pub async fn session_resume(
                 nexus_session_id: &nexus_id,
                 workspace_id: prev.workspace_id.as_deref(),
                 project_id: prev.project_id.as_deref(),
+                mcp_config: mcp_status.config_path(),
             },
             &env::current(),
         )?;
@@ -282,6 +306,8 @@ pub async fn session_resume(
                 NewSession {
                     id: Some(nexus_id),
                     kind: Some(Kind::Claude),
+                    host: Some(HostKind::Desktop),
+                    host_id: Some(ctx.host.id.clone()),
                     workspace_id: prev.workspace_id.clone(),
                     project_id: prev.project_id.clone(),
                     profile_id: Some(profile.id.clone()),
@@ -296,6 +322,7 @@ pub async fn session_resume(
                     resumed_from: Some(prev.id.clone()),
                 },
             )?;
+            session::set_integrations(&db, &s.id, &Integrations { mcp: mcp_status.clone() })?;
             profile::touch_used(&db, &profile.id)?;
             s
         };
@@ -344,15 +371,13 @@ pub async fn session_open_shell(app: AppHandle, ctx: State<'_, Ctx>, args: OpenS
             },
             (p, c) => resolve_target(&ctx, p, c)?,
         };
-        let set = vec![
-            ("TERM".to_string(), "xterm-256color".to_string(), Reason::Terminal),
-            ("COLORTERM".to_string(), "truecolor".to_string(), Reason::Terminal),
-        ];
-        let (child_env, _) = env::compose(&env::current(), &set, Policy::SHELL);
+        let child_env = env::shell_env(&env::current());
         let session = session::insert_starting(
             &ctx.db(),
             NewSession {
                 kind: Some(Kind::Shell),
+                host: Some(HostKind::Desktop),
+                host_id: Some(ctx.host.id.clone()),
                 workspace_id: target.workspace_id,
                 project_id: target.project_id,
                 title: format!("{} · {}", shell.name, target.default_title),

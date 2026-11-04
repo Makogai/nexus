@@ -156,6 +156,17 @@ pub fn compose(
     (env, changes)
 }
 
+/// Environment for an interactive shell terminal: the user's environment minus Claude session markers and stale
+/// NEXUS scope variables, plus terminal capabilities. Provider credentials and `CLAUDE_CONFIG_DIR` are the user's
+/// own shell configuration and are kept.
+pub fn shell_env(base: &[(String, String)]) -> Vec<(String, String)> {
+    let set = [
+        ("TERM".to_string(), "xterm-256color".to_string(), Reason::Terminal),
+        ("COLORTERM".to_string(), "truecolor".to_string(), Reason::Terminal),
+    ];
+    compose(base, &set, Policy::SHELL).0
+}
+
 /// Snapshot of this process's environment (skipping non-UTF-8 entries, which cannot be passed on reliably).
 pub fn current() -> Vec<(String, String)> {
     std::env::vars_os()
@@ -222,6 +233,66 @@ mod tests {
         assert_eq!(cfg[0].1, "/p");
         assert!(changes.iter().all(|c| c.action == EnvAction::Set || c.value.is_none()), "no removed values");
         assert!(!format!("{changes:?}").contains("secret") && !format!("{changes:?}").contains("sk-ambient"));
+    }
+
+    fn variants(name: &str) -> Vec<String> {
+        let lower = name.to_ascii_lowercase();
+        let mixed: String = name
+            .chars()
+            .enumerate()
+            .map(|(i, c)| if i % 2 == 0 { c.to_ascii_lowercase() } else { c })
+            .collect();
+        vec![name.to_string(), lower, mixed]
+    }
+
+    #[test]
+    fn every_scrubbed_name_is_removed_in_any_case() {
+        let mut must_go: Vec<&str> = SESSION_MARKERS.to_vec();
+        must_go.extend(PROVIDER_CREDENTIALS);
+        must_go.extend(NEXUS_SCOPE);
+        must_go.extend(["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_ENABLE_TELEMETRY", "OTEL_EXPORTER_OTLP_HEADERS", "OTEL_RESOURCE_ATTRIBUTES"]);
+        for name in must_go {
+            for v in variants(name) {
+                assert!(scrub_reason(&v, Policy::CLAUDE).is_some(), "{v} must not reach Claude");
+                let base = vec![(v.clone(), "x".to_string())];
+                let (env, _) = compose(&base, &[], Policy::CLAUDE);
+                assert!(env.is_empty(), "{v} survived compose");
+            }
+        }
+    }
+
+    #[test]
+    fn legitimate_configuration_is_kept() {
+        for name in [
+            "PATH",
+            "Path",
+            "HOME",
+            "USERPROFILE",
+            "SystemRoot",
+            "TEMP",
+            "CLAUDE_CODE_GIT_BASH_PATH",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "NEXUS_DATA_DIR",
+            "NEXUS_LOG",
+            "ANTHROPIC_MODEL",
+            "HTTPS_PROXY",
+        ] {
+            assert_eq!(scrub_reason(name, Policy::CLAUDE), None, "{name} is user configuration and must be kept");
+        }
+    }
+
+    #[test]
+    fn shell_env_keeps_user_config_but_drops_markers() {
+        let env = shell_env(&base());
+        let n = names(&env);
+        for gone in ["CLAUDECODE", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_CHILD_SESSION", "NEXUS_SESSION_ID"] {
+            assert!(!n.contains(&gone.to_string()), "{gone} reached a shell");
+        }
+        for kept in ["ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "NEXUS_DATA_DIR", "PATH"] {
+            assert!(n.contains(&kept.to_string()), "{kept} is the user's shell configuration");
+        }
+        assert!(env.iter().any(|(k, v)| k == "TERM" && v == "xterm-256color"));
     }
 
     #[test]
