@@ -29,3 +29,7 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0022](0022-proposed-memories.md) | Proposed memories: deterministic extraction, human approval before knowledge | Accepted, implemented |
 | [0023](0023-profile-diagnostics.md) | Claude profile diagnostics: read-only, allowlisted, verified against Claude | Accepted, implemented |
 | [0024](0024-ai-kits.md) | AI Kits: reviewed plugins enabled per profile through session-scoped `--plugin-dir` | Accepted, implemented |
+| [0025](0025-notifications-and-session-attention.md) | Notifications and session attention: reported signals only, one event sink, desktop delivery | Accepted, implemented |
+| [0026](0026-intelligence-subsystems.md) | Five intelligence subsystems (Constitutions, Context, Memory, Skills, Workflows) on shared infrastructure | Accepted |
+| [0027](0027-constitutions.md) | Constitutions: structured rule documents with stable ids, enforcement levels and scoped inheritance | Accepted, implemented |
+| [0028](0028-context-manager.md) | Context Manager: per-project strategies, cited retrieval from project docs, an inspector built on observation | Accepted, implemented |

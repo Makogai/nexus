@@ -17,7 +17,7 @@ use nexus_core::env;
 use nexus_core::paths::{self, Expect};
 use nexus_core::session::{self, Kind, NewSession, Session};
 use nexus_core::host::HostKind;
-use nexus_core::{git, new_id, project, workprofile, workspace};
+use nexus_core::{attention, git, new_id, notify, project, workprofile, workspace};
 
 use crate::error::{IpcError, IpcResult, blocking};
 use crate::pty::SpawnRequest;
@@ -39,6 +39,8 @@ pub struct SessionView {
     /// Claude sessions: whether Claude recorded a conversation that `--resume` can continue.
     pub conversation_recorded: Option<bool>,
     pub resumable: bool,
+    /// What the session needs from the user, from reported signals only (ADR-0025).
+    pub status: attention::SessionStatus,
 }
 
 fn view(ctx: &Ctx, s: Session, profiles: &HashMap<String, ClaudeProfile>) -> SessionView {
@@ -51,7 +53,9 @@ fn view(ctx: &Ctx, s: Session, profiles: &HashMap<String, ClaudeProfile>) -> Ses
     };
     let live_elsewhere = !running && s.state.is_live() && s.host_id.as_deref() != Some(ctx.host.id.as_str());
     let resumable = !running && !live_elsewhere && conversation_recorded == Some(true) && s.cwd.is_dir();
+    let status = attention::status(&s, running || live_elsewhere);
     SessionView {
+        status,
         attached: running || ctx.pty.is_attached(&s.id),
         running,
         live_elsewhere,
@@ -486,7 +490,8 @@ fn spawn(app: &AppHandle, ctx: &Ctx, session: &Session, req: SpawnRequest) -> Ip
     let ctx_exit = ctx.clone();
     let sid = session.id.clone();
     let on_exit = move |code: Option<i64>| {
-        if let Err(e) = session::mark_exited(&ctx_exit.db(), &sid, code) {
+        let stopped_by_user = ctx_exit.attention.take_stopped(&sid);
+        if let Err(e) = notify::session_exited(&ctx_exit.db(), &sid, code, stopped_by_user) {
             tracing::error!(session = %sid, error = %e, "cannot record session exit");
         }
         emit(&app_exit, &ctx_exit, &sid);
@@ -532,6 +537,8 @@ pub fn session_interrupt(ctx: State<'_, Ctx>, id: String) -> IpcResult<()> {
 /// Forcefully end a process NEXUS started. The UI asks for confirmation first.
 #[tauri::command]
 pub fn session_terminate(ctx: State<'_, Ctx>, id: String) -> IpcResult<()> {
+    // The user ended it: no "session interrupted" notification for that.
+    ctx.attention.mark_stopped(&id);
     ctx.pty.terminate(&id).map_err(IpcError::terminal)
 }
 

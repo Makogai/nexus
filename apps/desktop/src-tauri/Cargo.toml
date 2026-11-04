@@ -38,7 +38,12 @@ which.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 rfd = "0.17"
+tauri-winrt-notification = "0.8"
+windows = { version = "0.62", features = ["UI_Notifications"] }
 winreg = "0.56"
+
+[target."cfg(not(windows))".dependencies]
+tauri-plugin-notification = "2"
 
 [dev-dependencies]
 tempfile.workspace = true

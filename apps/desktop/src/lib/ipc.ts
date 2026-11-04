@@ -23,6 +23,25 @@ import type {
   KitView,
   MemoryApproval,
   MemoryProposal,
+  ContextAnalysis,
+  ContextConfig,
+  ContextReport,
+  ContextSettings,
+  ContextStrategy,
+  ProjectDocEntry,
+  ConstitutionHistory,
+  ConstitutionStructure,
+  ConstitutionSummary,
+  ConstitutionView,
+  EffectiveConstitution,
+  NewConstitution,
+  RuleHit,
+  AppNotification,
+  NotificationCounts,
+  NotificationFilter,
+  NotificationPrefs,
+  NotificationTarget,
+  NotifierAvailability,
   TaskUpdateInput,
   TaskView,
   LaunchOptions,
@@ -65,6 +84,10 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const SESSION_EVENT = 'nexus://session'
+/** The notification set changed (any process). */
+export const NOTIFICATIONS_EVENT = 'nexus://notifications'
+/** A desktop notification was clicked: payload = notification id. */
+export const NOTIFICATION_ACTIVATED_EVENT = 'nexus://notification-activated'
 
 export const api = {
   appInfo: () => call<AppInfo>('app_info'),
@@ -158,6 +181,40 @@ export const api = {
   instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
+
+  contextGet: (projectId: string) => call<ContextConfig>('context_get', { projectId }),
+  contextSet: (projectId: string, strategy: ContextStrategy, settings?: ContextSettings | null) =>
+    call<ContextConfig>('context_set', { projectId, strategy, settings: settings ?? null }),
+  contextPresets: () => call<[ContextStrategy, ContextSettings][]>('context_presets'),
+  contextAnalyze: (projectId: string) => call<ContextAnalysis>('context_analyze', { projectId }),
+  contextDocs: (projectId: string) => call<ProjectDocEntry[]>('context_docs', { projectId }),
+  contextInspect: (projectId: string, profileId: string | null) => call<ContextReport>('context_inspect', { projectId, profileId }),
+
+  constitutionList: (workspaceId: string) => call<ConstitutionSummary[]>('constitution_list', { workspaceId }),
+  constitutionGet: (workspaceId: string, id: string) => call<ConstitutionView>('constitution_get', { workspaceId, id }),
+  constitutionCreate: (workspaceId: string, input: NewConstitution) => call<ConstitutionView>('constitution_create', { workspaceId, input }),
+  constitutionSave: (workspaceId: string, id: string, structure: ConstitutionStructure, expectedHash: string) =>
+    call<ConstitutionView>('constitution_save', { workspaceId, id, structure, expectedHash }),
+  constitutionSaveRaw: (workspaceId: string, id: string, body: string, expectedHash: string) =>
+    call<ConstitutionView>('constitution_save_raw', { workspaceId, id, body, expectedHash }),
+  constitutionEffective: (workspaceId: string, projectId: string | null, taskId: string | null, includePending = false) =>
+    call<EffectiveConstitution>('constitution_effective', { workspaceId, projectId, taskId, includePending }),
+  constitutionSearch: (workspaceId: string, query: string) => call<RuleHit[]>('constitution_search', { workspaceId, query }),
+  constitutionHistory: (workspaceId: string, id: string) => call<ConstitutionHistory>('constitution_history', { workspaceId, id }),
+  constitutionVersion: (workspaceId: string, id: string, commit: string) => call<string>('constitution_version', { workspaceId, id, commit }),
+
+  notificationsList: (filter?: NotificationFilter) => call<AppNotification[]>('notifications_list', { filter }),
+  notificationsCounts: () => call<NotificationCounts>('notifications_counts'),
+  notificationsMarkRead: (ids: string[], all = false) => call<number>('notifications_mark_read', { ids, all }),
+  notificationsDismiss: (ids: string[]) => call<number>('notifications_dismiss', { ids }),
+  notificationsSnooze: (id: string, minutes: number) => call<void>('notifications_snooze', { id, minutes }),
+  notificationsPrefs: () => call<NotificationPrefs>('notifications_prefs'),
+  notificationsSetPrefs: (prefs: NotificationPrefs) => call<NotificationPrefs>('notifications_set_prefs', { prefs }),
+  notificationsSetView: (visibleSession: string | null, utcOffsetMinutes: number) =>
+    call<void>('notifications_set_view', { visibleSession, utcOffsetMinutes }),
+  notificationsAvailability: () => call<NotifierAvailability>('notifications_availability'),
+  notificationsTest: () => call<void>('notifications_test'),
+  notificationTarget: (id: string) => call<NotificationTarget>('notification_target', { id }),
 }
 
 export type Api = typeof api

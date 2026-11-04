@@ -1,6 +1,8 @@
 //! `nexus` — the NEXUS command-line interface. Every command is a thin layer over `nexus-core`; nothing here
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
+mod constitution;
+mod context;
 mod diagnose;
 mod hook;
 mod instructions;
@@ -8,6 +10,7 @@ mod kits;
 mod knowledge;
 mod launch;
 mod mcp;
+mod notifications;
 mod out;
 
 use std::path::PathBuf;
@@ -61,6 +64,15 @@ enum Command {
     /// AI Kits: Claude Code plugins or skill folders, enabled per profile for NEXUS sessions.
     #[command(subcommand)]
     Kits(kits::KitCmd),
+    /// Context Manager: a project's context strategy, onboarding analysis and the Context Inspector.
+    #[command(subcommand)]
+    Context(context::ContextCmd),
+    /// Constitutions: structured rules (articles, sections, rules with ids and enforcement) by scope.
+    #[command(subcommand)]
+    Constitution(constitution::ConstitutionCmd),
+    /// Notifications from sessions, tasks and reviews (the desktop's notification center).
+    #[command(subcommand)]
+    Notifications(notifications::NotificationsCmd),
     /// Show the instruction files Claude loads for a profile and project (CLAUDE.md layers, rules, imports) and what
     /// NEXUS appends. Read-only.
     Instructions(instructions::InstructionsArgs),
@@ -219,6 +231,9 @@ fn main() -> ExitCode {
         Command::Tasks(c) => knowledge::cmd_tasks(&ctx, c).map(|_| 0),
         Command::Kits(c) => kits::run(&ctx, c).map(|_| 0),
         Command::Instructions(a) => instructions::run(&ctx, a).map(|_| 0),
+        Command::Notifications(c) => notifications::run(&ctx, c).map(|_| 0),
+        Command::Constitution(c) => constitution::run(&ctx, c),
+        Command::Context(c) => context::run(&ctx, c).map(|_| 0),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),
@@ -632,9 +647,15 @@ fn cmd_sessions(ctx: &Ctx, a: SessionsArgs) -> nexus_core::Result<()> {
                 (session::State::Exited, Some(c)) if c != 0 => format!("exited ({c})"),
                 (st, _) => format!("{st:?}").to_lowercase(),
             };
+            let status = nexus_core::attention::status(s, s.state.is_live());
+            let attention = match (status.status, status.certainty) {
+                (_, "assumed") if s.state.is_live() => "running?".to_string(),
+                (st, _) => serde_json::to_value(st).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default(),
+            };
             vec![
                 out::short_id(&s.id),
                 state,
+                attention,
                 s.host.clone(),
                 s.profile_id
                     .as_ref()
@@ -646,6 +667,6 @@ fn cmd_sessions(ctx: &Ctx, a: SessionsArgs) -> nexus_core::Result<()> {
             ]
         })
         .collect();
-    out::table(&["ID", "STATE", "HOST", "PROFILE", "STARTED", "TITLE"], &rows);
+    out::table(&["ID", "STATE", "ATTENTION", "HOST", "PROFILE", "STARTED", "TITLE"], &rows);
     Ok(())
 }

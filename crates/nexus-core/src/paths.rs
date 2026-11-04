@@ -169,6 +169,17 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// `path` is `dir` or inside it (lexical, by components; case-insensitive and `/`≡`\` on Windows). No file access.
+pub fn is_within(path: &Path, dir: &Path) -> bool {
+    let norm = |p: &Path| {
+        let s = p.to_string_lossy().replace('\\', "/");
+        let s = s.trim_end_matches('/').to_string();
+        if cfg!(windows) { s.to_lowercase() } else { s }
+    };
+    let (p, d) = (norm(path), norm(dir));
+    !d.is_empty() && (p == d || p.starts_with(&format!("{d}/")))
+}
+
 fn canonicalize(path: &Path) -> Result<PathBuf> {
     dunce::canonicalize(path).map_err(|e| CoreError::io("cannot access", path, e))
 }

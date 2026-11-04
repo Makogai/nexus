@@ -4,8 +4,10 @@
 //! This crate has no dependency on Tauri, PTYs or any UI (see `docs/ARCHITECTURE.md`).
 
 pub mod activity;
+pub mod attention;
 pub mod checkpoint;
 pub mod claude;
+pub mod context;
 pub mod db;
 pub mod doctor;
 pub mod env;
@@ -14,6 +16,7 @@ pub mod git;
 pub mod host;
 pub mod kits;
 pub mod knowledge;
+pub mod notify;
 pub mod paths;
 pub mod proc;
 pub mod project;

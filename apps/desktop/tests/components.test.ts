@@ -127,11 +127,14 @@ function session(over: Partial<SessionView> = {}): SessionView {
     subagents: 0,
     lastActivityAt: null,
     attention: null,
+    attentionKind: null,
+    attentionAt: null,
     endReason: null,
     transcriptPath: null,
     taskId: null,
     conversationRecorded: true,
     resumable: true,
+    status: { status: 'completed', certainty: 'reported', since: null, detail: null },
     ...over,
   }
 }
@@ -374,7 +377,7 @@ describe('SessionRow', () => {
     expect(note?.attributes('title')).toBe(reason)
   })
 
-  it('shows turns, a live waiting-for-you badge and blocked hooks', () => {
+  it('shows turns, a reported attention badge and blocked hooks', () => {
     seed()
     const running = session({
       running: true,
@@ -382,17 +385,25 @@ describe('SessionRow', () => {
       endedAt: null,
       resumable: false,
       turns: 4,
-      attention: 'Claude needs your permission to use Bash',
+      attention: 'Permission requested: Bash',
+      attentionKind: 'permission',
+      status: { status: 'permission-required', certainty: 'reported', since: Date.now(), detail: 'Permission requested: Bash' },
       integrations: { mcp: { state: 'enabled' }, hooks: { state: 'blocked', reason: 'allowManagedHooksOnly' } },
     })
     const w = mountWith(SessionRow, { session: running })
     expect(w.text()).toContain('4 turns')
-    expect(w.find('.attention').attributes('title')).toBe('Claude needs your permission to use Bash')
+    expect(w.find('.attention').text()).toBe('Permission required')
+    expect(w.find('.attention').attributes('title')).toBe('Permission requested: Bash')
     expect(w.findAll('span').find((x) => x.text() === 'hooks off')?.attributes('title')).toBe('allowManagedHooksOnly')
     expect(w.findAll('span').some((x) => x.text() === 'NEXUS tools off')).toBe(false)
     // An ended session never shows a stale attention badge.
     const ended = mountWith(SessionRow, { session: session({ attention: 'stale', state: 'exited' }) })
     expect(ended.find('.attention').exists()).toBe(false)
+    // Silence is not a prompt: a quiet session shows no badge; without hooks the status is marked as unknown.
+    const quiet = mountWith(SessionRow, { session: session({ running: true, state: 'running', endedAt: null, status: { status: 'running', certainty: 'assumed', since: null, detail: null } }) })
+    expect(quiet.find('.attention').exists()).toBe(false)
+    const blind = mountWith(SessionRow, { session: session({ running: true, state: 'running', endedAt: null, status: { status: 'unknown', certainty: 'assumed', since: null, detail: 'NEXUS hooks are off' } }) })
+    expect(blind.find('.attention').text()).toBe('Unknown?')
   })
 
   it('a session owned by another host is shown as running without terminal controls', () => {

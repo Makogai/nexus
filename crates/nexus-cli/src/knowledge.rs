@@ -167,13 +167,13 @@ fn kinds(names: &[String]) -> nexus_core::Result<Vec<Kind>> {
         .collect()
 }
 
-fn find_project(conn: &nexus_core::db::Connection, ws: &Workspace, q: &str) -> nexus_core::Result<Project> {
+pub(crate) fn find_project(conn: &nexus_core::db::Connection, ws: &Workspace, q: &str) -> nexus_core::Result<Project> {
     let list = project::list(conn, &ws.id)?;
     resolve_ref(&list, q, |p| &p.id, |p| &p.name, "project").cloned()
 }
 
 /// Resolve an id, unique end/start of an id, or exact title to a document id (duplicates are reported by the service).
-fn find_id(conn: &nexus_core::db::Connection, ws: &Workspace, q: &str) -> nexus_core::Result<String> {
+pub(crate) fn find_id(conn: &nexus_core::db::Connection, ws: &Workspace, q: &str) -> nexus_core::Result<String> {
     let items: Vec<Item> = knowledge::list(conn, ws, &[], false)?.into_iter().filter(|i| i.id.is_some()).collect();
     Ok(knowledge::resolve(&items, q)?.id.clone().unwrap_or_default())
 }

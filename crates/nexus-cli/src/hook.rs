@@ -30,6 +30,10 @@ fn handle(ctx: &Ctx, session: &str, event: &str) -> Result<(), String> {
         return Ok(()); // no NEXUS database on this schema: nothing to record
     };
     let outcome = activity::handle(&conn, session, event, &payload).map_err(|e| e.to_string())?;
+    // Live cross-profile instruction bleed (threat T21): needs the home folder, which only the hook process knows.
+    if let (HookEvent::InstructionsLoaded, Some(path)) = (event, payload.get("file_path").and_then(Value::as_str)) {
+        let _ = nexus_core::context::inspector::check_bleed(&conn, session, path, &ctx.home);
+    }
     if let (HookEvent::SessionStart, Some(context)) = (event, outcome.additional_context) {
         let out = json!({ "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": context } });
         println!("{out}");

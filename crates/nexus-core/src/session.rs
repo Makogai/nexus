@@ -70,6 +70,9 @@ pub struct Session {
     pub last_activity_at: Option<i64>,
     /// Set while Claude waits for the user (Notification hook); cleared by the next activity.
     pub attention: Option<String>,
+    /// Structured attention reported by a supported hook (ADR-0025): `permission`, `input`, `idle`, `error`.
+    pub attention_kind: Option<String>,
+    pub attention_at: Option<i64>,
     pub end_reason: Option<String>,
     pub transcript_path: Option<PathBuf>,
     /// Knowledge task this session works on (ADR-0018).
@@ -119,7 +122,7 @@ pub struct NewSession {
 const SELECT: &str = "SELECT id, kind, workspace_id, project_id, profile_id, claude_session_id, title, cwd, branch,
     work_profile, effort, model, program, pid, state, exit_code, error, resumed_from, started_at, ended_at,
     archived_at, host, host_id, integrations, turns, prompts, subagents, last_activity_at, attention, end_reason,
-    transcript_path, task_id FROM sessions";
+    transcript_path, task_id, attention_kind, attention_at FROM sessions";
 
 fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
     let kind: String = r.get(1)?;
@@ -138,6 +141,8 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
         end_reason: r.get(29)?,
         transcript_path: r.get::<_, Option<String>>(30)?.map(PathBuf::from),
         task_id: r.get(31)?,
+        attention_kind: r.get(32)?,
+        attention_at: r.get(33)?,
         workspace_id: r.get(2)?,
         project_id: r.get(3)?,
         profile_id: r.get(4)?,

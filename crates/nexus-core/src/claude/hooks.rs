@@ -20,14 +20,30 @@ pub const SUBSCRIPTIONS: &[(&str, &str, Option<&str>)] = &[
     ("PreCompact", "pre-compact", None),
     ("Stop", "stop", None),
     ("UserPromptSubmit", "user-prompt", None),
-    // Only tools whose effects matter for continuity; reads and searches would only add process spawns.
-    ("PostToolUse", "post-tool-use", Some("Write|Edit|MultiEdit|NotebookEdit|Bash")),
+    // Only tools whose effects matter for continuity (and the answered question, which ends a wait); reads and
+    // searches would only add process spawns.
+    ("PostToolUse", "post-tool-use", Some("Write|Edit|MultiEdit|NotebookEdit|Bash|AskUserQuestion")),
     ("Notification", "notification", None),
     ("SubagentStop", "subagent-stop", None),
+    // Attention (ADR-0025). Observe-only: the handler prints nothing for these, so Claude's own dialogs decide.
+    ("PermissionRequest", "permission-request", None),
+    ("PreToolUse", "ask-user", Some("AskUserQuestion")),
+    ("Elicitation", "elicitation", None),
+    ("StopFailure", "stop-failure", None),
 ];
 
 /// Seconds Claude waits for one hook; NEXUS handlers finish in milliseconds.
 const TIMEOUT_SECS: u64 = 5;
+
+/// One exec-form handler: `nexus --data-dir <d> hook --session <id> <event>`.
+fn handler(nexus_exe: &Path, data_dir: &Path, nexus_session_id: &str, arg: &str) -> serde_json::Value {
+    json!({
+        "type": "command",
+        "command": nexus_exe.display().to_string(),
+        "args": ["--data-dir", data_dir.display().to_string(), "hook", "--session", nexus_session_id, arg],
+        "timeout": TIMEOUT_SECS,
+    })
+}
 
 pub fn blocked_by(policy: &PolicySummary) -> Option<&'static str> {
     if policy.disable_all_hooks {
@@ -43,13 +59,7 @@ pub fn blocked_by(policy: &PolicySummary) -> Option<&'static str> {
 pub fn settings_json(nexus_exe: &Path, data_dir: &Path, nexus_session_id: &str) -> Value {
     let mut hooks = serde_json::Map::new();
     for (event, arg, matcher) in SUBSCRIPTIONS {
-        let handler = json!({
-            "type": "command",
-            "command": nexus_exe.display().to_string(),
-            "args": ["--data-dir", data_dir.display().to_string(), "hook", "--session", nexus_session_id, arg],
-            "timeout": TIMEOUT_SECS,
-        });
-        let mut group = json!({ "hooks": [handler] });
+        let mut group = json!({ "hooks": [handler(nexus_exe, data_dir, nexus_session_id, arg)] });
         if let Some(m) = matcher {
             group["matcher"] = json!(m);
         }
@@ -60,7 +70,7 @@ pub fn settings_json(nexus_exe: &Path, data_dir: &Path, nexus_session_id: &str) 
 
 /// Decide and, when allowed, write the session's hook settings.
 pub fn prepare(policy: &PolicySummary, nexus_exe: Option<&Path>, data_dir: &Path, nexus_session_id: &str) -> Result<IntegrationStatus> {
-    Ok(prepare_session_settings(policy, nexus_exe, data_dir, nexus_session_id, &[])?.0)
+    Ok(prepare_session_settings(policy, nexus_exe, data_dir, nexus_session_id, &[], false)?.0)
 }
 
 /// The session's `--settings` file: NEXUS hooks (when policy allows them) and `claudeMdExcludes` for profile
@@ -72,6 +82,7 @@ pub fn prepare_session_settings(
     data_dir: &Path,
     nexus_session_id: &str,
     claude_md_excludes: &[String],
+    observe_instructions: bool,
 ) -> Result<(IntegrationStatus, Option<std::path::PathBuf>)> {
     uuid::Uuid::parse_str(nexus_session_id).map_err(|_| CoreError::invalid("session id must be a UUID"))?;
     let hooks: std::result::Result<&Path, IntegrationStatus> = match (blocked_by(policy), nexus_exe.filter(|e| e.is_file())) {
@@ -88,6 +99,10 @@ pub fn prepare_session_settings(
         Ok(exe) => settings_json(exe, data_dir, nexus_session_id),
         Err(_) => json!({}),
     };
+    // Context Inspector (ADR-0028): which instruction files Claude actually loads — only when the strategy asks.
+    if let (Ok(exe), true) = (&hooks, observe_instructions) {
+        doc["hooks"]["InstructionsLoaded"] = json!([{ "hooks": [handler(exe, data_dir, nexus_session_id, "instructions-loaded")] }]);
+    }
     if !claude_md_excludes.is_empty() {
         doc["claudeMdExcludes"] = json!(claude_md_excludes);
     }
@@ -120,7 +135,9 @@ mod tests {
         assert_eq!(start["command"], "/opt/nexus");
         let args: Vec<&str> = start["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
         assert_eq!(args, ["--data-dir", "/data", "hook", "--session", SID, "session-start"]);
-        assert_eq!(hooks["PostToolUse"][0]["matcher"], "Write|Edit|MultiEdit|NotebookEdit|Bash");
+        assert_eq!(hooks["PostToolUse"][0]["matcher"], "Write|Edit|MultiEdit|NotebookEdit|Bash|AskUserQuestion");
+        assert_eq!(hooks["PreToolUse"][0]["matcher"], "AskUserQuestion", "only the question tool, never a permission decision");
+        assert!(hooks["PermissionRequest"][0].get("matcher").is_none());
         assert!(hooks["Stop"][0].get("matcher").is_none());
     }
 

@@ -227,10 +227,124 @@ export interface SessionView {
   lastActivityAt: number | null
   /** Set while Claude waits for the user (Notification hook). */
   attention: string | null
+  /** Structured attention reported by a supported hook (ADR-0025). */
+  attentionKind: 'permission' | 'input' | 'idle' | 'error' | null
+  attentionAt: number | null
   endReason: string | null
   transcriptPath: string | null
   taskId: string | null
   conversationRecorded: boolean | null
+  resumable: boolean
+  status: SessionStatus
+}
+
+export type AttentionStatus =
+  | 'running'
+  | 'waiting-for-input'
+  | 'permission-required'
+  | 'idle'
+  | 'error'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'unknown'
+
+export interface SessionStatus {
+  status: AttentionStatus
+  /** `reported` by Claude/the process, or `assumed` (no signal — NEXUS never guesses prompts). */
+  certainty: 'reported' | 'assumed'
+  since: number | null
+  detail: string | null
+}
+
+export type NotificationCategory =
+  | 'input-required'
+  | 'permission-requested'
+  | 'agent-finished'
+  | 'task-completed'
+  | 'task-blocked'
+  | 'session-finished'
+  | 'session-interrupted'
+  | 'workflow-failed'
+  | 'process-issue'
+  | 'review-required'
+  | 'info'
+
+export type NotificationPriority = 'critical' | 'action' | 'success' | 'warning' | 'info'
+
+export interface AppNotification {
+  id: string
+  category: NotificationCategory
+  priority: NotificationPriority
+  source: string
+  title: string
+  body: string
+  workspaceId: string | null
+  projectId: string | null
+  profileId: string | null
+  sessionId: string | null
+  taskId: string | null
+  workflowId: string | null
+  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | null
+  targetId: string | null
+  dedupeKey: string | null
+  occurrences: number
+  createdAt: number
+  updatedAt: number
+  readAt: number | null
+  dismissedAt: number | null
+  snoozedUntil: number | null
+  resolvedAt: number | null
+  desktopState: 'pending' | 'sent' | 'suppressed'
+  desktopReason: string | null
+}
+
+export interface NotificationFilter {
+  workspaceId?: string | null
+  projectId?: string | null
+  profileId?: string | null
+  sessionId?: string | null
+  priority?: NotificationPriority | null
+  unreadOnly?: boolean
+  includeDismissed?: boolean
+  limit?: number
+}
+
+export interface NotificationCounts {
+  unread: number
+  actionRequired: number
+}
+
+export interface CategoryPref {
+  inApp: boolean
+  desktop: boolean
+}
+
+export interface NotificationPrefs {
+  desktopEnabled: boolean
+  sound: boolean
+  notifyFocusedSession: boolean
+  quietHours: [string, string] | null
+  categories: Record<NotificationCategory, CategoryPref>
+  mutedWorkspaces: string[]
+  mutedProfiles: string[]
+}
+
+export interface NotifierAvailability {
+  backend: string
+  available: boolean
+  reason: string | null
+  clickToOpen: boolean
+}
+
+export interface NotificationTarget {
+  kind: AppNotification['targetKind']
+  id: string | null
+  exists: boolean
+  workspaceId: string | null
+  projectId: string | null
+  attached: boolean
+  liveElsewhere: boolean
   resumable: boolean
 }
 
@@ -428,6 +542,149 @@ export interface LaunchRules {
   pendingApproval: string[]
   overBudget: string[]
   alreadyLoaded?: string[]
+  constitution?: ConstitutionDelivery | null
+}
+
+// --- Constitutions (ADR-0027) ------------------------------------------------------------------------------------
+
+export type Enforcement = 'mandatory' | 'rule' | 'guideline'
+export type ScopeLevel = 'global' | 'workspace' | 'stack' | 'project' | 'task'
+
+export interface CRule {
+  id: string
+  title: string
+  enforcement: Enforcement
+  enabled: boolean
+  overrides: string | null
+  text: string
+}
+
+export interface CSection {
+  title: string
+  text: string
+  rules: CRule[]
+}
+
+export interface CArticle {
+  title: string
+  text: string
+  sections: CSection[]
+}
+
+export interface ConstitutionStructure {
+  preamble: string
+  articles: CArticle[]
+}
+
+export interface ConstitutionProblem {
+  severity: 'error' | 'warning'
+  message: string
+  ruleId: string | null
+}
+
+export interface ConstitutionSummary {
+  id: string
+  title: string
+  scope: ScopeLevel
+  stacks: string[]
+  projectId: string | null
+  taskId: string | null
+  workflowId: string | null
+  applies: 'always' | 'on-demand'
+  status: string
+  prefix: string
+  approved: boolean
+  rules: number
+  mandatory: number
+  errors: number
+  warnings: number
+  relativePath: string
+  hash: string
+  updated: string | null
+}
+
+export interface RuleRef {
+  id: string
+  title: string
+  enforcement: Enforcement
+  docId: string
+  docTitle: string
+  scope: ScopeLevel
+}
+
+export interface ConstitutionView extends ConstitutionSummary {
+  structure: ConstitutionStructure
+  problems: ConstitutionProblem[]
+  body: string
+  appliesTo: { id: string; name: string }[]
+  otherRules: RuleRef[]
+}
+
+export interface EffectiveRule {
+  id: string
+  title: string
+  enforcement: Enforcement
+  text: string
+  article: string
+  section: string
+  docId: string
+  docTitle: string
+  scope: ScopeLevel
+  replaces: RuleRef | null
+}
+
+export interface ConstitutionConflict {
+  kind: 'mandatory-override' | 'same-scope-duplicate' | 'unknown-override' | 'invalid-document'
+  message: string
+  ruleId: string | null
+  docs: string[]
+}
+
+export interface RuleDoc {
+  id: string
+  title: string
+  scope: ScopeLevel
+  applies: string
+}
+
+export interface EffectiveConstitution {
+  rules: EffectiveRule[]
+  overridden: { rule: RuleRef; by: RuleRef; disabled: boolean }[]
+  conflicts: ConstitutionConflict[]
+  pending: RuleDoc[]
+  documents: RuleDoc[]
+}
+
+export interface ConstitutionDelivery {
+  text: string | null
+  included: string[]
+  onDemand: string[]
+  pendingApproval: string[]
+  conflicts: number
+}
+
+export interface RuleHit {
+  rule: RuleRef
+  article: string
+  section: string
+  snippet: string
+}
+
+export interface ConstitutionHistory {
+  available: boolean
+  reason: string | null
+  commits: { oid: string; summary: string; timestampMs: number }[]
+}
+
+export interface NewConstitution {
+  title: string
+  scope: ScopeLevel
+  stacks?: string[]
+  projectId?: string | null
+  taskId?: string | null
+  applies?: 'always' | 'on-demand' | null
+  prefix?: string | null
+  starter?: boolean
 }
 
 export interface InstructionsPreview {
@@ -673,3 +930,81 @@ export interface KitValidation {
   output: string
 }
 
+
+// --- Context Manager (ADR-0028) ----------------------------------------------------------------------------------
+
+export type ContextStrategy = 'minimal' | 'balanced' | 'deep' | 'custom'
+
+export interface ContextSettings {
+  alwaysRules: boolean
+  constitution: 'mandatory' | 'rules' | 'on-demand'
+  rulesBudget: number
+  startupSummary: boolean
+  startupIndex: boolean
+  checkpointsAtStart: boolean
+  startupChars: number
+  projectDocs: boolean
+  observeInstructions: boolean
+  retrievalLimit: number
+  retrievalChars: number
+}
+
+export interface ContextConfig {
+  projectId: string
+  strategy: ContextStrategy
+  settings: ContextSettings
+  configured: boolean
+  updatedAt: number | null
+}
+
+export interface ContextEstimate {
+  strategy: ContextStrategy
+  rulesChars: number
+  startupCharsMax: number
+  rulesInPrompt: number
+  onDemand: number
+}
+
+export interface ContextAnalysis {
+  projectId: string
+  project: string
+  docs: { files: number; bytes: number; sample: string[]; skipped: string[] }
+  instructions: { claudeMd: boolean; agentsMd: boolean; claudeDir: boolean }
+  knowledge: { rules: number; alwaysRules: number; openTasks: number; decisions: number; notes: number; specs: number; workflows: number; invalid: number; conflicts: number }
+  constitutionRules: number
+  constitutionMandatory: number
+  estimates: ContextEstimate[]
+  recommendation: ContextStrategy
+  reasons: string[]
+  configured: ContextStrategy | null
+}
+
+export interface ProjectDocEntry {
+  path: string
+  title: string
+  size: number
+  modifiedMs: number
+}
+
+export interface ContextReport {
+  configured: ContextConfig
+  predicted: InstructionsPreview | null
+  observed: {
+    session: { id: string; title: string; startedAt: number; profileId: string | null } | null
+    instructionsObserved: boolean
+    instructions: { path: string; memoryType: string; loadReason: string; predicted: boolean }[]
+    missing: string[]
+    nexus: { rules?: LaunchRules | null; task?: unknown; kits?: unknown; context?: { strategy: ContextStrategy; observeInstructions: boolean } | null } | null
+  }
+  onDemand: { knowledge: ContextAnalysis['knowledge']; projectDocs: number; constitutionRules: string[]; tools: string[] }
+  retrieved: { tool: string; results: number; chars: number; ids: string[]; at: number }[]
+  metrics: {
+    sessions: number
+    sessionsWithRetrieval: number
+    retrievals: number
+    chars: number
+    empty: number
+    byTool: [string, number][]
+    topDocuments: [string, number][]
+  }
+}

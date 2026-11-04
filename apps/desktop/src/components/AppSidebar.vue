@@ -1,24 +1,35 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { BookOpen, FolderGit2, House, Package, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
+import { Bell, BookOpen, FolderGit2, Gauge, House, Landmark, Package, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
 import { useAppStore } from '../stores/app'
+import { useNotificationStore } from '../stores/notifications'
 import { useSessionStore } from '../stores/sessions'
 
 const app = useAppStore()
 const sessions = useSessionStore()
+const notifications = useNotificationStore()
 const route = useRoute()
 
 const items = computed(() => [
   { to: '/', label: 'Home', icon: House, match: (p: string) => p === '/' },
   { to: '/projects', label: 'Projects', icon: FolderGit2, match: (p: string) => p.startsWith('/projects') },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen, match: (p: string) => p.startsWith('/knowledge') },
+  { to: '/constitutions', label: 'Constitutions', icon: Landmark, match: (p: string) => p.startsWith('/constitutions') },
+  { to: '/context', label: 'Context', icon: Gauge, match: (p: string) => p.startsWith('/context') },
   {
     to: '/sessions',
     label: 'Sessions',
     icon: SquareTerminal,
     match: (p: string) => p.startsWith('/sessions'),
     badge: sessions.running.length || undefined,
+  },
+  {
+    to: '/notifications',
+    label: 'Notifications',
+    icon: Bell,
+    match: (p: string) => p.startsWith('/notifications'),
+    badge: notifications.waitingCount || undefined,
   },
   { to: '/profiles', label: 'Claude profiles', icon: UserCog, match: (p: string) => p.startsWith('/profiles') },
   { to: '/kits', label: 'AI Kits', icon: Package, match: (p: string) => p.startsWith('/kits') },

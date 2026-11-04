@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { Archive, GitBranch, Pencil, RotateCcw, Sparkles, Square, SquareTerminal, SquareArrowOutUpRight } from '@lucide/vue'
 import type { IntegrationStatus, SessionView } from '../lib/types'
-import { duration, relativeTime, sessionStatus, sessionTone } from '../lib/format'
+import { attentionLabels, duration, needsUser, relativeTime, sessionStatus, sessionTone } from '../lib/format'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
 import { useProjectStore } from '../stores/projects'
@@ -94,7 +94,13 @@ async function archive() {
           <span class="pdot" :style="{ background: profile.color }" />{{ profile.name }}
         </span>
         <span v-if="workName" class="badge">{{ workName }}</span>
-        <span v-if="live && s.attention" class="badge badge-warn attention" :title="s.attention">Waiting for you</span>
+        <span
+          v-if="live && s.kind === 'claude' && s.status.status !== 'running'"
+          class="badge attention"
+          :class="{ 'badge-warn': needsUser(s.status), 'badge-accent': s.status.status === 'idle' }"
+          :data-attention="s.status.status"
+          :title="(s.status.detail ?? '') + (s.status.certainty === 'assumed' ? ' (not reported by Claude — NEXUS does not guess prompts)' : '')"
+        >{{ attentionLabels[s.status.status] }}<template v-if="s.status.certainty === 'assumed'">?</template></span>
         <span v-if="s.taskId && s.integrations?.task" class="chip task-chip" :title="`Launched for task “${s.integrations.task.title}”`">Task: {{ s.integrations.task.title }}</span>
       </div>
       <div class="meta">

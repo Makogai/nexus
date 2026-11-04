@@ -44,7 +44,7 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | --- | --- | --- |
 | M10 | `nexus` CLI: `doctor`, `workspaces`, `projects`, `profiles`, `sessions`, `launch` (reuses core; `launch` is a session host) | 5 end-to-end tests of the real binary incl. killed-host reconciliation ✅ |
 | M11 | Session hosts + leases ✅ (ADR-0014); still open: reconciliation with `claude agents --json`, durable-session experiment (`--bg` + `attach`) | ADR update with measured behaviour |
-| M12 | MCP server v1 (workspace-scoped tools incl. `checkpoint`; 17 tools after M16–M19 + M18) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
+| M12 | MCP server v1 (workspace-scoped tools incl. `checkpoint`; 19 tools after M16–M19, M18, `request_attention` and `get_constitution`) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
 | M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): start/end, compaction recovery, activity counters, files, command categories, attention; policy-aware | merge semantics verified on 2.1.311; unit + CLI + desktop E2E + real-Claude hook test ✅ |
 | M14 | Profile diagnostics (ADR-0023): executable/version, policy effects, settings (allowlisted), memory, skills, agents, commands, MCP servers, hooks, plugins, marketplaces, kits, context estimate, warnings; desktop view + `nexus profiles diagnose` — allowlist clone ☐ | fixture tests + real-CLI comparison with the init event ✅ |
 | M15 | WSL shells; login-shell PATH resolution on macOS/Linux | per-platform CI job |
@@ -76,6 +76,20 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | M26 | Codex review adapter (`codex review` in isolated worktree) | Scenario M |
 | M27 | Usage analytics with provenance | Scenario L; "unavailable" for org profiles |
 | M28 | Playwright integration | sample project |
+
+## Stage: Intelligence, Constitutions, Context & Notifications (owner specification, 2026-11-04)
+
+Branch `milestone/attention-constitutions-context`. Order set by the owner: notifications first, then the
+Constitution Manager, then the Context Manager. No workflow engine in this stage.
+
+| # | Milestone | Acceptance check | Status |
+| --- | --- | --- | --- |
+| A | Architecture alignment: five subsystems (Constitutions, Context, Memory, Skills, Workflows) mapped to existing modules, narrow interfaces, unified event sink (ADR-0026, ADR-0025) | ADRs reviewed against the code | ✅ |
+| B | Notification infrastructure: typed events, SQLite persistence (migration 0010), dedupe/rate limits/retention, notification center (bell, counts, inbox/history, filters, read/dismiss/snooze/open), preferences, `nexus notifications` | core + CLI + vitest | ✅ |
+| C | Claude attention: PermissionRequest / Notification / AskUserQuestion / Elicitation / Stop / StopFailure hooks (observe-only), MCP `request_attention`, ownership checks, session status with certainty, native desktop notifications with click routing, focus/quiet hours/mute, lifecycle producers | `e2e/attention.mjs` 23/23; real-CLI StopFailure; permission/question events with documented payloads (MANUAL_CHECKS 23) | ✅ |
+| D | Constitution Manager (ADR-0027): articles/sections/rules with stable ids, enforcement levels, scopes + inheritance (global → task), tree + Markdown editor, search, conflicts, effective-rules preview, applicable projects, Git history, approval of synced changes, launch delivery, MCP `get_constitution`, `nexus constitution` | core + CLI E2E + vitest + `e2e/constitutions.mjs` 13/13 | ✅ |
+| E | Context Manager (ADR-0028): onboarding analysis + wizard, strategies (minimal/balanced/deep/custom) with clamped custom sources and budgets, project docs as a cited FTS source (dedupe, freshness, indexed-only reads), InstructionsLoaded observation, retrieval recording, Context Inspector (configured / predicted / observed / on demand / retrieved), metrics, `nexus context` | core + CLI E2E + vitest + `e2e/context.mjs` 10/10 + `e2e/context-real-claude.mjs` (observed == predicted on the real CLI) | ✅ |
+| F | Integration: live cross-profile bleed warning from observed instructions (T21 → notification → isolation), constitution delivery per strategy, review notifications open the Constitution Manager, project page → Context | real CLI: `security-real-claude.mjs` bleed checks | ✅ |
 
 ## Phase 6 — Product maturity
 

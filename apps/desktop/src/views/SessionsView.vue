@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onActivated, ref } from 'vue'
+import { computed, nextTick, onActivated, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Info, SquareTerminal } from '@lucide/vue'
 import { useSessionStore } from '../stores/sessions'
 import { useWorkspaceStore } from '../stores/workspaces'
@@ -28,6 +29,25 @@ const visible = computed(() =>
 const labels: Record<FilterKey, string> = { all: 'All', running: 'Running', resumable: 'Resumable', ended: 'Ended' }
 
 onActivated(() => sessions.load().catch(() => undefined))
+
+// Opened from a notification: show and highlight that session.
+const route = useRoute()
+const highlighted = ref<string | null>(null)
+watch(
+  () => [route.name, route.query.focus],
+  async () => {
+    const id = route.name === 'sessions' && typeof route.query.focus === 'string' ? route.query.focus : null
+    if (!id) return
+    const s = sessions.byId[id]
+    if (s && s.workspaceId !== workspaces.active?.id) allWorkspaces.value = true
+    filter.value = 'all'
+    highlighted.value = id
+    await nextTick()
+    document.querySelector(`[data-session="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' })
+    setTimeout(() => (highlighted.value = null), 4000)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -58,7 +78,7 @@ onActivated(() => sessions.load().catch(() => undefined))
     </div>
 
     <div v-if="visible.length" class="list">
-      <SessionRow v-for="s in visible" :key="s.id" :session="s" />
+      <SessionRow v-for="s in visible" :key="s.id" :session="s" :data-session="s.id" :class="{ highlighted: highlighted === s.id }" />
     </div>
     <div v-else class="empty">
       <SquareTerminal class="empty-icon" />
@@ -71,6 +91,11 @@ onActivated(() => sessions.load().catch(() => undefined))
 </template>
 
 <style scoped>
+.list :deep(.highlighted) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
 .filters {
   display: flex;
   gap: 6px;

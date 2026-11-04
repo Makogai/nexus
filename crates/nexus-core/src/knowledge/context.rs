@@ -17,6 +17,8 @@ use super::{Kind, roots, store};
 use crate::error::Result;
 
 pub const MAX_ALWAYS_RULES_CHARS: usize = 1500;
+/// Constitutions always get at least this much room (mandatory policies are at least named).
+pub const MIN_CONSTITUTION_CHARS: usize = 600;
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +33,9 @@ pub struct LaunchRules {
     /// Always-on rules skipped because their text is already in an instruction file Claude loads (ADR-0019).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub already_loaded: Vec<String>,
+    /// Constitutions (ADR-0027): what of the effective rules reached the prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constitution: Option<super::constitution::Delivery>,
 }
 
 /// Refresh the workspace's knowledge index and compute the always-on rules for a launch.
@@ -46,7 +51,29 @@ pub fn prepare_launch(
 }
 
 pub fn launch_rules(conn: &Connection, workspace_id: &str, project: Option<(&str, &[String])>) -> Result<LaunchRules> {
-    launch_rules_with(conn, workspace_id, project, None)
+    launch_rules_with(conn, workspace_id, project, None, None, &RuleOptions::default())
+}
+
+/// How rules are delivered at launch — from the project's context strategy (ADR-0028).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RuleOptions {
+    /// Append approved always-on rule documents (else name them for on-demand reading).
+    pub plain_rules: bool,
+    pub constitution: crate::context::ConstitutionDelivery,
+    /// Characters for rules + constitutions.
+    pub budget: usize,
+}
+
+impl Default for RuleOptions {
+    fn default() -> Self {
+        RuleOptions::from(&crate::context::Settings::default())
+    }
+}
+
+impl From<&crate::context::Settings> for RuleOptions {
+    fn from(s: &crate::context::Settings) -> Self {
+        RuleOptions { plain_rules: s.always_rules, constitution: s.constitution, budget: s.rules_budget }
+    }
 }
 
 /// Like [`launch_rules`], skipping rules whose body is already part of an instruction file Claude loads itself, so
@@ -56,15 +83,18 @@ pub fn launch_rules_with(
     workspace_id: &str,
     project: Option<(&str, &[String])>,
     loaded: Option<&crate::claude::instructions::Inspection>,
+    task_id: Option<&str>,
+    opts: &RuleOptions,
 ) -> Result<LaunchRules> {
     let mut out = LaunchRules::default();
+    let constitutions = super::constitution::paths(conn, workspace_id)?;
     let always: Vec<Item> = index::effective_rules(conn, workspace_id, project)?
         .into_iter()
         .filter(|r| r.applies.as_deref() == Some("always"))
         .collect();
     let mut text = String::from("NEXUS rules (always apply; from the user's NEXUS knowledge):");
     let header = text.len();
-    for r in always {
+    for r in always.into_iter().filter(|r| !constitutions.contains(&r.path)) {
         if !index::is_approved(conn, &r)? {
             out.pending_approval.push(r.title.clone());
             continue;
@@ -81,21 +111,49 @@ pub fn launch_rules_with(
             continue;
         }
         let block = format!("\n\n### {}\n{}", r.title, doc.body.trim());
-        if text.chars().count() + block.chars().count() > MAX_ALWAYS_RULES_CHARS {
+        if !opts.plain_rules || text.chars().count() + block.chars().count() > opts.budget {
             out.over_budget.push(format!("{} (id {})", r.title, r.id.clone().unwrap_or_default()));
             continue;
         }
         text.push_str(&block);
         out.included.push(r.title.clone());
     }
-    if !out.over_budget.is_empty() {
-        text.push_str(&format!(
-            "\n\n(More always-on rules did not fit; read them with the NEXUS get_document tool: {}.)",
-            out.over_budget.join("; ")
-        ));
+    let mut parts: Vec<String> = Vec::new();
+    if !opts.plain_rules {
+        // On demand by the project's context strategy (ADR-0028): one compact line with the titles only.
+        if !out.over_budget.is_empty() {
+            let titles: Vec<String> = out.over_budget.iter().map(|t| t.rsplit_once(" (id ").map(|(t, _)| t.to_string()).unwrap_or_else(|| t.clone())).collect();
+            parts.push(format!("NEXUS rules on demand (get_context_index, get_document): {}.", titles.join("; ")));
+        }
+    } else if !out.over_budget.is_empty() {
+        text.push_str(&format!("\n\n(More always-on rules did not fit; read them with the NEXUS get_document tool: {}.)", out.over_budget.join("; ")));
     }
     if text.len() > header {
-        out.text = Some(text);
+        parts.push(text);
+    }
+    // Constitutions: structured, effective rules (mandatory first), bounded by what the plain rules left.
+    if !constitutions.is_empty() {
+        let mut e = super::constitution::effective_indexed(conn, workspace_id, &super::constitution::Target { project, task_id, include_pending: false })?;
+        if let Some(inspection) = loaded {
+            e.rules.retain(|r| match inspection.containing(r.text.trim()).filter(|_| r.text.trim().len() >= 20) {
+                Some(layer) => {
+                    let file = layer.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    out.already_loaded.push(format!("{} (in {file})", r.id));
+                    false
+                }
+                None => true,
+            });
+        }
+        let used: usize = parts.iter().map(|p| p.chars().count()).sum();
+        let budget = opts.budget.saturating_sub(used).max(MIN_CONSTITUTION_CHARS);
+        let d = super::constitution::delivery(&e, budget, true, opts.constitution);
+        out.pending_approval.extend(d.pending_approval.iter().cloned());
+        parts.extend(d.text.clone());
+        out.included.extend(d.included.iter().cloned());
+        out.constitution = Some(d);
+    }
+    if !parts.is_empty() {
+        out.text = Some(parts.join("\n\n"));
     }
     Ok(out)
 }

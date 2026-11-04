@@ -123,6 +123,14 @@ pub struct NexusAppend {
     pub isolation_excludes: Vec<String>,
 }
 
+/// The context strategy a session was launched with (ADR-0028).
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextLaunch {
+    pub strategy: crate::context::Strategy,
+    pub observe_instructions: bool,
+}
+
 pub struct PreviewRequest<'a> {
     pub conn: &'a Connection,
     pub data_dir: &'a Path,
@@ -154,7 +162,8 @@ pub fn preview(r: &PreviewRequest<'_>) -> Result<Preview> {
         let project = r.project_id.and_then(|id| project::get(r.conn, id).ok());
         let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
         let scope = project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice()));
-        let rules = context::launch_rules_with(r.conn, &ws.id, scope, Some(&claude))?;
+        let ctx = crate::context::settings_for(r.conn, r.project_id);
+        let rules = context::launch_rules_with(r.conn, &ws.id, scope, Some(&claude), r.task_id, &context::RuleOptions::from(&ctx))?;
         if let Some(tid) = r.task_id {
             let v = tasks::view(r.conn, &ws, tid, 4000)?;
             nexus.task_brief_chars = tasks::pointer(&v.id, "session-start").chars().count();
@@ -171,7 +180,9 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
     let (inspection, pol) = inspect_instructions(r.home, r.profile, r.machine, r.cwd, r.base_env);
     let mcp = mcp::prepare(&pol, r.nexus_exe, r.data_dir, r.nexus_session_id)?;
     let excludes = isolation_excludes(r.home, r.profile, r.cwd);
-    let (hooks, settings) = hooks::prepare_session_settings(&pol, r.nexus_exe, r.data_dir, r.nexus_session_id, &excludes)?;
+    let ctx = crate::context::settings_for(r.conn, r.project_id);
+    let strategy = r.project_id.and_then(|p| crate::context::get(r.conn, p).ok()).map(|c| c.strategy).unwrap_or_default();
+    let (hooks, settings) = hooks::prepare_session_settings(&pol, r.nexus_exe, r.data_dir, r.nexus_session_id, &excludes, ctx.observe_instructions)?;
     let isolation = (!excludes.is_empty()).then(|| Isolation { claude_md_excludes: excludes.clone() });
     let (plugin_dirs, kit_launches) = crate::kits::session_plugin_dirs(r.conn, r.data_dir, &r.profile.id, &pol)?;
     let ws = r.workspace_id.and_then(|id| workspace::get(r.conn, id).ok()).filter(|w| w.available);
@@ -184,8 +195,22 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
             service::refresh(r.conn, r.data_dir, ws)?;
             let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
             let scope = project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice()));
-            let lr = context::launch_rules_with(r.conn, &ws.id, scope, Some(&inspection))?;
+            let lr = context::launch_rules_with(r.conn, &ws.id, scope, Some(&inspection), r.task_id, &context::RuleOptions::from(&ctx))?;
             parts.extend(lr.text.clone());
+            if !lr.pending_approval.is_empty() {
+                // Synced rule changes are not used until reviewed (T19): make the review queue visible.
+                let mut e = crate::notify::NewEvent::new(
+                    crate::notify::Category::ReviewRequired,
+                    "knowledge",
+                    format!("{} rule document(s) changed and wait for your approval", lr.pending_approval.len()),
+                )
+                .body(lr.pending_approval.join(", "))
+                .target("rules", ws.id.clone())
+                .dedupe(format!("rules:{}", ws.id));
+                e.workspace_id = Some(ws.id.clone());
+                e.project_id = r.project_id.map(str::to_string);
+                let _ = crate::notify::publish(r.conn, e);
+            }
             rules = Some(lr);
             if let Some(tid) = r.task_id {
                 let v = tasks::view(r.conn, ws, tid, 4000)?;
@@ -216,8 +241,17 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
         None if r.task_id.is_some() => return Err(CoreError::invalid("a task can only be launched in its workspace")),
         None => {}
     }
+    let observing = ctx.observe_instructions && matches!(hooks, IntegrationStatus::Enabled { .. });
     Ok(Prepared {
-        integrations: Integrations { mcp, hooks, rules, task, isolation, kits: kit_launches },
+        integrations: Integrations {
+            mcp,
+            hooks,
+            rules,
+            task,
+            isolation,
+            kits: kit_launches,
+            context: Some(ContextLaunch { strategy, observe_instructions: observing }),
+        },
         prompt: (!parts.is_empty()).then(|| parts.join("\n\n")),
         settings,
         plugin_dirs,

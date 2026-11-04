@@ -110,6 +110,10 @@ console.log(`claude ${spawnSync(claude, ['--version'], { encoding: 'utf8', env: 
 const off = realClaude(nexusArgs([]).filter((a, i, all) => !['--mcp-config'].includes(a) && !['--mcp-config'].includes(all[i - 1])), 'off')
 check('control: without isolation Claude loads the default profile’s files in the Work profile session', personal(off.loaded).length === 3, personal(off.loaded).map(rel).join(', '))
 check('inspector predicts the unisolated set exactly', same(off.loaded, predicted()))
+// ADR-0028: NEXUS's own InstructionsLoaded hook (in its session settings) sees the bleed live and warns.
+const bleed = () => JSON.parse(cli(['--json', 'notifications', 'list', '--all'])).notifications.filter((n) => n.dedupeKey?.startsWith('bleed:'))
+const offBleed = bleed()
+check('the live bleed raises a warning that points at instruction isolation', offBleed.length === 3 && offBleed.every((n) => n.title.includes('default profile') && n.targetKind === 'profile'), offBleed.map((n) => n.body).join(' | '))
 cli(['profiles', 'isolate', 'Work'])
 const isoArgs = nexusArgs([])
 const settingsPath = isoArgs[isoArgs.indexOf('--settings') + 1]
@@ -119,6 +123,7 @@ const on = realClaude(isoArgs.filter((a, i, all) => a !== '--mcp-config' && all[
 check('with isolation the real Claude loads none of the default profile’s files', personal(on.loaded).length === 0, personal(on.loaded).map(rel).join(', '))
 check('project instructions still load', on.loaded.has(norm(join(proj, 'CLAUDE.md'))) && on.loaded.has(norm(join(proj, '.claude', 'rules', 'project-rule.md'))))
 check('inspector predicts the isolated set exactly', same(on.loaded, predicted()), [...on.loaded].map(rel).join(', '))
+check('…and with isolation no new bleed warning', bleed().length === offBleed.length)
 cli(['profiles', 'isolate', 'Work', '--off'])
 
 // ---- B. task text as data ---------------------------------------------------------------------------------------

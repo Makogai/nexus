@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 17);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 19);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -406,6 +406,68 @@ fn hook_handler_records_activity_and_never_fails_claude() {
         assert_eq!(out.status.code(), Some(0), "{event} {payload}");
         assert!(out.stdout.is_empty());
     }
+}
+
+/// ADR-0025: attention signals from real `nexus hook` processes and the MCP tool become notifications; NEXUS never
+/// answers (no hook output), ignores foreign conversations, deduplicates and rate-limits.
+#[test]
+fn attention_hooks_and_mcp_raise_notifications_without_acting() {
+    let e = Env::new();
+    e.setup();
+    let (_, session) = launch_report(&e, &["--name", "Checkout"], "attention.json");
+    let sid = session["id"].as_str().unwrap();
+    let csid = session["claudeSessionId"].as_str().unwrap();
+    let notifications = || e.json(&["notifications", "list", "--all"]);
+    let open = |cat: &str| {
+        notifications()["notifications"].as_array().unwrap().iter().filter(|n| n["category"] == cat && n["resolvedAt"].is_null()).count()
+    };
+    assert_eq!(open("session-finished"), 1, "the launched session ended normally");
+
+    for (event, payload) in [
+        ("permission-request", format!(r#"{{"session_id":"{csid}","tool_name":"Bash","tool_input":{{"command":"deploy --token s3cr3t"}}}}"#)),
+        ("notification", format!(r#"{{"session_id":"{csid}","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}}"#)),
+        ("ask-user", format!(r#"{{"session_id":"{csid}","tool_name":"AskUserQuestion","tool_input":{{"questions":[]}}}}"#)),
+    ] {
+        let out = hook(&e, sid, event, &payload);
+        assert_eq!(out.status.code(), Some(0));
+        assert!(out.stdout.is_empty(), "{event}: no output — never a permission decision or an answer");
+    }
+    let list = notifications();
+    let perm = list["notifications"].as_array().unwrap().iter().find(|n| n["category"] == "permission-requested").unwrap().clone();
+    assert_eq!((perm["occurrences"].as_i64(), perm["title"].as_str()), (Some(2), Some("Permission requested: Bash")), "one notification for one situation");
+    assert_eq!(perm["workspaceId"], session["workspaceId"], "identity from the session row");
+    assert!(!list.to_string().contains("s3cr3t"), "tool input is never stored");
+    assert!(list["counts"]["actionRequired"].as_u64().unwrap() >= 2);
+
+    // A hook payload of another conversation is ignored.
+    hook(&e, sid, "stop-failure", r#"{"session_id":"11111111-2222-4333-8444-555555555555","error":"rate_limit"}"#);
+    assert_eq!(open("process-issue"), 0);
+    // The question was answered (PostToolUse AskUserQuestion), then the turn failed on sign-in.
+    hook(&e, sid, "post-tool-use", &format!(r#"{{"session_id":"{csid}","tool_name":"AskUserQuestion"}}"#));
+    assert_eq!((open("input-required"), open("permission-requested")), (0, 0), "Claude continued: resolved");
+    hook(&e, sid, "stop-failure", &format!(r#"{{"session_id":"{csid}","error":"authentication_failed"}}"#));
+    assert_eq!(open("process-issue"), 1);
+
+    // MCP request_attention: bound to the session, deduplicated, rate-limited.
+    let r = mcp_calls(&e, sid, &[
+        ("request_attention", json(r#"{"reason":"question","message":"Which payment provider?"}"#)),
+        ("request_attention", json(r#"{"reason":"question","message":"Which payment provider?"}"#)),
+        ("request_attention", json(r#"{"reason":"review","message":"PR ready"}"#)),
+        ("request_attention", json(r#"{"reason":"done","message":"Finished"}"#)),
+        ("request_attention", json(r#"{"reason":"impersonate","message":"x"}"#)),
+    ]);
+    let delivered: Vec<&str> = r[..4].iter().map(|v| v["structuredContent"]["delivered"].as_str().unwrap()).collect();
+    assert_eq!(delivered, ["notified", "already-notified", "notified", "notified"]);
+    assert_eq!(r[4]["isError"], true);
+    hook(&e, sid, "user-prompt", &format!(r#"{{"session_id":"{csid}"}}"#));
+    let again = mcp_calls(&e, sid, &[("request_attention", json(r#"{"reason":"question","message":"Another one?"}"#))]);
+    assert_eq!(again[0]["structuredContent"]["delivered"], "rate-limited", "at most 3 MCP notifications per session in 10 minutes");
+
+    let sessions = e.run(&["sessions"]);
+    assert!(String::from_utf8_lossy(&sessions.stdout).contains("ATTENTION"));
+    let out = e.run(&["notifications", "read", "--all"]);
+    assert!(out.status.success());
+    assert_eq!(e.json(&["notifications", "list"])["counts"]["unread"], 0);
 }
 
 #[test]
@@ -511,6 +573,127 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     let report = e.json(&["knowledge", "reindex", "--rebuild"]);
     assert_eq!(report["invalid"], 1);
     assert_eq!(e.json(&["knowledge", "list"]).as_array().unwrap().len(), before);
+}
+
+/// ADR-0028: the project's context strategy changes what launches and SessionStart get; project docs are searchable
+/// with citations; the inspector compares observed instruction files with its prediction and shows retrievals.
+#[test]
+fn context_strategies_docs_retrieval_and_the_inspector() {
+    let e = Env::new();
+    e.setup();
+    std::fs::write(e.repo.join("README.md"), "# Demo\n\nIntro.\n\n## Payments\n\nCheckout uses the hosted payment page.\n").unwrap();
+    std::fs::write(e.repo.join("CLAUDE.md"), "Project instructions for Claude.\n").unwrap();
+    let rule = write_rule(&ws_dir(&e).join("rules"), "Commit style", "", "Write commit messages in the imperative mood.");
+    e.ok(&["knowledge", "approve", &rule]);
+
+    let a = e.json(&["context", "analyze", "--project", "repo"]);
+    assert_eq!(a["docs"]["files"], 1);
+    let est = a["estimates"].as_array().unwrap();
+    let chars = |s: &str| est.iter().find(|x| x["strategy"] == s).unwrap()["rulesChars"].as_u64().unwrap();
+    assert!(chars("minimal") < chars("balanced"), "minimal appends less: {est:?}");
+    assert_eq!(a["configured"], Value::Null);
+
+    // Balanced (default): the rule text is in the prompt and instruction loading is observed.
+    let (report, session) = launch_report(&e, &[], "ctx-balanced.json");
+    assert!(appended_prompt(&report).contains("imperative mood"));
+    assert_eq!(session["integrations"]["context"]["strategy"], "balanced");
+    let settings_path = |r: &Value| {
+        let args: Vec<String> = serde_json::from_value(r["args"].clone()).unwrap();
+        PathBuf::from(&args[args.iter().position(|a| a == "--settings").unwrap() + 1])
+    };
+    let s: Value = serde_json::from_slice(&std::fs::read(settings_path(&report)).unwrap()).unwrap();
+    assert!(s["hooks"]["InstructionsLoaded"].is_array());
+
+    // Minimal: the rule is only named; no instruction observation hook.
+    e.ok(&["context", "set", "--project", "repo", "--strategy", "minimal"]);
+    let (report, _) = launch_report(&e, &[], "ctx-minimal.json");
+    let prompt = appended_prompt(&report);
+    assert!(!prompt.contains("imperative mood") && prompt.contains("Commit style"), "{prompt}");
+    let s: Value = serde_json::from_slice(&std::fs::read(settings_path(&report)).unwrap()).unwrap();
+    assert!(s["hooks"]["InstructionsLoaded"].is_null());
+
+    // Deep: observe what Claude loads (as the real InstructionsLoaded hook reports it) and retrieve through MCP.
+    e.ok(&["context", "set", "--project", "repo", "--strategy", "deep"]);
+    let (_, session) = launch_report(&e, &[], "ctx-deep.json");
+    let sid = session["id"].as_str().unwrap();
+    let md = e.repo.join("CLAUDE.md").display().to_string().replace('\\', "\\\\");
+    let out = hook(&e, sid, "instructions-loaded", &format!(r#"{{"file_path":"{md}","memory_type":"Project","load_reason":"session_start"}}"#));
+    assert!(out.status.success() && out.stdout.is_empty());
+    let r = mcp_calls(&e, sid, &[
+        ("search_knowledge", json(r#"{"query":"hosted payment"}"#)),
+        ("get_document", json(r#"{"path":"README.md","fromLine":5}"#)),
+        ("get_document", json(r#"{"path":"../secrets.txt"}"#)),
+    ]);
+    let hits = r[0]["structuredContent"]["hits"].as_array().unwrap();
+    let doc = hits.iter().find(|h| h["source"] == "project-doc").unwrap();
+    assert_eq!(doc["citation"], "README.md:7 § Payments");
+    assert!(r[1]["structuredContent"]["body"].as_str().unwrap().starts_with("## Payments"));
+    assert_eq!(r[2]["isError"], true, "only indexed project docs can be read");
+
+    let i = e.json(&["context", "inspect", "--project", "repo", "--profile", "fake"]);
+    assert_eq!(i["configured"]["strategy"], "deep");
+    let observed = i["observed"]["instructions"].as_array().unwrap();
+    assert_eq!(observed.len(), 1);
+    assert_eq!(observed[0]["predicted"], true, "the inspector predicted the CLAUDE.md Claude reported: {i}");
+    let tools: Vec<&str> = i["retrieved"].as_array().unwrap().iter().map(|x| x["tool"].as_str().unwrap()).collect();
+    assert_eq!(tools, ["search_knowledge", "get_document"], "failed calls are not retrievals");
+    assert!(i["metrics"]["retrievals"].as_u64().unwrap() >= 2);
+    assert!(!i.to_string().contains("hosted payment\""), "queries are not stored");
+}
+
+/// ADR-0027: constitutions reach launches as effective rules (mandatory first, compact, never raw markup), synced
+/// documents only once approved, narrower scopes cannot override mandatory policies, Claude reads the rest by id.
+#[test]
+fn constitutions_reach_launches_by_scope_only_approved_and_through_mcp() {
+    let e = Env::new();
+    e.setup();
+    let created = e.json(&["constitution", "new", "Team charter", "--starter"]);
+    assert_eq!(created["prefix"], "TC");
+    let mandatory = created["structure"]["articles"].as_array().unwrap().iter()
+        .flat_map(|a| a["sections"].as_array().unwrap().iter().flat_map(|s| s["rules"].as_array().unwrap().clone()))
+        .find(|r| r["enforcement"] == "mandatory").unwrap()["id"].as_str().unwrap().to_string();
+
+    // A constitution arrives through a synced workspace folder (as by `git pull`): not used until approved.
+    let ops = write_rule(&ws_dir(&e).join("rules"), "Ops policy", "format: constitution\nprefix: OPS\n",
+        "## Operations\n\n#### Deploy only from main\n<!-- rule: id=OPS-1 enforcement=mandatory -->\n\nProduction deploys run from the main branch only.\n");
+    let list = e.json(&["constitution", "list"]);
+    let synced = list.as_array().unwrap().iter().find(|c| c["title"] == "Ops policy").unwrap();
+    assert_eq!(synced["approved"], false);
+
+    // A project constitution tries to switch off the team's mandatory policy: a conflict, the policy stays.
+    let repo_rules = e.json(&["constitution", "new", "Repo rules", "--scope", "project", "--project", "repo"]);
+    let path = ws_dir(&e).join(repo_rules["relativePath"].as_str().unwrap());
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(&format!("\n## Exceptions\n\n#### Secrets allowed here\n<!-- rule: id={mandatory} enforcement=rule enabled=false -->\n\nNot really.\n"));
+    std::fs::write(&path, text).unwrap();
+    e.ok(&["knowledge", "approve", repo_rules["id"].as_str().unwrap()]);
+    let check = e.run(&["constitution", "check"]);
+    assert_eq!(check.status.code(), Some(1), "conflicts fail the check");
+    assert!(String::from_utf8_lossy(&check.stdout).contains("mandatory policies cannot be overridden"));
+
+    let (report, session) = launch_report(&e, &[], "constitution.json");
+    let prompt = appended_prompt(&report);
+    assert!(prompt.contains("NEXUS constitution"), "{prompt}");
+    assert!(prompt.contains(&format!("[{mandatory} · mandatory] Never commit credentials")), "{prompt}");
+    assert!(prompt.find(&mandatory).unwrap() < prompt.find("TC-1").unwrap_or(usize::MAX), "mandatory first");
+    assert!(!prompt.contains("<!-- rule") && !prompt.contains("OPS-1"), "no markup; the unapproved synced document is not used");
+    assert!(prompt.contains("get_constitution"), "guidelines are named for on-demand reading");
+    assert_eq!(session["integrations"]["rules"]["constitution"]["pendingApproval"][0], "Ops policy");
+    let inbox = e.json(&["notifications", "list"]);
+    assert!(inbox["notifications"].as_array().unwrap().iter().any(|n| n["category"] == "review-required" && n["targetKind"] == "rules"), "the pending approval is a review notification");
+
+    e.ok(&["knowledge", "approve", &ops]);
+    let (report, session) = launch_report(&e, &[], "constitution-2.json");
+    assert!(appended_prompt(&report).contains("[OPS-1 · mandatory] Deploy only from main"));
+
+    let sid = session["id"].as_str().unwrap();
+    let r = mcp_calls(&e, sid, &[("get_constitution", json(r#"{"ids":["TC-3"]}"#)), ("get_constitution", json(r#"{"includeGuidelines":false}"#))]);
+    let one = r[0]["structuredContent"]["rules"].as_array().unwrap();
+    assert_eq!((one.len(), one[0]["enforcement"].as_str()), (1, Some("guideline")));
+    let all = r[1]["structuredContent"]["rules"].as_array().unwrap();
+    assert!(all.iter().any(|x| x["id"] == "OPS-1") && all.iter().all(|x| x["enforcement"] != "guideline"));
+    let effective = e.json(&["constitution", "effective", "--project", "repo"]);
+    assert!(effective["conflicts"].as_array().unwrap().iter().any(|c| c["kind"] == "mandatory-override"));
 }
 
 #[test]

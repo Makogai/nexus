@@ -40,6 +40,9 @@ pub struct Integrations {
     /// AI Kits given to (or withheld from) this session (ADR-0024).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kits: Vec<crate::kits::KitLaunch>,
+    /// The project's context strategy applied to this session (ADR-0028).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<super::prepare::ContextLaunch>,
 }
 
 impl IntegrationStatus {

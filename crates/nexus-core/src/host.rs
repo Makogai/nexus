@@ -96,13 +96,22 @@ pub fn heartbeat(conn: &Connection, host_id: &str, running_sessions: &[String]) 
 /// Sessions in `starting`/`running` whose host is dead (stopped, lease expired, or unknown) become `interrupted`.
 /// Returns how many sessions changed.
 pub fn reconcile(conn: &Connection, now: i64) -> Result<usize> {
-    Ok(conn.execute(
-        "UPDATE sessions SET state = 'interrupted'
-         WHERE state IN ('starting', 'running')
+    let orphaned = "state IN ('starting', 'running')
            AND (host_id IS NULL
-                OR host_id NOT IN (SELECT id FROM session_hosts WHERE stopped_at IS NULL AND heartbeat_at >= ?1))",
-        [now - LEASE_MS],
-    )?)
+                OR host_id NOT IN (SELECT id FROM session_hosts WHERE stopped_at IS NULL AND heartbeat_at >= ?1))";
+    let ids: Vec<String> = conn
+        .prepare(&format!("SELECT id FROM sessions WHERE {orphaned}"))?
+        .query_map([now - LEASE_MS], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    let n = conn.execute(&format!("UPDATE sessions SET state = 'interrupted' WHERE {orphaned}"), [now - LEASE_MS])?;
+    // The owning process died without an orderly shutdown: tell the user (ADR-0025). Best effort.
+    for id in ids {
+        if let Ok(s) = crate::session::get(conn, &id) {
+            let _ = crate::attention::clear_on_end(conn, &id);
+            let _ = crate::notify::session_ended(conn, &s, None);
+        }
+    }
+    Ok(n)
 }
 
 /// Orderly shutdown of a host: its still-live sessions are recorded as `interrupted` with an end time (final — a
@@ -117,6 +126,14 @@ pub fn shutdown(conn: &Connection, host_id: &str) -> Result<usize> {
         params![host_id, now],
     )?;
     tx.execute("UPDATE session_hosts SET stopped_at = ?2 WHERE id = ?1", params![host_id, now])?;
+    // The user closed the host: nothing to announce, but nothing of these sessions waits for them any more.
+    tx.execute(
+        "UPDATE notifications SET resolved_at = ?2 WHERE resolved_at IS NULL
+           AND session_id IN (SELECT id FROM sessions WHERE host_id = ?1)
+           AND category IN ('input-required', 'permission-requested', 'agent-finished')",
+        params![host_id, now],
+    )?;
+    tx.execute("UPDATE sessions SET attention_kind = NULL, attention_at = NULL, attention = NULL WHERE host_id = ?1", [host_id])?;
     tx.commit()?;
     Ok(n)
 }

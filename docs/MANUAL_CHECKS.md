@@ -67,6 +67,21 @@
     a new NEXUS session of Personal lists `<kit>:<skill>` in `/skills`; a session of another profile does not; plain
     `claude` outside NEXUS does not.
 22. Re-run the snapshot from step 1 → still unchanged (hooks, MCP, isolation and kits are session-scoped, not profile edits).
+23. **Notifications** (needs a signed-in session): *Notifications → Preferences → Send a test notification* → a
+    Windows notification appears (in development builds titled by "Windows PowerShell"). Start a Personal session,
+    ask Claude to run `git status`, switch to another NEXUS view or minimise NEXUS → when Claude asks for permission a
+    notification "Permission requested: Bash" appears; clicking it brings NEXUS back with that terminal; the bell
+    shows it and the session row says *Permission required*. Approve in the terminal → it shows as handled. After the
+    answer, the turn end shows *Your turn* and (if NEXUS is not focused) "Claude finished in …". Nothing was
+    approved or typed by NEXUS.
+24. **Constitution** (optional): *Constitutions → New constitution* (starter) in your test workspace → start a
+    Personal session in the test project → ask Claude "which NEXUS constitution rules apply here?" → it names the
+    rule ids from the *Effective rules* tab (mandatory policies first) and can read a guideline with
+    `get_constitution`.
+25. **Context** (optional): project page → *Context* → the analysis lists your README/docs and recommends a strategy;
+    choose one → start a Personal session → *Inspector* with profile Personal: every file under *Observed* is marked
+    predicted, nothing is missing (compare with `/memory` in Claude). Ask Claude to "search the project docs for X"
+    → *Retrieval metrics* shows the call (no query text).
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

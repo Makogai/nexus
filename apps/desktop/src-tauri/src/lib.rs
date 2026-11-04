@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod error;
+pub mod notifier;
 pub mod pty;
 pub mod shells;
 pub mod state;
@@ -72,10 +73,14 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(not(windows))]
+    let app = app.plugin(tauri_plugin_notification::init());
+    let app = app
         .setup(|app| {
             let ctx: Ctx = Arc::new(open_context()?);
             spawn_heartbeat(ctx.clone());
+            notifier::spawn_poller(app.handle().clone(), ctx.clone());
             app.manage(ctx);
             Ok(())
         })
@@ -146,6 +151,35 @@ pub fn run() {
             commands::kits::kit_enable,
             commands::kits::kit_disable,
             commands::kits::kit_validate,
+            commands::context::context_get,
+            commands::context::context_set,
+            commands::context::context_presets,
+            commands::context::context_analyze,
+            commands::context::context_docs,
+            commands::context::context_inspect,
+            commands::constitutions::constitution_list,
+            commands::constitutions::constitution_get,
+            commands::constitutions::constitution_create,
+            commands::constitutions::constitution_save,
+            commands::constitutions::constitution_save_raw,
+            commands::constitutions::constitution_effective,
+            commands::constitutions::constitution_search,
+            commands::constitutions::constitution_history,
+            commands::constitutions::constitution_version,
+            commands::notifications::notifications_list,
+            commands::notifications::notifications_counts,
+            commands::notifications::notifications_mark_read,
+            commands::notifications::notifications_dismiss,
+            commands::notifications::notifications_snooze,
+            commands::notifications::notifications_prefs,
+            commands::notifications::notifications_set_prefs,
+            commands::notifications::notifications_set_view,
+            commands::notifications::notifications_availability,
+            commands::notifications::notifications_test,
+            commands::notifications::notification_target,
+            commands::notifications::e2e_notifications_recorded,
+            commands::notifications::e2e_focus_state,
+            commands::notifications::e2e_notification_activate,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the NEXUS application");

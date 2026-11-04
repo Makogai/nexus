@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -18,6 +19,38 @@ pub struct AppCtx {
     pub host: Host,
     /// Set when the database was unreadable at startup and has been moved aside.
     pub recovery: Option<Recovery>,
+    /// Where the user is looking, for notification decisions (ADR-0025).
+    pub attention: AttentionState,
+    pub notifier: Box<dyn crate::notifier::Notifier>,
+}
+
+#[derive(Default)]
+pub struct AttentionState {
+    stopped: Mutex<HashSet<String>>,
+    view: Mutex<ViewFocus>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ViewFocus {
+    /// The session whose terminal is visible in the NEXUS window, if any.
+    pub visible_session: Option<String>,
+    /// `Date.getTimezoneOffset()` of the UI (minutes, UTC − local) — for quiet hours.
+    pub utc_offset_minutes: i64,
+}
+
+impl AttentionState {
+    pub fn mark_stopped(&self, id: &str) {
+        self.stopped.lock().unwrap_or_else(|p| p.into_inner()).insert(id.to_string());
+    }
+    pub fn take_stopped(&self, id: &str) -> bool {
+        self.stopped.lock().unwrap_or_else(|p| p.into_inner()).remove(id)
+    }
+    pub fn set_view(&self, v: ViewFocus) {
+        *self.view.lock().unwrap_or_else(|p| p.into_inner()) = v;
+    }
+    pub fn view(&self) -> ViewFocus {
+        self.view.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
 }
 
 pub type Ctx = Arc<AppCtx>;
@@ -40,6 +73,8 @@ impl AppCtx {
             machine_policy: MachinePolicyLocations::system(),
             host,
             recovery,
+            attention: AttentionState::default(),
+            notifier: crate::notifier::select(),
         }
     }
 

@@ -64,5 +64,15 @@ const after = JSON.parse(cli('--json', 'sessions')).find((s) => s.id === session
 check('SessionStart hook reached NEXUS (transcript path recorded)', typeof after.transcriptPath === 'string' && after.transcriptPath.includes(claudeSessionId))
 check('SessionEnd hook reached NEXUS (end reason recorded)', typeof after.endReason === 'string', after.endReason)
 check('Claude conversation id unchanged (same session)', after.claudeSessionId === claudeSessionId)
+
+// 3. Attention (ADR-0025): the real CLI accepts NEXUS's attention hooks and reports the signed-out failure.
+const hooks = JSON.parse(readFileSync(settingsPath, 'utf8')).hooks
+check('settings register the attention hooks', ['PermissionRequest', 'StopFailure', 'Elicitation', 'PreToolUse'].every((e) => hooks[e]) && hooks.PreToolUse[0].matcher === 'AskUserQuestion')
+check('real Claude accepted them (no settings error)', !/settings error|invalid settings|unknown hook/i.test(`${run.stdout}${run.stderr}`))
+const inbox = JSON.parse(cli('--json', 'notifications', 'list', '--all'))
+const issue = inbox.notifications.find((n) => n.sessionId === session.id && n.category === 'process-issue')
+check('StopFailure from the real CLI became an action notification', issue?.title === 'Claude is not signed in for this profile' && issue?.priority === 'action', issue?.title)
+check('…bound to the session’s workspace and profile', issue?.workspaceId === session.workspaceId && issue?.profileId === session.profileId)
+check('…and no model output is stored', !JSON.stringify(inbox).includes('Not logged in'))
 console.log(failures === 0 ? '\nREAL-CLAUDE HOOKS OK' : `\nREAL-CLAUDE HOOKS FAILED (${failures})`)
 process.exitCode = failures === 0 ? 0 : 1

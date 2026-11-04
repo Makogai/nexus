@@ -6,6 +6,7 @@ import { useWorkspaceStore } from './stores/workspaces'
 import { useProjectStore } from './stores/projects'
 import { useProfileStore } from './stores/profiles'
 import { useSessionStore } from './stores/sessions'
+import { useNotificationStore } from './stores/notifications'
 import { toIpcError } from './lib/ipc'
 import AppSidebar from './components/AppSidebar.vue'
 import AppTopBar from './components/AppTopBar.vue'
@@ -21,6 +22,7 @@ const workspaces = useWorkspaceStore()
 const projects = useProjectStore()
 const profiles = useProfileStore()
 const sessions = useSessionStore()
+const notifications = useNotificationStore()
 
 const ready = ref(false)
 const fatal = ref<string | null>(null)
@@ -42,6 +44,7 @@ async function boot() {
     await Promise.all([workspaces.load(), profiles.load(), sessions.subscribe()])
     await sessions.load()
     if (workspaces.active) await projects.load(workspaces.active.id)
+    await notifications.start().catch(() => undefined)
     app.watchExternalChanges()
     ready.value = true
   } catch (e) {

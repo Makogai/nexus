@@ -3,8 +3,11 @@
 
 pub mod app;
 pub mod claude;
+pub mod constitutions;
+pub mod context;
 pub mod kits;
 pub mod knowledge;
+pub mod notifications;
 pub mod projects;
 pub mod sessions;
 pub mod workspaces;

@@ -178,9 +178,9 @@ try {
     await new Promise((r) => hookRun.on('exit', r))
   }
   const waiting = await cdp
-    .waitFor(`[...document.querySelectorAll('.page .session')].some((r) => r.innerText.includes('From a terminal') && r.innerText.includes('Waiting for you'))`, 15000)
+    .waitFor(`[...document.querySelectorAll('.page .session')].some((r) => r.innerText.includes('From a terminal') && r.innerText.includes('Permission required'))`, 15000)
     .catch(() => false)
-  check('Notification hook shows “waiting for you” live in the desktop', !!waiting)
+  check('Notification hook shows “Permission required” live in the desktop', !!waiting)
   cliRun.stdin.end('bye\n') // fake-claude reads one line and exits
   await new Promise((r) => cliRun.on('exit', r))
 } finally {

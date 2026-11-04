@@ -205,7 +205,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     let _ = beat.join();
 
     let code = status.ok().and_then(|s| s.code()).map(i64::from);
-    session::mark_exited(&conn, &session.id, code)?;
+    nexus_core::notify::session_exited(&conn, &session.id, code, false)?;
     host::shutdown(&conn, &me.id)?;
     Ok(code.map(|c| c as i32).unwrap_or(1))
 }
