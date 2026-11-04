@@ -82,6 +82,15 @@
     choose one → start a Personal session → *Inspector* with profile Personal: every file under *Observed* is marked
     predicted, nothing is missing (compare with `/memory` in Claude). Ask Claude to "search the project docs for X"
     → *Retrieval metrics* shows the call (no query text).
+26. **Workflow** (optional, Personal profile): *Workflows → New from template → Bug investigation and fix* → *Gates*:
+    add `test` for the test project → project page → *Run workflow* (balanced) → Claude reads `get_workflow_run`, works
+    and calls `report_step`; the run shows *AI-reported* for steps without gates and *Verified by gates* once NEXUS ran
+    `test`. Nothing is published or pushed by the workflow.
+27. **Installed build notifications** (release candidate only): install the NSIS build → *Notifications → Send a test
+    notification* → the sender is **NEXUS** (not Windows PowerShell) → lock the screen (Win+L) while a session raises a
+    permission prompt → the lock screen shows only "NEXUS — A Claude session asks for a permission" → unlock, quit NEXUS,
+    click the notification in the Action Center → NEXUS starts and opens that session (resumable). Uninstall →
+    `HKCU\Software\Classes\AppUserModelId\dev.nexus.desktop` and `HKCU\Software\Classes\nexus` are gone.
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

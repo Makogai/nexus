@@ -115,6 +115,7 @@ export const categoryLabels: Record<NotificationCategory, string> = {
   'session-finished': 'Session finished',
   'session-interrupted': 'Session interrupted',
   'workflow-failed': 'Workflow failed',
+  'workflow-completed': 'Workflow finished',
   'process-issue': 'Claude stopped on an error',
   'review-required': 'Review required',
   info: 'Information',

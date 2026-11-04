@@ -31,6 +31,8 @@ fn open_context() -> Result<AppCtx, Box<dyn std::error::Error>> {
     let me = host::register(&conn, HostKind::Desktop)?;
     host::stop_others(&conn, HostKind::Desktop, &me.id)?;
     let interrupted = host::reconcile(&conn, now_ms())?;
+    // Gate executions of a crashed host are interrupted and verified again (ADR-0029).
+    let _ = nexus_core::workflow::run::reconcile(&conn, now_ms());
     if interrupted > 0 {
         tracing::info!(interrupted, "sessions whose host is gone are no longer attached");
     }
@@ -46,7 +48,10 @@ fn spawn_heartbeat(ctx: Ctx) {
             std::thread::sleep(host::HEARTBEAT_INTERVAL);
             let running = ctx.pty.running_ids();
             let db = ctx.db();
-            if let Err(e) = host::heartbeat(&db, &ctx.host.id, &running).and_then(|_| host::reconcile(&db, now_ms())) {
+            if let Err(e) = host::heartbeat(&db, &ctx.host.id, &running)
+                .and_then(|_| host::reconcile(&db, now_ms()))
+                .and_then(|_| nexus_core::workflow::run::reconcile(&db, now_ms()))
+            {
                 tracing::warn!(error = %e, "host heartbeat failed");
             }
         }
@@ -66,10 +71,16 @@ pub fn run() {
     }
     let app = tauri::Builder::default()
         // Must be first: a second launch focuses the existing window instead of opening the same database.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.set_focus();
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // A notification click (`nexus://notification/<id>`) or a second start: focus this window.
+            match argv.iter().find_map(|a| notifier::parse_activation(a)) {
+                Some(id) => notifier::activate(app, &id),
+                None => {
+                    if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.unminimize();
+                        let _ = w.set_focus();
+                    }
+                }
             }
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -79,8 +90,12 @@ pub fn run() {
     let app = app
         .setup(|app| {
             let ctx: Ctx = Arc::new(open_context()?);
+            if let Some(id) = std::env::args().find_map(|a| notifier::parse_activation(&a)) {
+                ctx.attention.set_activation(id);
+            }
             spawn_heartbeat(ctx.clone());
             notifier::spawn_poller(app.handle().clone(), ctx.clone());
+            commands::workflows::spawn_runner(app.handle().clone(), ctx.clone());
             app.manage(ctx);
             Ok(())
         })
@@ -151,6 +166,25 @@ pub fn run() {
             commands::kits::kit_enable,
             commands::kits::kit_disable,
             commands::kits::kit_validate,
+            commands::workflows::workflow_templates,
+            commands::workflows::workflow_list,
+            commands::workflows::workflow_get,
+            commands::workflows::workflow_create,
+            commands::workflows::workflow_save,
+            commands::workflows::workflow_save_raw,
+            commands::workflows::workflow_start,
+            commands::workflows::workflow_runs,
+            commands::workflows::workflow_run,
+            commands::workflows::workflow_review,
+            commands::workflows::workflow_cancel,
+            commands::workflows::workflow_retry,
+            commands::workflows::gates_list,
+            commands::workflows::gate_upsert,
+            commands::workflows::gate_approve,
+            commands::workflows::gate_revoke,
+            commands::workflows::gate_remove,
+            commands::workflows::gate_suggest,
+            commands::workflows::gate_run,
             commands::context::context_get,
             commands::context::context_set,
             commands::context::context_presets,
@@ -178,6 +212,8 @@ pub fn run() {
             commands::notifications::notifications_test,
             commands::notifications::notification_target,
             commands::notifications::e2e_notifications_recorded,
+            commands::notifications::e2e_notifications_withdrawn,
+            commands::notifications::notifications_take_activation,
             commands::notifications::e2e_focus_state,
             commands::notifications::e2e_notification_activate,
         ])

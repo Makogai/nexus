@@ -16,7 +16,7 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0009](0009-mcp-server.md) | stdio MCP server in the `nexus` binary, scope bound at launch | Accepted, implemented |
 | [0010](0010-usage-metrics-provenance.md) | Usage metrics with explicit provenance | Accepted (Phase 5) |
 | [0011](0011-work-profiles.md) | Work profiles as data, separate from native effort | Accepted |
-| [0012](0012-workflows-reuse-native.md) | Workflows reuse native skills/subagents; no custom orchestrator | Accepted (Phase 4) |
+| [0012](0012-workflows-reuse-native.md) | Workflows reuse native skills/subagents; no custom orchestrator | Accepted, implemented by 0029 |
 | [0013](0013-portable-knowledge-format.md) | Portable knowledge files: identity, schema, atomic writes, indexing, sync boundaries | Accepted, implemented (sync keys: Phase 6) |
 | [0014](0014-session-hosts-and-lifecycle.md) | Session hosts and lifecycle (prepares background-service mode) | Accepted |
 | [0015](0015-production-webview-hardening.md) | Production webview hardening (threat T18) | Accepted, implemented |
@@ -33,3 +33,4 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0026](0026-intelligence-subsystems.md) | Five intelligence subsystems (Constitutions, Context, Memory, Skills, Workflows) on shared infrastructure | Accepted |
 | [0027](0027-constitutions.md) | Constitutions: structured rule documents with stable ids, enforcement levels and scoped inheritance | Accepted, implemented |
 | [0028](0028-context-manager.md) | Context Manager: per-project strategies, cited retrieval from project docs, an inspector built on observation | Accepted, implemented |
+| [0029](0029-workflow-engine.md) | Workflow Engine: portable definitions on tasks and sessions, trusted gates, AI-reported vs. verified | Accepted, implemented |

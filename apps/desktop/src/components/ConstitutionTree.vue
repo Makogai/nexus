@@ -83,6 +83,10 @@ function visibleSection(rules: { id: string; title: string; text: string }[]) {
           <textarea v-model="r.text" class="textarea" rows="2" placeholder="What Claude must / should do" aria-label="Rule text" :readonly="readonly" @input="changed" />
           <div class="rule-meta">
             <label class="checkbox"><input v-model="r.enabled" type="checkbox" :disabled="readonly" @change="changed" /><span>Enabled</span></label>
+            <label class="check" title="A quality gate (Workflows → Gates) that verifies this rule. Without one the rule is an instruction only.">
+              <span class="faint">Verified by gate</span>
+              <input v-model="r.check" class="input mono" placeholder="none — instructed only" aria-label="Verified by gate" :readonly="readonly" @input="changed" />
+            </label>
             <label class="override">
               <span class="faint">Overrides</span>
               <select v-model="r.overrides" class="select" :disabled="readonly" aria-label="Overrides" @change="changed">
@@ -188,6 +192,14 @@ function visibleSection(rules: { id: string; title: string; text: string }[]) {
 }
 .override .select {
   max-width: 420px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.check .input {
+  width: 170px;
 }
 .problem {
   color: var(--red);

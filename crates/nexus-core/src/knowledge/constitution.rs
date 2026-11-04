@@ -73,6 +73,8 @@ pub struct Rule {
     pub enabled: bool,
     /// Id of a broader-scope rule this one replaces.
     pub overrides: Option<String>,
+    /// A quality gate that verifies compliance (ADR-0029): without one the rule is *instructed only*.
+    pub check: Option<String>,
     pub text: String,
 }
 
@@ -208,6 +210,7 @@ pub fn parse(body: &str) -> (Structure, Vec<Problem>) {
                         },
                         "enabled" => r.enabled = v != "false",
                         "overrides" => r.overrides = Some(v).filter(|v| !v.is_empty()),
+                        "check" => r.check = Some(v).filter(|v| !v.is_empty()),
                         other => problems.push(warn(format!("rule “{}”: unknown attribute `{other}`", r.title), Some(&r.id))),
                     }
                 }
@@ -284,6 +287,9 @@ pub fn render(s: &Structure) -> String {
                 if let Some(o) = &r.overrides {
                     attrs.push_str(&format!(" overrides={o}"));
                 }
+                if let Some(c) = &r.check {
+                    attrs.push_str(&format!(" check={c}"));
+                }
                 out.push_str(&format!("<!-- rule: {attrs} -->\n\n"));
                 para(&mut out, &r.text);
             }
@@ -334,6 +340,11 @@ pub fn validate(s: &Structure) -> Vec<Problem> {
                 && !valid_id(o)
             {
                 problems.push(err(format!("`overrides={o}` is not a rule id"), id));
+            }
+            if let Some(c) = &r.check
+                && !crate::workflow::gates::valid_name(c)
+            {
+                problems.push(err(format!("`check={c}` is not a gate name (lowercase letters, digits, `-`)"), id));
             }
         }
     }
@@ -720,6 +731,8 @@ pub struct EffectiveRule {
     pub scope: ScopeLevel,
     /// The broader rule this one replaced, if any.
     pub replaces: Option<RuleRef>,
+    /// Gate that verifies compliance, if any (else: instructed only).
+    pub check: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -842,6 +855,7 @@ fn effective_of(all: Vec<Loaded>, t: &Target<'_>) -> Result<Effective> {
                 doc_title: l.summary.title.clone(),
                 scope: l.summary.scope,
                 replaces: None,
+                check: r.check.clone(),
             };
             match target_slot {
                 Some(slot) => {
@@ -889,6 +903,42 @@ fn effective_of(all: Vec<Loaded>, t: &Target<'_>) -> Result<Effective> {
         }
     }
     out.rules = winners.into_iter().flatten().map(|(r, _)| r).collect();
+    Ok(out)
+}
+
+/// How compliance with a rule is known (ADR-0027/0029): applying an instruction is not guaranteeing it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Compliance {
+    pub rule_id: String,
+    pub enforcement: Enforcement,
+    /// `instructed` (Claude is told; nothing checks it), `passed` / `failed` (the linked gate's latest result for the
+    /// project), `not-run` (gate defined, never run), `not-approved` (its current command is not approved),
+    /// `gate-missing` (the named gate is not defined for the project),
+    /// `no-project` (a gate needs a project to run in).
+    pub status: &'static str,
+    pub check: Option<String>,
+    pub at: Option<i64>,
+}
+
+pub fn compliance(conn: &Connection, project_id: Option<&str>, e: &Effective) -> Result<Vec<Compliance>> {
+    let mut out = Vec::new();
+    for r in &e.rules {
+        let (status, at) = match (&r.check, project_id) {
+            (None, _) => ("instructed", None),
+            (Some(_), None) => ("no-project", None),
+            (Some(g), Some(p)) => match crate::workflow::gates::find(conn, p, g)? {
+                None => ("gate-missing", None),
+                Some(gate) if !gate.approved => ("not-approved", None),
+                Some(_) => match crate::workflow::gates::latest(conn, p, g)? {
+                    Some(res) if res.status == "passed" => ("passed", Some(res.started_at)),
+                    Some(res) => ("failed", Some(res.started_at)),
+                    None => ("not-run", None),
+                },
+            },
+        };
+        out.push(Compliance { rule_id: r.id.clone(), enforcement: r.enforcement, status, check: r.check.clone(), at });
+    }
     Ok(out)
 }
 

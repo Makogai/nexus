@@ -44,7 +44,7 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | --- | --- | --- |
 | M10 | `nexus` CLI: `doctor`, `workspaces`, `projects`, `profiles`, `sessions`, `launch` (reuses core; `launch` is a session host) | 5 end-to-end tests of the real binary incl. killed-host reconciliation ✅ |
 | M11 | Session hosts + leases ✅ (ADR-0014); still open: reconciliation with `claude agents --json`, durable-session experiment (`--bg` + `attach`) | ADR update with measured behaviour |
-| M12 | MCP server v1 (workspace-scoped tools incl. `checkpoint`; 19 tools after M16–M19, M18, `request_attention` and `get_constitution`) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
+| M12 | MCP server v1 (workspace-scoped tools incl. `checkpoint`; 21 tools after M16–M19, M18, `request_attention`, `get_constitution`, `get_workflow_run` and `report_step`) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
 | M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): start/end, compaction recovery, activity counters, files, command categories, attention; policy-aware | merge semantics verified on 2.1.311; unit + CLI + desktop E2E + real-Claude hook test ✅ |
 | M14 | Profile diagnostics (ADR-0023): executable/version, policy effects, settings (allowlisted), memory, skills, agents, commands, MCP servers, hooks, plugins, marketplaces, kits, context estimate, warnings; desktop view + `nexus profiles diagnose` — allowlist clone ☐ | fixture tests + real-CLI comparison with the init event ✅ |
 | M15 | WSL shells; login-shell PATH resolution on macOS/Linux | per-platform CI job |
@@ -90,6 +90,21 @@ Constitution Manager, then the Context Manager. No workflow engine in this stage
 | D | Constitution Manager (ADR-0027): articles/sections/rules with stable ids, enforcement levels, scopes + inheritance (global → task), tree + Markdown editor, search, conflicts, effective-rules preview, applicable projects, Git history, approval of synced changes, launch delivery, MCP `get_constitution`, `nexus constitution` | core + CLI E2E + vitest + `e2e/constitutions.mjs` 13/13 | ✅ |
 | E | Context Manager (ADR-0028): onboarding analysis + wizard, strategies (minimal/balanced/deep/custom) with clamped custom sources and budgets, project docs as a cited FTS source (dedupe, freshness, indexed-only reads), InstructionsLoaded observation, retrieval recording, Context Inspector (configured / predicted / observed / on demand / retrieved), metrics, `nexus context` | core + CLI E2E + vitest + `e2e/context.mjs` 10/10 + `e2e/context-real-claude.mjs` (observed == predicted on the real CLI) | ✅ |
 | F | Integration: live cross-profile bleed warning from observed instructions (T21 → notification → isolation), constitution delivery per strategy, review notifications open the Constitution Manager, project page → Context | real CLI: `security-real-claude.mjs` bleed checks | ✅ |
+
+## Stage: Workflow Engine (owner specification, 2026-11-04)
+
+Branch `milestone/workflow-engine`. No heavyweight orchestrator: workflows run on tasks, sessions, skills, hooks,
+constitutions, checkpoints and MCP (ADR-0012 → ADR-0029).
+
+| # | Milestone | Acceptance check | Status |
+| --- | --- | --- | --- |
+| W1 | Definitions (portable, validated, approval), six templates, library UI and `nexus workflow` | core + vitest | ✅ |
+| W2 | Trusted quality gates per project (argv, no shell, machine-local), suggestions, runner in the desktop and CLI, crash reconciliation | core + CLI E2E + desktop E2E (kill during a gate) | ✅ |
+| W3 | Runs: dependencies, acceptance criteria, AI-reported vs verified vs human, rigor (work profiles), retry, cancel, failure handling, task/checkpoint memory | core + CLI + desktop E2E | ✅ |
+| W4 | Session integration: task launch with pointer, SessionStart brief, MCP `get_workflow_run`/`report_step`, session-only skills with profile isolation | CLI E2E + real CLI `workflow-real-claude.mjs` 7/7 | ✅ |
+| W5 | Notifications (input, review, gate failed, completed, failed) and launch points (project page, task dialog, library) | desktop E2E | ✅ |
+| W6 | Pre-release: NEXUS as notification sender, click routing incl. `nexus://`, withdrawal, lock-screen content policy; constitution compliance (instructed vs verified) | opt-in Windows self-test, attention E2E 27/27, core | ✅ |
+| W7 | Gate approval and versions: each gate command version needs explicit approval before it runs (separate from workflow approval); waiting steps resume once approved | core + CLI E2E + desktop E2E `workflows.mjs` 22/22 | ✅ |
 
 ## Phase 6 — Product maturity
 

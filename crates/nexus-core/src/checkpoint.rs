@@ -72,6 +72,16 @@ pub struct Checkpoint {
 
 /// Record a checkpoint. The summary is trimmed, control characters other than newlines are removed and the length
 /// is bounded — the text comes from a model and is stored as data.
+/// A NEXUS checkpoint on the latest session that worked on a task (none when no session did — not an error).
+pub fn add_for_task(conn: &Connection, task_id: &str, kind: CheckpointKind, summary: &str) -> Result<Option<Checkpoint>> {
+    let sid: Option<String> = rusqlite::OptionalExtension::optional(conn.query_row(
+        "SELECT id FROM sessions WHERE task_id = ?1 ORDER BY started_at DESC LIMIT 1",
+        [task_id],
+        |r| r.get(0),
+    ))?;
+    sid.map(|s| add(conn, &s, kind, summary, Source::Nexus)).transpose()
+}
+
 pub fn add(conn: &Connection, session_id: &str, kind: CheckpointKind, summary: &str, source: Source) -> Result<Checkpoint> {
     let clean: String = summary
         .chars()

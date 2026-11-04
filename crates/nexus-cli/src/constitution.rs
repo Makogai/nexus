@@ -27,6 +27,11 @@ pub enum ConstitutionCmd {
     },
     /// Problems and conflicts of all constitutions; exit code 1 when there are errors or conflicts.
     Check,
+    /// Run the gates linked from the project's effective rules (`check=`); exit code 1 when one fails.
+    Verify {
+        #[arg(long)]
+        project: String,
+    },
     /// Create a constitution (scope: global, workspace, stack, project, task).
     New {
         title: String,
@@ -104,16 +109,26 @@ pub fn run(ctx: &Ctx, c: ConstitutionCmd) -> Result<i32> {
             let stacks = p.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
             let t = Target { project: p.as_ref().map(|p| (p.id.as_str(), stacks.as_slice())), task_id: task.as_deref(), include_pending: pending };
             let e = constitution::effective(&conn, &ctx.data_dir, &ws, &t)?;
+            let comp = constitution::compliance(&conn, p.as_ref().map(|p| p.id.as_str()), &e)?;
             if ctx.json {
-                out::json(&e);
+                out::json(&serde_json::json!({ "effective": e, "compliance": comp }));
                 return Ok(0);
             }
             let rows: Vec<Vec<String>> = e
                 .rules
                 .iter()
-                .map(|r| vec![r.id.clone(), r.enforcement.as_str().into(), r.scope.label().into(), r.replaces.as_ref().map(|x| format!("replaces {}", x.id)).unwrap_or_default(), r.title.clone()])
+                .zip(&comp)
+                .map(|(r, c)| {
+                    let compliance = match (c.status, &c.check) {
+                        ("instructed", _) => "instructed only".to_string(),
+                        (s, Some(g)) => format!("{g}: {s}"),
+                        (s, None) => s.to_string(),
+                    };
+                    vec![r.id.clone(), r.enforcement.as_str().into(), r.scope.label().into(), compliance, r.title.clone()]
+                })
                 .collect();
-            out::table(&["ID", "ENFORCEMENT", "FROM", "", "TITLE"], &rows);
+            out::table(&["ID", "ENFORCEMENT", "FROM", "COMPLIANCE", "TITLE"], &rows);
+            println!("\ninstructed = Claude is told; only rules with a check= gate are verified (`nexus constitution verify --project …`).");
             for c in &e.conflicts {
                 println!("conflict: {}", c.message);
             }
@@ -149,6 +164,44 @@ pub fn run(ctx: &Ctx, c: ConstitutionCmd) -> Result<i32> {
                 println!("{} constitution(s), no problems", list.len());
             }
             return Ok(if bad > 0 { 1 } else { 0 });
+        }
+        ConstitutionCmd::Verify { project } => {
+            let p = find_project(&conn, &ws, &project)?;
+            let t = Target { project: Some((p.id.as_str(), p.stack.stacks.as_slice())), ..Default::default() };
+            let e = constitution::effective(&conn, &ctx.data_dir, &ws, &t)?;
+            let mut names: Vec<String> = e.rules.iter().filter_map(|r| r.check.clone()).collect();
+            names.sort();
+            names.dedup();
+            if names.is_empty() {
+                println!("no rule of {} names a check= gate — every rule is instructed only", p.name);
+                return Ok(0);
+            }
+            let dir = p.local_path.clone().filter(|d| d.is_dir()).ok_or_else(|| CoreError::invalid("the project folder is not available"))?;
+            let me = nexus_core::host::register(&conn, nexus_core::host::HostKind::Cli)?;
+            let mut failed = 0;
+            for n in &names {
+                let Some(g) = nexus_core::workflow::gates::find(&conn, &p.id, n)? else {
+                    println!("{n}: not defined for {} (`nexus gates add --project {} {n} -- …`)", p.name, p.name);
+                    failed += 1;
+                    continue;
+                };
+                let id = match nexus_core::workflow::gates::begin(&conn, &p.id, None, &g, &me.id) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("{n}: {e}");
+                        failed += 1;
+                        continue;
+                    }
+                };
+                let o = nexus_core::workflow::gates::execute(&g, &dir, &nexus_core::env::current(), &id);
+                let r = nexus_core::workflow::gates::finish(&conn, &id, &o)?;
+                println!("{n}: {} ({} ms)", r.status, r.duration_ms.unwrap_or(0));
+                if r.status != "passed" {
+                    failed += 1;
+                }
+            }
+            nexus_core::host::shutdown(&conn, &me.id)?;
+            return Ok(if failed > 0 { 1 } else { 0 });
         }
         ConstitutionCmd::New { title, scope, stacks, project, task, prefix, starter } => {
             let project_id = project.map(|q| find_project(&conn, &ws, &q).map(|p| p.id)).transpose()?;

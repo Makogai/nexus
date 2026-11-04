@@ -2,7 +2,7 @@
 import { computed, onActivated, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert } from '@lucide/vue'
+import { ArrowLeft, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
 import { relativeTime } from '../lib/format'
 import { api } from '../lib/ipc'
 import { STATUS_LABELS } from '../lib/knowledge'
@@ -114,6 +114,7 @@ async function unregister() {
         <button class="btn" :disabled="!project.available" @click="openShell"><SquareTerminal /> Shell</button>
         <button class="btn" data-resume-project @click="router.push(`/projects/${project.id}/resume`)"><History /> Resume project</button>
         <button class="btn" data-project-context @click="router.push({ name: 'context', query: { project: project.id } })"><Gauge /> Context</button>
+        <button class="btn" data-project-workflow @click="router.push({ name: 'workflows', query: { start: '1', project: project.id } })"><Workflow /> Run workflow</button>
         <button class="btn btn-primary" :disabled="!project.available" @click="app.openLaunch(project.id)"><Sparkles /> Launch Claude</button>
       </div>
     </div>

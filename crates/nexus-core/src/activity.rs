@@ -513,7 +513,15 @@ fn knowledge_line(conn: &Connection, s: &Session) -> Result<Option<String>> {
 fn task_data(conn: &Connection, s: &Session, fresh: bool) -> Option<String> {
     let ws = crate::workspace::get(conn, s.workspace_id.as_deref()?).ok().filter(|w| w.available)?;
     let v = crate::knowledge::tasks::view(conn, &ws, s.task_id.as_deref()?, 2000).ok()?;
-    Some(if fresh { crate::knowledge::tasks::data_block(&v) } else { crate::knowledge::tasks::status_data(&v) })
+    let mut block = if fresh { crate::knowledge::tasks::data_block(&v) } else { crate::knowledge::tasks::status_data(&v) };
+    // A workflow run on this task (ADR-0029): its step states as a bounded data block.
+    if let Some(run) = crate::workflow::run::active_for_task(conn, &v.id).ok().flatten()
+        && let Ok(rv) = crate::workflow::run::view(conn, &run.id)
+    {
+        block.push('\n');
+        block.push_str(&crate::workflow::run::brief(&rv, 700));
+    }
+    Some(block)
 }
 
 fn clip_block(text: &str, max: usize) -> String {

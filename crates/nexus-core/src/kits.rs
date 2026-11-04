@@ -431,9 +431,48 @@ pub struct KitLaunch {
 
 /// Plugin folders for a profile's session: one overlay per enabled, approved kit with exactly the selected parts.
 pub fn session_plugin_dirs(conn: &Connection, data_dir: &Path, profile_id: &str, policy: &PolicySummary) -> Result<(Vec<PathBuf>, Vec<KitLaunch>)> {
+    let (dirs, launches, _) = session_plugin_dirs_with(conn, data_dir, profile_id, policy, &[])?;
+    Ok((dirs, launches))
+}
+
+/// Like [`session_plugin_dirs`], plus `extra` skills (`kit:skill`, e.g. a workflow's, ADR-0029) for *this session
+/// only*: they join the overlay of a kit that is already enabled for the profile, in a separate overlay folder so other
+/// sessions of the profile are unaffected. A skill of a kit that is not enabled for the profile is refused (profile
+/// isolation) — returned with the reason.
+pub fn session_plugin_dirs_with(
+    conn: &Connection,
+    data_dir: &Path,
+    profile_id: &str,
+    policy: &PolicySummary,
+    extra: &[String],
+) -> Result<(Vec<PathBuf>, Vec<KitLaunch>, Vec<String>)> {
     let mut dirs = Vec::new();
     let mut launches = Vec::new();
-    for u in uses_for_profile(conn, data_dir, profile_id, policy)? {
+    let mut refused = Vec::new();
+    let mut uses = uses_for_profile(conn, data_dir, profile_id, policy)?;
+    let mut variant: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for r in extra {
+        let Some((kit, skill)) = r.split_once(':') else {
+            refused.push(format!("{r}: not a kit:skill reference"));
+            continue;
+        };
+        let Some(u) = uses.iter_mut().find(|u| get(conn, &u.kit_id).map(|k| k.name == kit).unwrap_or(false)) else {
+            refused.push(format!("{r}: kit {kit} is not enabled for this profile (profile isolation)"));
+            continue;
+        };
+        let k = get(conn, &u.kit_id)?;
+        let full = view(conn, data_dir, &k)?.inventory;
+        match full.skills.iter().find(|s| s.name == skill) {
+            Some(s) => {
+                if !u.inventory.skills.iter().any(|x| x.name == skill) {
+                    u.inventory.skills.push(s.clone());
+                    variant.entry(u.kit_id.clone()).or_default().push(skill.to_string());
+                }
+            }
+            None => refused.push(format!("{r}: kit {kit} has no skill {skill}")),
+        }
+    }
+    for u in uses {
         let k = get(conn, &u.kit_id)?;
         let mut l = KitLaunch {
             kit_id: k.id.clone(),
@@ -445,14 +484,19 @@ pub fn session_plugin_dirs(conn: &Connection, data_dir: &Path, profile_id: &str,
             blocked: u.blocked.clone(),
         };
         if l.blocked.is_none() {
-            match build_overlay(data_dir, &k, profile_id, &u.inventory) {
+            // Session-only skills get their own overlay folder; the profile's shared overlay stays as it is.
+            let folder = match variant.get(&u.kit_id) {
+                Some(extra) => format!("{profile_id}-x{}", &crate::knowledge::content_hash(extra.join(",").as_bytes())[..10]),
+                None => profile_id.to_string(),
+            };
+            match build_overlay(data_dir, &k, &folder, &u.inventory) {
                 Ok(dir) => dirs.push(dir),
                 Err(e) => l.blocked = Some(format!("could not prepare the kit: {e}")),
             }
         }
         launches.push(l);
     }
-    Ok((dirs, launches))
+    Ok((dirs, launches, refused))
 }
 
 fn copy_tree(src: &Path, dst: &Path, skip: &dyn Fn(&Path) -> bool) -> Result<()> {

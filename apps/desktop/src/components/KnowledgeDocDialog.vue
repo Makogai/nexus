@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Workflow as WorkflowIcon } from '@lucide/vue'
+import { router as appRouter } from '../router'
 import { computed, ref, watch } from 'vue'
 import { FolderOpen, GitBranch, ShieldCheck, Sparkles, TriangleAlert } from '@lucide/vue'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
@@ -11,6 +13,12 @@ import SessionRow from './SessionRow.vue'
 
 const props = defineProps<{ item: KnowledgeItem | null; workspaceId: string }>()
 const emit = defineEmits<{ close: []; approved: []; changed: []; launch: [item: KnowledgeItem] }>()
+/** Start a workflow run on this task (ADR-0029). */
+function runWorkflow() {
+  const it = props.item
+  emit('close')
+  if (it?.id) appRouter.push({ name: 'workflows', query: { start: '1', task: it.id, project: it.projectId ?? undefined } })
+}
 const sessions = useSessionStore()
 
 const doc = ref<KnowledgeDoc | null>(null)
@@ -129,6 +137,7 @@ async function approve() {
       <button v-if="item" class="btn btn-ghost" @click="revealItemInDir(item.path)"><FolderOpen /> Show file</button>
       <span class="spacer" />
       <button v-if="item?.needsApproval" class="btn btn-primary" :disabled="busy || !doc" @click="approve"><ShieldCheck /> Approve this version</button>
+      <button v-if="task && task.status !== 'done' && item" class="btn" data-run-workflow @click="runWorkflow"><WorkflowIcon /> Run workflow</button>
       <button v-if="task && task.status !== 'done' && item" class="btn btn-primary" data-launch @click="emit('launch', item)"><Sparkles /> Launch Claude</button>
       <button class="btn" @click="emit('close')">Close</button>
     </template>

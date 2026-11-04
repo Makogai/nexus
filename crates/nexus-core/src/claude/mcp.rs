@@ -43,6 +43,9 @@ pub struct Integrations {
     /// The project's context strategy applied to this session (ADR-0028).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<super::prepare::ContextLaunch>,
+    /// The workflow run this session works on (ADR-0029).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<super::prepare::WorkflowLaunch>,
 }
 
 impl IntegrationStatus {

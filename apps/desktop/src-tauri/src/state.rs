@@ -28,6 +28,8 @@ pub struct AppCtx {
 pub struct AttentionState {
     stopped: Mutex<HashSet<String>>,
     view: Mutex<ViewFocus>,
+    /// A notification click that started this process (`nexus://notification/<id>`), until the UI takes it.
+    activation: Mutex<Option<String>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -50,6 +52,12 @@ impl AttentionState {
     }
     pub fn view(&self) -> ViewFocus {
         self.view.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+    pub fn set_activation(&self, id: String) {
+        *self.activation.lock().unwrap_or_else(|p| p.into_inner()) = Some(id);
+    }
+    pub fn take_activation(&self) -> Option<String> {
+        self.activation.lock().unwrap_or_else(|p| p.into_inner()).take()
     }
 }
 

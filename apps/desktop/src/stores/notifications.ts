@@ -120,6 +120,9 @@ export const useNotificationStore = defineStore('notifications', () => {
       case 'profile':
         await router.push({ name: 'profiles' })
         break
+      case 'workflow':
+        if (t.id) await router.push({ name: 'workflows', query: { run: t.id } })
+        break
       case 'project':
         if (t.id) await router.push({ name: 'project', params: { id: t.id } })
         break
@@ -154,6 +157,9 @@ export const useNotificationStore = defineStore('notifications', () => {
     document.addEventListener('visibilitychange', reportView)
     reportView()
     await Promise.all([refresh(), loadPrefs()])
+    // NEXUS was started by a click on a notification (nexus://notification/<id>).
+    const pending = await api.notificationsTakeActivation().catch(() => null)
+    if (pending) await open({ id: pending })
   }
 
   return {

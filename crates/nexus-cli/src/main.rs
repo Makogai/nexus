@@ -12,6 +12,7 @@ mod launch;
 mod mcp;
 mod notifications;
 mod out;
+mod workflow;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -64,6 +65,12 @@ enum Command {
     /// AI Kits: Claude Code plugins or skill folders, enabled per profile for NEXUS sessions.
     #[command(subcommand)]
     Kits(kits::KitCmd),
+    /// Workflows: definitions, templates, runs (AI-reported vs verified), reviews.
+    #[command(subcommand)]
+    Workflow(workflow::WorkflowCmd),
+    /// Quality gates: trusted, deterministic checks per project (program + arguments, no shell).
+    #[command(subcommand)]
+    Gates(workflow::GatesCmd),
     /// Context Manager: a project's context strategy, onboarding analysis and the Context Inspector.
     #[command(subcommand)]
     Context(context::ContextCmd),
@@ -211,6 +218,7 @@ impl Ctx {
             );
         }
         host::reconcile(&conn, now_ms())?;
+        nexus_core::workflow::run::reconcile(&conn, now_ms())?;
         Ok(conn)
     }
 }
@@ -234,6 +242,8 @@ fn main() -> ExitCode {
         Command::Notifications(c) => notifications::run(&ctx, c).map(|_| 0),
         Command::Constitution(c) => constitution::run(&ctx, c),
         Command::Context(c) => context::run(&ctx, c).map(|_| 0),
+        Command::Workflow(c) => workflow::run_workflow(&ctx, c),
+        Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),
