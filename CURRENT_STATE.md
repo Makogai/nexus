@@ -65,6 +65,14 @@ Run one group at a time; free memory checked before each group. "Latest" = run a
 After the log, only the gate-redaction test fixture changed (test code, see below); `cargo test -p nexus-core --lib
 workflow::gates` (2/2) and `cargo clippy -p nexus-core --all-targets -- -D warnings` were rerun and passed.
 
+**Follow-up fix after the milestone commit** (separate commit): gates defined before migration 0013 have no stored
+command hash and could never have been approved. They now show their computed hash, stay unapproved, and become
+approvable once (approval stores the hash). Rerun on that code, all passed: `cargo test -p nexus-core -p nexus-cli`
+(163 + 28 + 6 + 2 + 5 + 4), `cargo clippy --workspace --all-targets -- -D warnings`, E2E rebuild
+(`npx tauri build --debug --no-bundle --features e2e-webview-debugging`) + `node e2e/workflows.mjs` 22/22 (the only
+E2E suite that uses gates). Not rerun for this fix: the other E2E and real-Claude suites (they do not touch gates)
+and T18 (webview hardening unchanged).
+
 Real-Claude suites use synthetic profiles in temp dirs and temporary repositories only. Peak load stayed well
 within memory (free RAM 4.3–5.8 GB between groups, low-memory watchdog never fired); no leftover processes.
 
@@ -90,7 +98,8 @@ uninstaller hook.
   check in MANUAL_CHECKS 27). Development builds register `dev.nexus.desktop.dev` in HKCU on their first notification.
 * Gates run with the user's rights; a run needs the project folder on this machine to verify. Gate approval is
   machine-local like the gates themselves: it guards against unseen command changes, not against a person approving
-  a harmful command. Approving one gate resumes every step of that project waiting on gates (they re-block with a
+  a harmful command. Gates that existed before this stage need one approval after the upgrade. Approving one gate
+  resumes every step of that project waiting on gates (they re-block with a
   fresh reason if another gate is still unapproved).
 * Context strategy is machine-local; InstructionsLoaded costs one hook process per instruction file at start.
 * Knowledge files are not watched; session artifacts and kit overlays are not pruned.

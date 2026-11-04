@@ -69,15 +69,20 @@ pub struct GateInput {
 
 fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Gate> {
     let args: String = r.get(5)?;
-    let command_hash: String = r.get(9)?;
+    let program: String = r.get(4)?;
+    let args: Vec<String> = serde_json::from_str(&args).unwrap_or_default();
+    let stored: String = r.get(9)?;
+    // Gates defined before migration 0013 have no stored hash: they are shown with their computed hash and stay
+    // unapproved until the person approves them once (`approve` then stores the hash).
+    let command_hash = if stored.is_empty() { self::command_hash(&program, &args) } else { stored };
     let approved_hash: Option<String> = r.get(10)?;
     Ok(Gate {
         id: r.get(0)?,
         project_id: r.get(1)?,
         name: r.get(2)?,
         title: r.get(3)?,
-        program: r.get(4)?,
-        args: serde_json::from_str(&args).unwrap_or_default(),
+        program,
+        args,
         timeout_secs: r.get(6)?,
         updated_at: r.get(7)?,
         version: r.get(8)?,
@@ -144,7 +149,8 @@ pub fn approve(conn: &Connection, project_id: &str, name: &str, expected_hash: &
         return Err(CoreError::Conflict(format!("gate {name} changed since it was reviewed (now version {}): review it again", g.version)));
     }
     conn.execute(
-        "UPDATE quality_gates SET approved_hash = command_hash, approved_at = ?3 WHERE project_id = ?1 AND name = ?2 AND command_hash = ?4",
+        "UPDATE quality_gates SET command_hash = ?4, approved_hash = ?4, approved_at = ?3
+         WHERE project_id = ?1 AND name = ?2 AND (command_hash = ?4 OR command_hash = '')",
         params![project_id, name, now_ms(), expected_hash],
     )?;
     find(conn, project_id, name)?.ok_or_else(|| CoreError::not_found("gate"))
@@ -497,6 +503,16 @@ mod tests {
         let mut forged = approve(&conn, &p.id, "version", &changed.command_hash).unwrap();
         forged.args = vec!["--danger".into()];
         assert!(begin(&conn, &p.id, None, &forged, "host-x").is_err(), "only the approved command, as stored, runs");
+
+        // A gate defined before migration 0013 (no stored hash) is unapproved until approved once, then runs.
+        conn.execute("UPDATE quality_gates SET command_hash = '', approved_hash = NULL WHERE name = 'fail'", []).unwrap();
+        let legacy = find(&conn, &p.id, "fail").unwrap().unwrap();
+        assert!(!legacy.approved && legacy.command_hash == command_hash("git", &legacy.args));
+        assert!(begin(&conn, &p.id, None, &legacy, "host-x").is_err());
+        assert!(approve(&conn, &p.id, "fail", &"0".repeat(64)).is_err(), "only the shown command can be approved");
+        let legacy = approve(&conn, &p.id, "fail", &legacy.command_hash).unwrap();
+        assert!(legacy.approved);
+        assert!(begin(&conn, &p.id, None, &legacy, "host-x").is_ok());
         revoke(&conn, &p.id, "version").unwrap();
         assert!(!find(&conn, &p.id, "version").unwrap().unwrap().approved);
 
