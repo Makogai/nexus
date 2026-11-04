@@ -52,7 +52,11 @@
 16. **Effective instructions**: project page → *Effective instructions* with Personal selected → the list matches
     what `/memory` shows in Claude. If a "belongs to the default Claude profile" warning appears, your
     `~\.claude\CLAUDE.md` reaches Personal sessions for projects inside your home folder (Claude behaviour).
-17. Re-run the snapshot from step 1 → still unchanged (hooks and MCP are session-scoped flags, not profile edits).
+17. **Profile isolation** (only if step 16 showed the warning): *Claude profiles → edit Personal* → tick "Keep my
+    default profile's personal instructions out of this profile's sessions" → the inspector shows those files as
+    *excluded — NEXUS profile isolation*; in a new session `/memory` no longer lists them. `claude` started outside
+    NEXUS still loads them (unchanged).
+18. Re-run the snapshot from step 1 → still unchanged (hooks, MCP and isolation are session-scoped, not profile edits).
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

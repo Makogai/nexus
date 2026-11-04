@@ -51,6 +51,9 @@ pub enum Load {
     NotLoaded,
     /// Documented fallback whose loading could not be observed (AGENTS.md).
     Fallback,
+    /// An import from outside the project: Claude loads it only after the user approves external imports once per
+    /// project (verified: not loaded in a session without that approval).
+    NeedsApproval,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -93,6 +96,8 @@ pub struct Input<'a> {
     pub cwd: &'a Path,
     /// `CLAUDE_CODE_DISABLE_CLAUDE_MDS` is set in the environment Claude receives.
     pub env_disabled: bool,
+    /// `claudeMdExcludes` NEXUS adds to the session settings (profile instruction isolation, ADR-0020).
+    pub session_excludes: &'a [String],
 }
 
 pub fn inspect(i: &Input<'_>) -> Inspection {
@@ -105,7 +110,10 @@ pub fn inspect(i: &Input<'_>) -> Inspection {
         excludes.extend(settings_file(&i.cwd.join(f)).0);
     }
     let agents_mode = agents_mode.unwrap_or_else(|| policy::INSTRUCTION_FILE_MODES[0].to_string());
-    let mut b = Builder { layers: Vec::new(), seen: HashSet::new(), excludes: &excludes, cwd: i.cwd };
+    let mut sourced: Vec<(String, &'static str)> = excludes.iter().map(|p| (p.clone(), "claudeMdExcludes")).collect();
+    sourced.extend(i.session_excludes.iter().map(|p| (p.clone(), "NEXUS profile isolation")));
+    excludes.extend(i.session_excludes.iter().cloned());
+    let mut b = Builder { layers: Vec::new(), seen: HashSet::new(), excludes: &sourced, cwd: i.cwd };
 
     if let Some(dir) = i.managed_dir {
         b.file(Scope::Managed, "claude-md", &dir.join("CLAUDE.md"), false);
@@ -138,7 +146,7 @@ pub fn inspect(i: &Input<'_>) -> Inspection {
             b.file(Scope::Local, "claude-md", &dir.join("CLAUDE.local.md"), true);
             if !paths_eq(&default_cfg, i.config_dir) {
                 for l in &mut b.layers[before..] {
-                    if l.path.as_ref().is_some_and(|p| p.starts_with(&default_cfg)) {
+                    if l.load != Load::Excluded && l.path.as_ref().is_some_and(|p| p.starts_with(&default_cfg)) {
                         l.reason = Some(format!(
                             "the default profile's {} — loaded as project memory because the folder is inside your home folder",
                             l.path.as_ref().and_then(|p| p.strip_prefix(&default_cfg).ok()).map(|p| p.display().to_string()).unwrap_or_default()
@@ -177,7 +185,10 @@ pub fn inspect(i: &Input<'_>) -> Inspection {
             warnings.push(format!("{} has {} lines (Claude recommends under {ADVISORY_LINES})", short(l), l.lines));
         }
         if l.reason.as_deref().is_some_and(|r| r.starts_with("the default profile's")) && l.load == Load::AtStart {
-            warnings.push(format!("{} belongs to the default Claude profile but also reaches this profile's sessions", short(l)));
+            warnings.push(format!(
+                "{} belongs to the default Claude profile but also reaches this profile's sessions — turn on instruction isolation for this profile to keep it out",
+                short(l)
+            ));
         }
     }
     let at_start: Vec<&Layer> = b.layers.iter().filter(|l| l.load == Load::AtStart).collect();
@@ -248,14 +259,15 @@ fn settings_file(path: &Path) -> (Vec<String>, Option<String>) {
 struct Builder<'a> {
     layers: Vec<Layer>,
     seen: HashSet<String>,
-    excludes: &'a [String],
+    /// (pattern, where it comes from)
+    excludes: &'a [(String, &'static str)],
     cwd: &'a Path,
 }
 
 impl Builder<'_> {
     fn excluded(&self, path: &Path) -> Option<String> {
         let p = path.to_string_lossy().replace('\\', "/");
-        self.excludes.iter().find(|pat| glob_match(&pat.replace('\\', "/"), &p)).cloned()
+        self.excludes.iter().find(|(pat, _)| glob_match(&pat.replace('\\', "/"), &p)).map(|(pat, src)| format!("{src}: {pat}"))
     }
 
     fn file(&mut self, scope: Scope, kind: &'static str, path: &Path, excludable: bool) {
@@ -264,7 +276,7 @@ impl Builder<'_> {
         }
         let ex = if excludable { self.excluded(path) } else { None };
         let (load, reason) = match ex {
-            Some(pat) => (Load::Excluded, Some(format!("claudeMdExcludes: {pat}"))),
+            Some(why) => (Load::Excluded, Some(why)),
             None => (Load::AtStart, None),
         };
         if let Some(idx) = self.push_file(scope, kind, path, None, load, reason)
@@ -313,7 +325,7 @@ impl Builder<'_> {
             let globs = rule_paths(&text);
             let ex = self.excluded(&f);
             let (load, reason) = match (ex, globs.is_empty()) {
-                (Some(pat), _) => (Load::Excluded, Some(format!("claudeMdExcludes: {pat}"))),
+                (Some(why), _) => (Load::Excluded, Some(why)),
                 (None, true) => (Load::AtStart, None),
                 (None, false) => (Load::OnDemand, Some("conditional rule: loads when Claude touches matching files".into())),
             };
@@ -339,9 +351,16 @@ impl Builder<'_> {
             if !target.is_file() {
                 continue;
             }
-            let outside = scope != Scope::User && !target.starts_with(self.cwd) && !target.starts_with(&base);
-            let reason = outside.then(|| "outside the project: Claude asks once per project before loading it".to_string());
-            if let Some(child) = self.push_file(scope, "import", &target, Some(&parent), Load::AtStart, reason) {
+            // Project-level imports from outside the working directory need a one-time approval in Claude.
+            let outside = scope != Scope::User && !target.starts_with(self.cwd);
+            let (load, reason) = if outside {
+                (Load::NeedsApproval, Some("outside the project: Claude loads it only after you approve external imports for this project".to_string()))
+            } else {
+                (Load::AtStart, None)
+            };
+            if let Some(child) = self.push_file(scope, "import", &target, Some(&parent), load, reason)
+                && load == Load::AtStart
+            {
                 self.imports(scope, child, hop + 1);
             }
         }
@@ -478,12 +497,16 @@ fn strip_html_comments(t: &str) -> String {
     out
 }
 
-/// Glob match on `/`-separated paths: `**` spans directories, `*` and `?` stay within one segment. Case-insensitive
-/// on Windows.
+/// Glob match on `/`-separated paths, **case-sensitive like Claude** (verified: a lower-case drive letter does not
+/// match): `**` spans directories, `*` and `?` stay within one segment, `[...]` is a character class.
 pub fn glob_match(pattern: &str, path: &str) -> bool {
-    let (p, s) = if cfg!(windows) { (pattern.to_lowercase(), path.to_lowercase()) } else { (pattern.to_string(), path.to_string()) };
-    let p: Vec<char> = p.chars().collect();
-    let s: Vec<char> = s.chars().collect();
+    let p: Vec<char> = pattern.chars().collect();
+    let s: Vec<char> = path.chars().collect();
+    fn class(p: &[char]) -> Option<(Vec<char>, usize)> {
+        // p[0] == '['; returns the members and the index after ']'.
+        let close = p.iter().skip(2).position(|c| *c == ']').map(|i| i + 2)?;
+        Some((p[1..close].to_vec(), close + 1))
+    }
     fn m(p: &[char], s: &[char]) -> bool {
         match p.first() {
             None => s.is_empty(),
@@ -493,6 +516,10 @@ pub fn glob_match(pattern: &str, path: &str) -> bool {
             }
             Some('*') => (0..=s.len()).take_while(|i| *i == 0 || s[i - 1] != '/').any(|i| m(&p[1..], &s[i..])),
             Some('?') => s.first().is_some_and(|c| *c != '/') && m(&p[1..], &s[1..]),
+            Some('[') => match class(p) {
+                Some((members, next)) => s.first().is_some_and(|c| members.contains(c)) && m(&p[next..], &s[1..]),
+                None => s.first() == Some(&'[') && m(&p[1..], &s[1..]),
+            },
             Some(c) => s.first() == Some(c) && m(&p[1..], &s[1..]),
         }
     }
@@ -515,6 +542,8 @@ mod tests {
         assert!(glob_match("**/*.md", "/x/y.md"));
         assert!(!glob_match("/x/*.md", "/x/y/z.md"));
         assert!(glob_match("/x/?.md", "/x/a.md") && !glob_match("/x/?.md", "/x/ab.md"));
+        assert!(glob_match("C:/my home [(]x[)]/.claude/rules/**", "C:/my home (x)/.claude/rules/a/b.md"), "bracket escapes");
+        assert!(!glob_match("c:/home/.claude/CLAUDE.md", "C:/home/.claude/CLAUDE.md"), "case-sensitive, like Claude");
     }
 
     #[test]
@@ -547,7 +576,7 @@ mod tests {
         w(&proj.join(".claude").join("settings.json"), r#"{"claudeMdExcludes": ["**/work/CLAUDE.md"], "env": {"SECRET": "x"}}"#);
 
         let pol = PolicySummary::default();
-        let i = inspect(&Input { managed_dir: Some(&managed), policy: &pol, config_dir: &cfg, home: &home, cwd: &proj, env_disabled: false });
+        let i = inspect(&Input { managed_dir: Some(&managed), policy: &pol, config_dir: &cfg, home: &home, cwd: &proj, env_disabled: false, session_excludes: &[] });
         // Only the synthetic tree: real ancestors of the temp dir (outside `root`) are machine-specific.
         let mine: Vec<&Layer> = i.layers.iter().filter(|l| l.path.as_ref().is_some_and(|p| p.starts_with(&root))).collect();
         let order: Vec<(Scope, String, Load)> = mine
@@ -579,7 +608,7 @@ mod tests {
         assert!(i.containing("Parent folder memory").is_none(), "excluded files do not count");
         assert!(!serde_json::to_string(&i).unwrap().contains("Always run the linter"), "content is never serialised");
 
-        let off = inspect(&Input { managed_dir: Some(&managed), policy: &pol, config_dir: &cfg, home: &home, cwd: &proj, env_disabled: true });
+        let off = inspect(&Input { managed_dir: Some(&managed), policy: &pol, config_dir: &cfg, home: &home, cwd: &proj, env_disabled: true, session_excludes: &[] });
         assert!(off.disabled && off.layers.iter().all(|l| l.load != AtStart));
     }
 }

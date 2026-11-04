@@ -69,6 +69,7 @@ function profile(id: string, over: Partial<ClaudeProfile> = {}): ClaudeProfile {
     extraArgs: [],
     managedByNexus: false,
     inheritProviderEnv: false,
+    isolateInstructions: false,
     defaultWorkProfile: null,
     defaultEffort: null,
     defaultModel: null,
@@ -273,6 +274,26 @@ describe('ProfileDialog', () => {
       }),
     )
     expect(w.emitted('close')).toBeTruthy()
+  })
+
+  it('instruction isolation is opt-in, sent when chosen and unavailable for the default location', async () => {
+    useProfileStore().launchOptions = OPTIONS
+    api.profileCreate.mockResolvedValue(profile('w'))
+    const w = mountWith(ProfileDialog, { open: true, mode: 'create' })
+    await flushPromises()
+    const box = w.find('[data-isolation] input')
+    expect((box.element as HTMLInputElement).checked).toBe(false)
+    expect(w.find('[data-isolation]').text()).toContain('Organisation-managed and project instructions still load')
+    await w.find('#pf-name').setValue('Work')
+    await w.find('.input.mono').setValue('/home/u/.claude-work')
+    await box.setValue(true)
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.profileCreate).toHaveBeenCalledWith(expect.objectContaining({ isolateInstructions: true }))
+
+    const d = mountWith(ProfileDialog, { open: true, mode: 'edit', profile: profile('d', { configDir: null }) })
+    await flushPromises()
+    expect(d.find('[data-isolation] input').attributes('disabled')).toBeDefined()
   })
 
   it('registering the detected default location sends no config dir', async () => {

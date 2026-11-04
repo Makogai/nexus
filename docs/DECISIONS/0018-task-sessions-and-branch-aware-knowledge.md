@@ -1,6 +1,8 @@
 # ADR-0018 — Task-driven sessions and branch-aware knowledge
 
-Status: Accepted, implemented (2026-11-04, M17 + M19)
+Status: Accepted, implemented (2026-11-04, M17 + M19). **Amended by ADR-0020**: the task brief no longer goes into
+the system prompt; the system prompt carries only a pointer with the task id and the task text arrives as an escaped
+data block in SessionStart context.
 
 ## Context
 Tasks are Markdown files (ADR-0013). The owner asked for: launching Claude directly from a task with the right
@@ -22,7 +24,7 @@ always-on rules (minus duplicates of loaded CLAUDE.md text, ADR-0019) and the ta
 * A launch for a task uses the task's project (a task bound to another project is refused), the chosen profile
   and its work profile, the task title as the session name, and moves a `backlog`/`ready` task to `in-progress`
   with a log line (optional in the desktop dialog). Resuming never changes the status.
-* **Brief, not history**: Claude gets ≤ 900 characters appended after the work profile and rules — id, title,
+* *(Superseded by ADR-0020 — kept for history.)* **Brief, not history**: Claude gets ≤ 900 characters appended after the work profile and rules — id, title,
   status, priority, branch, a 360-character excerpt of the description, acceptance criteria and up to eight
   numbered checklist items — framed as data from a workspace file (threat T22). The `## Log` section is never
   included.

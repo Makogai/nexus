@@ -40,6 +40,7 @@ fn profile(config_dir: Option<&Path>) -> ClaudeProfile {
         extra_args: vec![],
         managed_by_nexus: true,
         inherit_provider_env: false,
+        isolate_instructions: false,
         default_work_profile: None,
         default_effort: None,
         default_model: None,

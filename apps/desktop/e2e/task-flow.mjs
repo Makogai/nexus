@@ -100,6 +100,25 @@ function mcp(sessionId, calls) {
   })
 }
 
+/** What the NEXUS SessionStart hook returns to Claude for this session (Claude runs exactly this command). */
+function hookContext(sessionId, source, claudeSessionId) {
+  return new Promise((resolve) => {
+    const p = spawn(nexusCli, ['--data-dir', dataDir, 'hook', '--session', sessionId, 'session-start'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    let out = ''
+    p.stdout.on('data', (d) => (out += d))
+    p.on('exit', () => {
+      try {
+        resolve(JSON.parse(out).hookSpecificOutput?.additionalContext ?? '')
+      } catch {
+        resolve('')
+      }
+    })
+    p.stdin.end(js({ hook_event_name: 'SessionStart', source, session_id: claudeSessionId }))
+  })
+}
+let resumedId = null
+const resumed0 = () => resumedId
+
 const report1 = join(root, 'report-1.json')
 const report2 = join(root, 'report-2.json')
 let child = startApp(report1)
@@ -132,11 +151,14 @@ try {
   check('Claude runs under the selected profile', r1.env.CLAUDE_CONFIG_DIR === cfg, r1.env.CLAUDE_CONFIG_DIR)
   check('…with the profile’s work profile', brief.startsWith('NEXUS work profile: BALANCED'))
   check('…in the task’s project', r1.cwd.toLowerCase() === repo.toLowerCase(), r1.cwd)
-  check('…with a short task brief (status moved to in-progress)', brief.includes(`NEXUS task for this session (id ${setup.task.id}): Ship checkout\nStatus: in-progress`))
+  check('…with a pointer to the task — and no task text — in the system prompt', brief.includes(`NEXUS task ${setup.task.id}`) && !brief.includes('Ship checkout') && !brief.includes('Cart summary'))
   check('…and never the task history', !brief.includes('## Log') && brief.length < 2500, `${brief.length} chars`)
   const sessions = await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)
   const s1 = sessions.find((s) => s.taskId === setup.task.id)
   check('the session is linked to the task and running', !!s1 && s1.running, s1 ? `${s1.state}` : 'missing')
+  check('the task moved to in-progress', s1?.integrations?.task?.status === 'in-progress' && s1?.integrations?.task?.delivery === 'session-start')
+  const startCtx = await hookContext(s1.id, 'startup', s1.claudeSessionId)
+  check('the task text arrives as a data block at session start', startCtx.includes(`<nexus-task-data id="${setup.task.id}" status="in-progress"`) && startCtx.includes('title: Ship checkout'))
 
   // 2. Claude updates the task through the NEXUS MCP server (as the real Claude would).
   const r = await mcp(s1.id, [
@@ -169,8 +191,10 @@ try {
   await cdp.waitFor(`[...document.querySelectorAll('.page .session')].some((r) => r.innerText.includes('Ship checkout') && [...r.querySelectorAll('button')].some((b) => b.innerText.includes('Resume')))`, 15000)
   await cdp.evaluate(`(() => { const row = [...document.querySelectorAll('.page .session')].find((r) => r.innerText.includes('Ship checkout')); [...row.querySelectorAll('button')].find((b) => b.innerText.includes('Resume')).click(); return true })()`)
   const r2 = await waitForFile(report2)
+  resumedId = (await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)).find((s) => s.resumedFrom === s1.id)?.id
   check('Resume continues the same Claude conversation', r2.args.includes('--resume') && r2.args[r2.args.indexOf('--resume') + 1] === s1.claudeSessionId)
-  check('…with the task’s current status in the brief', appended(r2).includes('Status: review'))
+  const resumeCtx = await hookContext(resumed0(), 'resume', s1.claudeSessionId)
+  check('…and SessionStart brings the task’s current state', resumeCtx.includes('status="review"') && resumeCtx.includes('checklist: 1/2 items done'), resumeCtx.slice(0, 200))
   const chip = await cdp.waitFor(`[...document.querySelectorAll('.page .session .task-chip')].some((c) => c.innerText.includes('Ship checkout'))`, 10000).catch(() => false)
   check('session rows show the task they work on', !!chip)
   const resumed = (await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)).find((s) => s.resumedFrom === s1.id)

@@ -11,6 +11,19 @@ _Last updated: 2026-11-04 (end of session 4)._ Read this first, then `docs/ROADM
 * Phases: Phase 1 ✅ · M9 ✅ · M10 ✅ · M11 partial · M12 ✅ · M13 ✅ · M16 ✅ · M17 ✅ (activity consolidation open) ·
   M19 ✅ · M20 ✅ · M21 partial (skills catalog).
 
+## Security follow-up (session 5, on the same branch before merging)
+
+* **Profile instruction isolation** (ADR-0020, migration 0007): opt-in per profile; session-scoped `claudeMdExcludes`
+  for exactly the default profile's `~/.claude/CLAUDE.md` and `~/.claude/rules/**` (literal paths + bracket-escaped
+  glob, case from the session cwd); works under hooks-blocking policy; never touches Claude configs or managed values.
+  Desktop profile dialog option with warning; `nexus profiles add --isolate-instructions`, `nexus profiles isolate`.
+* **Task text as untrusted data**: the system prompt carries only a pointer with the task id; title/description/
+  checklist arrive as one escaped `<nexus-task-data>` block in SessionStart context; Claude's `--name` is
+  `NEXUS task <id>`. Adversarial tests (unit, CLI) and a real-CLI check.
+* Found by the new tests and fixed: the task title reached Claude verbatim as `--name`; the inspector called
+  external imports loaded (they need approval) and matched excludes case-insensitively (Claude is case-sensitive).
+* Verified against the real CLI: `e2e/security-real-claude.mjs` 12/12 (synthetic `home (x)`, control + isolated runs).
+
 ## What exists now (session 4)
 
 * **Launch from a task** — desktop (project page *Open tasks* → Launch, board card ✦, task dialog) and

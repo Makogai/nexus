@@ -4,6 +4,7 @@ pub mod auth;
 pub mod hooks;
 pub mod install;
 pub mod instructions;
+pub mod isolation;
 pub mod launch;
 pub mod mcp;
 pub mod policy;

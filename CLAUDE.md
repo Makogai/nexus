@@ -17,6 +17,7 @@ cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `n
 cd apps/desktop && node e2e/task-flow.mjs   # project → task → launch → MCP update → restart → resume (E2E build)
 cd apps/desktop && node e2e/hooks-real-claude.mjs # real Claude runs NEXUS hooks (synthetic profile)
 cd apps/desktop && node e2e/instructions-real-claude.mjs # inspector vs. real Claude InstructionsLoaded
+cd apps/desktop && node e2e/security-real-claude.mjs # isolation + task-text-as-data vs. real Claude
 ```
 
 ## Architecture rules
@@ -38,6 +39,8 @@ cd apps/desktop && node e2e/instructions-real-claude.mjs # inspector vs. real Cl
 * Everything a session gets from NEXUS is built by `claude::prepare` (both hosts). Appended context stays bounded:
   work profile, approved always-on rules not already in CLAUDE.md, a task brief — never histories or whole knowledge.
 * NEXUS reads Claude's instruction files (inspector) but never writes, reorders or replaces them (ADR-0019).
+* Workspace-controlled text (task titles/descriptions, synced files) never goes into the system prompt or `--name`;
+  it reaches Claude only as escaped, labelled data (SessionStart context, tool output) — ADR-0020, threat T22.
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
   older Tauri crates than the npm packages and `tauri build` fails its version check.
 

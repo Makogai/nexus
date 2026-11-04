@@ -245,6 +245,8 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
             (None, Some(t)) => launch::sanitize_title(&t.title),
             _ => title,
         };
+        let settings_path = prepared.settings.clone();
+        let claude_name = prepared.claude_name.clone();
         let integrations = prepared.integrations;
         let spec = launch::build(
             &LaunchRequest {
@@ -253,7 +255,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 cwd: &target.cwd,
                 mode: Mode::New,
                 claude_session_id: &claude_session_id,
-                title: Some(&title),
+                title: Some(claude_name.as_deref().unwrap_or(&title)),
                 work_profile: wp,
                 effort: effort.as_deref(),
                 model: model.as_deref(),
@@ -261,7 +263,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 workspace_id: target.workspace_id.as_deref(),
                 project_id: target.project_id.as_deref(),
                 mcp_config: integrations.mcp.config_path(),
-                settings: integrations.hooks.config_path(),
+                settings: settings_path.as_deref(),
                 context_prompt: prepared.prompt.as_deref(),
             },
             &env::current(),
@@ -351,6 +353,7 @@ pub async fn session_resume(
             &prev.cwd,
             false,
         )?;
+        let settings_path = prepared.settings.clone();
         let integrations = prepared.integrations;
         let spec = launch::build(
             &LaunchRequest {
@@ -367,7 +370,7 @@ pub async fn session_resume(
                 workspace_id: prev.workspace_id.as_deref(),
                 project_id: prev.project_id.as_deref(),
                 mcp_config: integrations.mcp.config_path(),
-                settings: integrations.hooks.config_path(),
+                settings: settings_path.as_deref(),
                 context_prompt: prepared.prompt.as_deref(),
             },
             &env::current(),

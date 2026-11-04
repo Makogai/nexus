@@ -60,24 +60,47 @@ pub fn settings_json(nexus_exe: &Path, data_dir: &Path, nexus_session_id: &str) 
 
 /// Decide and, when allowed, write the session's hook settings.
 pub fn prepare(policy: &PolicySummary, nexus_exe: Option<&Path>, data_dir: &Path, nexus_session_id: &str) -> Result<IntegrationStatus> {
-    if let Some(reason) = blocked_by(policy) {
-        return Ok(IntegrationStatus::Blocked { reason: reason.into() });
-    }
-    let Some(exe) = nexus_exe.filter(|e| e.is_file()) else {
-        return Ok(IntegrationStatus::Unavailable {
-            reason: "the nexus command-line tool was not found next to NEXUS".into(),
-        });
-    };
+    Ok(prepare_session_settings(policy, nexus_exe, data_dir, nexus_session_id, &[])?.0)
+}
+
+/// The session's `--settings` file: NEXUS hooks (when policy allows them) and `claudeMdExcludes` for profile
+/// instruction isolation (ADR-0020; a plain setting, so it also applies when organisation policy blocks hooks).
+/// Returns the hook status and the file to pass, if any.
+pub fn prepare_session_settings(
+    policy: &PolicySummary,
+    nexus_exe: Option<&Path>,
+    data_dir: &Path,
+    nexus_session_id: &str,
+    claude_md_excludes: &[String],
+) -> Result<(IntegrationStatus, Option<std::path::PathBuf>)> {
     uuid::Uuid::parse_str(nexus_session_id).map_err(|_| CoreError::invalid("session id must be a UUID"))?;
+    let hooks: std::result::Result<&Path, IntegrationStatus> = match (blocked_by(policy), nexus_exe.filter(|e| e.is_file())) {
+        (Some(reason), _) => Err(IntegrationStatus::Blocked { reason: reason.into() }),
+        (None, None) => Err(IntegrationStatus::Unavailable { reason: "the nexus command-line tool was not found next to NEXUS".into() }),
+        (None, Some(exe)) => Ok(exe),
+    };
+    if claude_md_excludes.is_empty()
+        && let Err(status) = &hooks
+    {
+        return Ok((status.clone(), None));
+    }
+    let mut doc = match &hooks {
+        Ok(exe) => settings_json(exe, data_dir, nexus_session_id),
+        Err(_) => json!({}),
+    };
+    if !claude_md_excludes.is_empty() {
+        doc["claudeMdExcludes"] = json!(claude_md_excludes);
+    }
     let dir = session_dir(data_dir, nexus_session_id);
     std::fs::create_dir_all(&dir).map_err(|e| CoreError::io("cannot create", &dir, e))?;
     let config = dir.join("settings.json");
-    let body = serde_json::to_vec_pretty(&settings_json(exe, data_dir, nexus_session_id)).map_err(|source| CoreError::Json {
-        what: "hook settings".into(),
-        source,
-    })?;
+    let body = serde_json::to_vec_pretty(&doc).map_err(|source| CoreError::Json { what: "session settings".into(), source })?;
     crate::workspace::write_atomic(&config, &body)?;
-    Ok(IntegrationStatus::Enabled { config })
+    let status = match hooks {
+        Ok(_) => IntegrationStatus::Enabled { config: config.clone() },
+        Err(status) => status,
+    };
+    Ok((status, Some(config)))
 }
 
 #[cfg(test)]

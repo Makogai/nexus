@@ -24,7 +24,10 @@ NEXUS cannot (and must not) change that.
     rules with `paths:` load on demand; subdirectory files below the working directory load lazily;
     `CLAUDE_CODE_DISABLE_CLAUDE_MDS` disables all of them;
   * AGENTS.md was not loaded in any probe, including with no CLAUDE.md in the chain; it is shown as a documented
-    fallback, never claimed as loaded.
+    fallback, never claimed as loaded;
+  * a project-level `@import` of a file outside the working directory is not loaded until the user approves external
+    imports for the project (verified); it is shown as *needs approval*;
+  * `claudeMdExcludes` matching is case-sensitive and supports bracket classes; the inspector matches the same way.
 * Order: managed → user → ancestors from the filesystem root down to the working directory (per directory:
   `CLAUDE.md`, `.claude/CLAUDE.md`, rules, `CLAUDE.local.md`). The event order of `InstructionsLoaded` is not the
   concatenation order, so the documented order is used.
@@ -47,5 +50,5 @@ NEXUS cannot (and must not) change that.
 
 ## Consequences
 * The inspector can drift when Claude Code changes its loading rules; the real-CLI test detects that.
-* Follow-up: an opt-in per-profile setting to exclude the default profile's `~/.claude` files through the
-  session-scoped `--settings` (`claudeMdExcludes`), which stays within ADR-0004.
+* Done: the opt-in per-profile exclusion of the default profile's `~/.claude` files through the session-scoped
+  `--settings` (ADR-0020); the inspector includes those session excludes.

@@ -27,6 +27,9 @@ pub struct ClaudeProfile {
     pub extra_args: Vec<String>,
     pub managed_by_nexus: bool,
     pub inherit_provider_env: bool,
+    /// Keep the default profile's personal instructions (`~/.claude/CLAUDE.md`, `~/.claude/rules`) out of this
+    /// profile's NEXUS sessions (ADR-0020). Never set for the default-location profile.
+    pub isolate_instructions: bool,
     pub default_work_profile: Option<String>,
     pub default_effort: Option<String>,
     pub default_model: Option<String>,
@@ -59,6 +62,7 @@ pub struct ProfileInput {
     pub executable: Option<String>,
     pub extra_args: Vec<String>,
     pub inherit_provider_env: bool,
+    pub isolate_instructions: bool,
     pub default_work_profile: Option<String>,
     pub default_effort: Option<String>,
     pub default_model: Option<String>,
@@ -142,6 +146,7 @@ fn validate_fields(input: &ProfileInput) -> Result<ValidFields> {
         executable,
         extra_args: input.extra_args.clone(),
         inherit_provider_env: input.inherit_provider_env,
+        isolate_instructions: input.isolate_instructions,
         default_work_profile,
         default_effort,
         default_model,
@@ -155,10 +160,13 @@ struct ValidFields {
     executable: Option<PathBuf>,
     extra_args: Vec<String>,
     inherit_provider_env: bool,
+    isolate_instructions: bool,
     default_work_profile: Option<String>,
     default_effort: Option<String>,
     default_model: Option<String>,
 }
+
+const ISOLATE_DEFAULT: &str = "the default-location profile cannot be isolated from its own instructions";
 
 fn opt(v: &Option<String>) -> Option<String> {
     v.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
@@ -221,6 +229,9 @@ fn ensure_dir_unique(conn: &Connection, dir: &Option<PathBuf>, except: Option<&s
 pub fn register(conn: &Connection, input: &ProfileInput, home: &Path) -> Result<ClaudeProfile> {
     let f = validate_fields(input)?;
     let dir = normalize_config_dir(input.config_dir.as_deref(), home, Expect::ExistingDir)?;
+    if f.isolate_instructions && dir.is_none() {
+        return Err(CoreError::invalid(ISOLATE_DEFAULT));
+    }
     ensure_dir_unique(conn, &dir, None)?;
     insert(conn, f, dir, false)
 }
@@ -254,8 +265,8 @@ fn insert(conn: &Connection, f: ValidFields, dir: Option<PathBuf>, managed: bool
     let res = conn.execute(
         "INSERT INTO claude_profiles(id, name, description, color, config_dir, executable, extra_args_json,
             managed_by_nexus, inherit_provider_env, default_work_profile, default_effort, default_model,
-            created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)",
+            created_at, updated_at, isolate_instructions)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14)",
         params![
             id,
             f.name,
@@ -269,7 +280,8 @@ fn insert(conn: &Connection, f: ValidFields, dir: Option<PathBuf>, managed: bool
             f.default_work_profile,
             f.default_effort,
             f.default_model,
-            now
+            now,
+            f.isolate_instructions,
         ],
     );
     map_unique(res, &f.name)?;
@@ -288,12 +300,15 @@ fn map_unique(res: rusqlite::Result<usize>, name: &str) -> Result<()> {
 
 /// Update editable fields. The configuration directory of a profile cannot be changed (register a new one).
 pub fn update(conn: &Connection, id: &str, input: &ProfileInput) -> Result<ClaudeProfile> {
-    let _existing = get(conn, id)?;
+    let existing = get(conn, id)?;
     let f = validate_fields(input)?;
+    if f.isolate_instructions && existing.config_dir.is_none() {
+        return Err(CoreError::invalid(ISOLATE_DEFAULT));
+    }
     let res = conn.execute(
         "UPDATE claude_profiles SET name = ?2, description = ?3, color = ?4, executable = ?5, extra_args_json = ?6,
             inherit_provider_env = ?7, default_work_profile = ?8, default_effort = ?9, default_model = ?10,
-            updated_at = ?11 WHERE id = ?1",
+            updated_at = ?11, isolate_instructions = ?12 WHERE id = ?1",
         params![
             id,
             f.name,
@@ -305,7 +320,8 @@ pub fn update(conn: &Connection, id: &str, input: &ProfileInput) -> Result<Claud
             f.default_work_profile,
             f.default_effort,
             f.default_model,
-            now_ms()
+            now_ms(),
+            f.isolate_instructions,
         ],
     );
     map_unique(res, &f.name)?;
@@ -314,7 +330,7 @@ pub fn update(conn: &Connection, id: &str, input: &ProfileInput) -> Result<Claud
 
 const SELECT: &str = "SELECT id, name, description, color, config_dir, executable, extra_args_json, managed_by_nexus,
     inherit_provider_env, default_work_profile, default_effort, default_model, created_at, updated_at, last_used_at,
-    archived_at FROM claude_profiles";
+    archived_at, isolate_instructions FROM claude_profiles";
 
 fn from_row(r: &Row<'_>) -> rusqlite::Result<ClaudeProfile> {
     let extra: String = r.get(6)?;
@@ -335,6 +351,7 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<ClaudeProfile> {
         updated_at: r.get(13)?,
         last_used_at: r.get(14)?,
         archived_at: r.get(15)?,
+        isolate_instructions: r.get(16)?,
     })
 }
 

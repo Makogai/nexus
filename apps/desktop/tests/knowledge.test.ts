@@ -236,7 +236,7 @@ describe('task workflow UI', () => {
         warnings: ['/home/.claude/CLAUDE.md belongs to the default Claude profile but also reaches this profile’s sessions'],
       },
       nexus: {
-        workProfile: 'Balanced', workProfileChars: 100, task: null, taskBriefChars: 0, appendedChars: 160, mcp: null, hooks: null,
+        workProfile: 'Balanced', workProfileChars: 100, task: null, taskBriefChars: 0, appendedChars: 160, mcp: null, hooks: null, isolationExcludes: ['/home/.claude/CLAUDE.md'],
         rules: { included: ['Tests'], pendingApproval: [], overBudget: [], alreadyLoaded: ['Small commits (in CLAUDE.md)'] },
       },
     }
@@ -248,5 +248,6 @@ describe('task workflow UI', () => {
     expect(w.text()).toContain('when Claude touches src/**/*.rs')
     expect(w.find('.notice-warn').text()).toContain('default Claude profile')
     expect(w.find('[data-already]').text()).toContain('Small commits (in CLAUDE.md)')
+    expect(w.find('[data-isolation-on]').text()).toContain('1 pattern(s)')
   })
 })

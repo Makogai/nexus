@@ -101,6 +101,8 @@ export interface ClaudeProfile {
   extraArgs: string[]
   managedByNexus: boolean
   inheritProviderEnv: boolean
+  /** Keep the default profile's ~/.claude instructions out of this profile's NEXUS sessions (ADR-0020). */
+  isolateInstructions: boolean
   defaultWorkProfile: string | null
   defaultEffort: string | null
   defaultModel: string | null
@@ -118,6 +120,7 @@ export interface ProfileInput {
   executable?: string | null
   extraArgs?: string[]
   inheritProviderEnv?: boolean
+  isolateInstructions?: boolean
   defaultWorkProfile?: string | null
   defaultEffort?: string | null
   defaultModel?: string | null
@@ -212,7 +215,8 @@ export interface SessionView {
   integrations: {
     mcp: IntegrationStatus
     hooks?: IntegrationStatus
-    task?: { id: string; title: string; status: string; briefChars: number }
+    task?: { id: string; title: string; status: string; delivery: 'session-start' | 'tools' | 'none' }
+    isolation?: { claudeMdExcludes: string[] }
   } | null
   turns: number
   prompts: number
@@ -407,7 +411,7 @@ export interface InstructionLayer {
   scope: 'managed' | 'user' | 'project' | 'local'
   kind: 'claude-md' | 'rule' | 'import' | 'agents-md' | 'managed-setting'
   path: string | null
-  load: 'at-start' | 'on-demand' | 'excluded' | 'not-loaded' | 'fallback'
+  load: 'at-start' | 'on-demand' | 'excluded' | 'not-loaded' | 'fallback' | 'needs-approval'
   reason: string | null
   chars: number
   lines: number
@@ -442,5 +446,6 @@ export interface InstructionsPreview {
     appendedChars: number
     mcp: string | null
     hooks: string | null
+    isolationExcludes: string[]
   }
 }

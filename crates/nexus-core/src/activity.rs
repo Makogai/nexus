@@ -16,7 +16,8 @@ use crate::{new_id, now_ms};
 /// Upper bound of hook-recorded events per session (counters keep counting beyond it).
 pub const MAX_EVENTS_PER_SESSION: i64 = 1000;
 /// Upper bound of text a SessionStart hook injects into Claude's context.
-pub const MAX_CONTEXT_CHARS: usize = 1200;
+/// Upper bound for SessionStart context (task data block ≤ 900 plus pointers/checkpoints).
+pub const MAX_CONTEXT_CHARS: usize = 1800;
 const MAX_ITEM_CHARS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,9 +297,11 @@ fn mcp_enabled(s: &Session) -> bool {
 }
 
 /// Bounded recovery text for SessionStart. Lazy by design: a fresh start or `/clear` gets at most a one-line
-/// pointer; a resumed conversation gets the latest project checkpoints; after a compaction Claude gets back the
-/// checkpoints and files of *this* session (the compaction dropped them from its context).
+/// pointer (plus the task data block for a task session); a resumed conversation gets the task's current state and
+/// the latest project checkpoints; after a compaction Claude gets back the checkpoints and files of *this* session.
+/// Everything that originates from workspace files or from Claude is escaped data (threat T22).
 fn recovery_context(conn: &Connection, s: &Session, source: &str) -> Result<Option<String>> {
+    use crate::knowledge::tasks::escape_untrusted as esc;
     let tools = if mcp_enabled(s) {
         " Details: NEXUS MCP tools get_session_context, get_checkpoints, get_session_activity."
     } else {
@@ -308,7 +311,8 @@ fn recovery_context(conn: &Connection, s: &Session, source: &str) -> Result<Opti
         Some(p) => checkpoint::for_project(conn, p, limit),
         None => checkpoint::for_session(conn, &s.id, limit),
     };
-    let task = task_line(conn, s);
+    let fresh = !matches!(source, "compact" | "resume");
+    let task = task_data(conn, s, fresh);
     let text = match source {
         "compact" => {
             let cps = checkpoint::for_session(conn, &s.id, 5)?;
@@ -319,15 +323,17 @@ fn recovery_context(conn: &Connection, s: &Session, source: &str) -> Result<Opti
             if cps.is_empty() && files.is_empty() && task.is_none() {
                 return Ok(None);
             }
-            let mut t = String::from("NEXUS recovery after compaction (data recorded earlier in this session):");
-            if let Some(line) = &task {
-                t.push_str(&format!("\n- {line}"));
+            let mut t = String::new();
+            if let Some(block) = &task {
+                t.push_str(block);
+                t.push('\n');
             }
+            t.push_str("NEXUS recovery after compaction (data recorded earlier in this session):");
             for c in &cps {
-                t.push_str(&format!("\n- [{}] {}", c.kind, clip(&c.summary, MAX_ITEM_CHARS)));
+                t.push_str(&format!("\n- [{}] {}", c.kind, esc(&c.summary, MAX_ITEM_CHARS)));
             }
             if !files.is_empty() {
-                t.push_str(&format!("\n- files changed: {}", files.join(", ")));
+                t.push_str(&format!("\n- files changed: {}", esc(&files.join(", "), 400)));
             }
             t.push_str(tools);
             t
@@ -344,28 +350,30 @@ fn recovery_context(conn: &Connection, s: &Session, source: &str) -> Result<Opti
                 }
                 t.push_str("NEXUS: latest checkpoints for this project (data, newest first):");
                 for c in &cps {
-                    t.push_str(&format!("\n- [{}] {} ({})", c.kind, clip(&c.summary, MAX_ITEM_CHARS), clip(&c.session_title, 60)));
+                    t.push_str(&format!("\n- [{}] {} ({})", c.kind, esc(&c.summary, MAX_ITEM_CHARS), esc(&c.session_title, 60)));
                 }
             }
             t.push_str(tools);
             t
         }
         _ => {
-            if tools.is_empty() {
-                return Ok(None);
-            }
-            let n = project_cps(50)?.len();
             let mut parts = Vec::new();
-            if n > 0 {
-                parts.push(format!("NEXUS: {n} checkpoint(s) from earlier sessions of this project are available."));
+            if !tools.is_empty() {
+                let n = project_cps(50)?.len();
+                if n > 0 {
+                    parts.push(format!("NEXUS: {n} checkpoint(s) from earlier sessions of this project are available."));
+                }
+                if let Some(line) = knowledge_line(conn, s)? {
+                    parts.push(line);
+                }
             }
-            if let Some(line) = knowledge_line(conn, s)? {
-                parts.push(line);
+            let pointer = (!parts.is_empty()).then(|| format!("{}{tools} Workspace knowledge: get_context_index, search_knowledge.", parts.join(" ")));
+            match (task, pointer) {
+                (None, None) => return Ok(None),
+                (Some(block), None) => block,
+                (None, Some(p)) => p,
+                (Some(block), Some(p)) => format!("{block}\n{p}"),
             }
-            if parts.is_empty() {
-                return Ok(None);
-            }
-            format!("{}{tools} Workspace knowledge: get_context_index, search_knowledge.", parts.join(" "))
         }
     };
     Ok(Some(clip_block(&text, MAX_CONTEXT_CHARS)))
@@ -391,11 +399,12 @@ fn knowledge_line(conn: &Connection, s: &Session) -> Result<Option<String>> {
     Ok(line)
 }
 
-/// Current state of the session's task, from its file (resumed conversations keep their original system prompt).
-fn task_line(conn: &Connection, s: &Session) -> Option<String> {
+/// The session's task as a data block from its file: the full (bounded) block for a fresh session, the current state
+/// after resume/compaction (a resumed conversation keeps its original context).
+fn task_data(conn: &Connection, s: &Session, fresh: bool) -> Option<String> {
     let ws = crate::workspace::get(conn, s.workspace_id.as_deref()?).ok().filter(|w| w.available)?;
-    let v = crate::knowledge::tasks::view(conn, &ws, s.task_id.as_deref()?, 200).ok()?;
-    Some(crate::knowledge::tasks::status_line(&v))
+    let v = crate::knowledge::tasks::view(conn, &ws, s.task_id.as_deref()?, 2000).ok()?;
+    Some(if fresh { crate::knowledge::tasks::data_block(&v) } else { crate::knowledge::tasks::status_data(&v) })
 }
 
 fn clip_block(text: &str, max: usize) -> String {

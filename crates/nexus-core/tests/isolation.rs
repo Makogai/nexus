@@ -57,6 +57,7 @@ fn profile(config_dir: Option<&Path>, inherit_provider_env: bool) -> ClaudeProfi
         extra_args: vec![],
         managed_by_nexus: false,
         inherit_provider_env,
+        isolate_instructions: false,
         default_work_profile: None,
         default_effort: None,
         default_model: None,

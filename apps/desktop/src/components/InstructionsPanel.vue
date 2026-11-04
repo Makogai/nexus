@@ -49,6 +49,7 @@ const LOAD: Record<InstructionLayer['load'], string> = {
   excluded: 'excluded',
   'not-loaded': 'not loaded',
   fallback: 'fallback',
+  'needs-approval': 'needs approval',
 }
 const KIND: Record<InstructionLayer['kind'], string> = {
   'claude-md': 'memory',
@@ -92,9 +93,10 @@ const rules = computed(() => preview.value?.nexus.rules ?? null)
         <li v-if="rules?.alreadyLoaded?.length" data-already>Skipped — already in Claude's files: {{ rules.alreadyLoaded.join(', ') }}</li>
         <li v-if="rules?.pendingApproval.length" class="warn-text">Waiting for approval: {{ rules.pendingApproval.join(', ') }}</li>
         <li v-if="rules?.overBudget.length">Over budget (Claude reads them on demand): {{ rules.overBudget.join(', ') }}</li>
+        <li v-if="preview.nexus.isolationExcludes.length" data-isolation-on>Profile isolation: the default profile's personal instructions are excluded ({{ preview.nexus.isolationExcludes.length }} pattern(s))</li>
         <li v-if="preview.nexus.mcp">NEXUS tools: {{ preview.nexus.mcp }}</li>
         <li v-if="preview.nexus.hooks">Lifecycle hooks: {{ preview.nexus.hooks }}</li>
-        <li class="faint">Tasks get a short brief (never their history); everything else is retrieved on demand.</li>
+        <li class="faint">A task session gets only a pointer in the system prompt; the task text arrives as labelled data, never its history. Everything else is retrieved on demand.</li>
       </ul>
     </template>
     <p v-else-if="loading" class="faint">Inspecting…</p>

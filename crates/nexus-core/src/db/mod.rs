@@ -55,6 +55,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0006_task_sessions_branches.sql"),
         disable_foreign_keys: false,
     },
+    Migration {
+        name: "0007_profile_isolation",
+        sql: include_str!("migrations/0007_profile_isolation.sql"),
+        disable_foreign_keys: false,
+    },
 ];
 
 /// Schema version this build understands.

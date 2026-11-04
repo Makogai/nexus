@@ -70,6 +70,14 @@ Recorded 2026-11-04. Re-verify when Claude Code's minor version changes signific
     honoured; rules with `paths:` and subdirectory CLAUDE.md files are not loaded at start;
   * AGENTS.md was not loaded in any probe, even with no CLAUDE.md in the chain (documented fallback, unobserved);
   * the order of `InstructionsLoaded` events is not the documented concatenation order (root → cwd);
+  * `claudeMdExcludes` patterns (verified 2026-11-04): case-sensitive (a lower-case drive letter does not match);
+    absolute paths with `/` and with `\` both work; a glob over a path containing `(`/`)` silently fails unless the
+    characters are bracket-escaped (`[(]`); backslash escaping breaks even literal matches; exact literal paths work;
+  * a project-level `@import` of a file outside the cwd (e.g. from `~/.claude/CLAUDE.md` loaded as an ancestor) is
+    not loaded without the one-time external-import approval;
+  * `claude -p --verbose --output-format stream-json` emits `{"type":"system","subtype":"hook_response",
+    "hook_event":"SessionStart","output":…,"outcome":"success"}` — evidence that Claude ran a hook and accepted its
+    output (used by `e2e/security-real-claude.mjs`);
   * managed `CLAUDE.md` (`C:\Program Files\ClaudeCode\CLAUDE.md`) and managed `claudeMd` were not probed (need
     admin rights); taken from the docs. `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` disables all memory (docs).
 

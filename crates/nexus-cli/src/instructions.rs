@@ -95,6 +95,7 @@ pub fn run(ctx: &Ctx, a: InstructionsArgs) -> Result<()> {
                 Load::Excluded => "excluded",
                 Load::NotLoaded => "not loaded",
                 Load::Fallback => "fallback",
+                Load::NeedsApproval => "needs approval",
             };
             let what = l.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "(managed settings)".into());
             let note = l.reason.clone().unwrap_or_else(|| if l.paths.is_empty() { String::new() } else { format!("paths: {}", l.paths.join(", ")) });
@@ -128,7 +129,13 @@ pub fn run(ctx: &Ctx, a: InstructionsArgs) -> Result<()> {
         }
     }
     if let Some(t) = &nexus.task {
-        println!("  task brief: “{t}” ({} characters; never the task history)", nexus.task_brief_chars);
+        println!(
+            "  task “{t}”: a {}-character pointer in the system prompt; the task text arrives as a data block at session start",
+            nexus.task_brief_chars
+        );
+    }
+    if !nexus.isolation_excludes.is_empty() {
+        println!("  profile isolation: the default profile's instructions are excluded ({} pattern(s))", nexus.isolation_excludes.len());
     }
     for (name, state) in [("NEXUS tools", &nexus.mcp), ("lifecycle hooks", &nexus.hooks)] {
         if let Some(s) = state {

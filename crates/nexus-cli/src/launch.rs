@@ -99,6 +99,8 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
         base_env: &base_env,
         start_task: plan.mode == Mode::New,
     })?;
+    let settings_path = prepared.settings.clone();
+    let claude_name = prepared.claude_name.clone().unwrap_or_else(|| plan.title.clone());
     let integrations = prepared.integrations;
     let spec = launch::build(
         &LaunchRequest {
@@ -107,7 +109,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             cwd: &plan.cwd,
             mode: plan.mode,
             claude_session_id: &plan.claude_session_id,
-            title: (plan.mode == Mode::New).then_some(plan.title.as_str()),
+            title: (plan.mode == Mode::New).then_some(claude_name.as_str()),
             work_profile: plan.work_profile,
             effort: plan.effort.as_deref(),
             model: plan.model.as_deref(),
@@ -115,7 +117,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             workspace_id: plan.workspace_id.as_deref(),
             project_id: plan.project_id.as_deref(),
             mcp_config: integrations.mcp.config_path(),
-            settings: integrations.hooks.config_path(),
+            settings: settings_path.as_deref(),
             context_prompt: prepared.prompt.as_deref(),
         },
         &base_env,
@@ -155,6 +157,9 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
         let mut tools = format!("{} · {}", state("NEXUS tools", &integrations.mcp), state("hooks", &integrations.hooks));
         if let Some(t) = &integrations.task {
             tools.push_str(&format!(" · task “{}” ({})", t.title, t.status));
+        }
+        if integrations.isolation.is_some() {
+            tools.push_str(" · default-profile instructions excluded");
         }
         eprintln!(
             "nexus: {} Claude · profile {} · {} · {} · {tools} · session {}",

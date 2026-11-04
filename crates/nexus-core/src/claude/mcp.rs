@@ -34,6 +34,9 @@ pub struct Integrations {
     /// The task this session was launched for and the brief it received (ADR-0018).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<super::prepare::TaskLaunch>,
+    /// Profile instruction isolation applied to this session (ADR-0020).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub isolation: Option<super::prepare::Isolation>,
 }
 
 impl IntegrationStatus {
