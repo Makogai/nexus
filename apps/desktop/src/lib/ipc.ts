@@ -15,6 +15,9 @@ import type {
   KnowledgeOverview,
   InstructionsPreview,
   ProjectKnowledge,
+  ResumeSummary,
+  MemoryApproval,
+  MemoryProposal,
   TaskUpdateInput,
   TaskView,
   LaunchOptions,
@@ -130,6 +133,11 @@ export const api = {
     call<KnowledgeEntry>('knowledge_update_task', { workspaceId, id, ...u }),
   knowledgeTask: (workspaceId: string, id: string) => call<TaskView>('knowledge_task', { workspaceId, id }),
   projectKnowledge: (projectId: string) => call<ProjectKnowledge>('project_knowledge', { projectId }),
+  projectResume: (projectId: string) => call<ResumeSummary>('project_resume', { projectId }),
+  knowledgeProposals: (workspaceId: string, extract = true) => call<MemoryProposal[]>('knowledge_proposals', { workspaceId, extract }),
+  knowledgeProposalApprove: (workspaceId: string, id: string, approval: MemoryApproval) =>
+    call<KnowledgeEntry>('knowledge_proposal_approve', { workspaceId, id, approval }),
+  knowledgeProposalReject: (id: string) => call<void>('knowledge_proposal_reject', { id }),
   instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),

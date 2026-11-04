@@ -9,7 +9,7 @@
 //
 // Windows only (WebView2 DevTools protocol). Synthetic fixtures in a temp dir; never touches real Claude profiles.
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -164,6 +164,7 @@ try {
   const r = await mcp(s1.id, [
     ['update_task', { status: 'review', log: 'Cart summary done; payment form next', check: [1], linkBranch: true }],
     ['record_memory', { kind: 'note', title: 'Checkout uses the payment sandbox', body: 'Sandbox keys come from the developer portal.', scope: 'branch' }],
+    ['checkpoint', { kind: 'decision', summary: 'Use the hosted payment page instead of a custom card form. It handles SCA.' }],
   ])
   check('MCP update_task succeeded', r[0]?.isError === false && r[0].structuredContent.updated.status === 'review', JSON.stringify(r[0]).slice(0, 200))
   check('MCP record_memory stored a branch note', r[1]?.structuredContent?.recorded?.branch === 'main')
@@ -186,15 +187,25 @@ try {
   const after = (await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)).find((s) => s.id === s1.id)
   check('after the restart the session is interrupted and resumable', after?.state === 'interrupted' && after?.resumable === true, `${after?.state} resumable=${after?.resumable}`)
 
-  // 4. Resume work from the UI: same conversation, same task, current state.
-  await cdp.evaluate(`location.hash = '#/sessions', true`)
-  await cdp.waitFor(`[...document.querySelectorAll('.page .session')].some((r) => r.innerText.includes('Ship checkout') && [...r.querySelectorAll('button')].some((b) => b.innerText.includes('Resume')))`, 15000)
-  await cdp.evaluate(`(() => { const row = [...document.querySelectorAll('.page .session')].find((r) => r.innerText.includes('Ship checkout')); [...row.querySelectorAll('button')].find((b) => b.innerText.includes('Resume')).click(); return true })()`)
+  // 4. Resume Project (M18): the project page → Resume project → the recommended next step resumes the work.
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}', true`)
+  await cdp.waitFor(`document.querySelector('[data-resume-project]')`, 15000)
+  await cdp.evaluate(`document.querySelector('[data-resume-project]').click(), true`)
+  const kind = await cdp.waitFor(`document.querySelector('[data-next]')?.dataset.kind`, 15000).catch(() => '')
+  check('Resume project recommends resuming the interrupted task session', kind === 'resume-session', kind)
+  const verifiedText = await cdp.evaluate(`document.querySelector('[data-section="verified"]')?.innerText ?? ''`)
+  const savedText = await cdp.evaluate(`document.querySelector('[data-section="saved"]')?.innerText ?? ''`)
+  check('…showing verified Git state separately', verifiedText.includes('main') && verifiedText.includes('init') && !verifiedText.includes('Ship checkout'))
+  const pendingNote = await cdp.evaluate(`document.querySelector('[data-pending-proposals]')?.innerText ?? ''`)
+  check('…and points to the memory proposal from the interrupted session', pendingNote.includes('1 memory proposal'), pendingNote)
+  check('…and the saved task state, branch note and checkpoint as history', savedText.includes('Ship checkout') && savedText.includes('Review') && savedText.includes('Checkout uses the payment sandbox') && savedText.includes('Cart summary done'))
+  await cdp.evaluate(`document.querySelector('[data-next-action]').click(), true`)
   const r2 = await waitForFile(report2)
   resumedId = (await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)).find((s) => s.resumedFrom === s1.id)?.id
   check('Resume continues the same Claude conversation', r2.args.includes('--resume') && r2.args[r2.args.indexOf('--resume') + 1] === s1.claudeSessionId)
   const resumeCtx = await hookContext(resumed0(), 'resume', s1.claudeSessionId)
   check('…and SessionStart brings the task’s current state', resumeCtx.includes('status="review"') && resumeCtx.includes('checklist: 1/2 items done'), resumeCtx.slice(0, 200))
+  await cdp.evaluate(`location.hash = '#/sessions', true`)
   const chip = await cdp.waitFor(`[...document.querySelectorAll('.page .session .task-chip')].some((c) => c.innerText.includes('Ship checkout'))`, 10000).catch(() => false)
   check('session rows show the task they work on', !!chip)
   const resumed = (await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)).find((s) => s.resumedFrom === s1.id)
@@ -205,6 +216,20 @@ try {
   check('the branch note appears for the checked-out branch', !!note)
   const inspector = await cdp.waitFor(`document.querySelector('[data-instructions]')?.innerText.includes('NEXUS appends')`, 15000).catch(() => false)
   check('the effective-instructions panel renders', !!inspector)
+
+  // 5. Proposed memory (ADR-0022): reviewed and approved before it becomes knowledge.
+  const decisionsDir = join(wsDir, 'knowledge', 'decisions')
+  const decisionFiles = () => (existsSync(decisionsDir) ? readdirSync(decisionsDir) : [])
+  check('the proposal is not knowledge before review', decisionFiles().length === 0)
+  await cdp.evaluate(`location.hash = '#/knowledge', true`)
+  await cdp.waitFor(`document.querySelector('[data-tab="proposals"]')`, 10000)
+  await cdp.evaluate(`document.querySelector('[data-tab="proposals"]').click(), true`)
+  const shown = await cdp.waitFor(`[...document.querySelectorAll('[data-proposal] input.title')].some((i) => i.value === 'Use the hosted payment page instead of a custom card form')`, 10000).catch(() => false)
+  check('the Knowledge view lists the proposal for review', !!shown)
+  await cdp.evaluate(`document.querySelector('[data-proposal] [data-approve]').click(), true`)
+  const approved = await cdp.waitFor(`!document.querySelector('[data-proposal]')`, 10000).catch(() => false)
+  const files = decisionFiles()
+  check('approving writes an accepted decision file', !!approved && files.length === 1 && readFileSync(join(decisionsDir, files[0]), 'utf8').includes('status: accepted'), files.join(','))
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

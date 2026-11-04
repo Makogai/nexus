@@ -449,3 +449,76 @@ export interface InstructionsPreview {
     isolationExcludes: string[]
   }
 }
+
+// --- Resume project (ADR-0021) -----------------------------------------------------------------------------------
+
+export interface CommitRef {
+  oid: string
+  summary: string
+  at: number
+}
+
+export interface ResumeSummary {
+  projectId: string
+  projectName: string
+  verified: {
+    checkedAt: number
+    available: boolean
+    repo: boolean
+    branch: string | null
+    detached: boolean
+    head: CommitRef | null
+    upstream: string | null
+    ahead: number
+    behind: number
+    staged: number
+    unstaged: number
+    untracked: number
+    conflicted: number
+    recentCommits: CommitRef[]
+  }
+  saved: {
+    tasks: { id: string; title: string; status: string; priority: string | null; branch: string | null; checklistDone: number; checklistTotal: number; lastProgress: string | null; updated: string | null }[]
+    notes: { id: string; kind: string; title: string; status: string | null; relevance: Relevance; branch: string | null; updated: string | null }[]
+    decisions: { id: string; kind: string; title: string; status: string | null; relevance: Relevance; branch: string | null; updated: string | null }[]
+    checkpoints: { kind: string; summary: string; sessionTitle: string; at: number; branch: string | null; otherBranch: boolean }[]
+    sessions: { id: string; title: string; state: string; startedAt: number; endedAt: number | null; resumable: boolean; taskId: string | null; branch: string | null }[]
+    hiddenOtherBranch: number
+    pendingProposals: number
+  }
+  next: {
+    kind: 'resume-session' | 'launch-task' | 'resolve-conflicts' | 'review-changes' | 'pull' | 'launch'
+    label: string
+    evidence: string[]
+    sessionId: string | null
+    taskId: string | null
+  }
+  warnings: string[]
+}
+
+// --- Memory proposals (ADR-0022) ---------------------------------------------------------------------------------
+
+export interface MemoryProposal {
+  id: string
+  workspaceId: string
+  projectId: string | null
+  sessionId: string
+  sessionTitle: string
+  kind: 'note' | 'decision'
+  title: string
+  body: string
+  source: string
+  branch: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  documentId: string | null
+  createdAt: number
+  decidedAt: number | null
+}
+
+export interface MemoryApproval {
+  title?: string
+  body?: string
+  scope?: 'workspace' | 'project' | 'branch'
+  localOnly?: boolean
+}
+

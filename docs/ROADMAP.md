@@ -44,7 +44,7 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | --- | --- | --- |
 | M10 | `nexus` CLI: `doctor`, `workspaces`, `projects`, `profiles`, `sessions`, `launch` (reuses core; `launch` is a session host) | 5 end-to-end tests of the real binary incl. killed-host reconciliation ✅ |
 | M11 | Session hosts + leases ✅ (ADR-0014); still open: reconciliation with `claude agents --json`, durable-session experiment (`--bg` + `attach`) | ADR update with measured behaviour |
-| M12 | MCP server v1 (workspace-scoped tools incl. `checkpoint`; 16 tools after M16–M19) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
+| M12 | MCP server v1 (workspace-scoped tools incl. `checkpoint`; 17 tools after M16–M19 + M18) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
 | M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): start/end, compaction recovery, activity counters, files, command categories, attention; policy-aware | merge semantics verified on 2.1.311; unit + CLI + desktop E2E + real-Claude hook test ✅ |
 | M14 | Profile diagnostics, allowlist clone, `ANTHROPIC_*` opt-in, settings validation | diagnostics fixture tests |
 | M15 | WSL shells; login-shell PATH resolution on macOS/Linux | per-platform CI job |
@@ -54,8 +54,8 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
 | M16 | Workspace knowledge files (ADR-0013) + context hierarchy and lazy loading (ADR-0017): rules (global/workspace/stack/project, always-on with approval), decisions, notes, specs, workflows, skills catalog; FTS5 index with rebuild and health; MCP `get_context_index`/`search_knowledge`/`get_document`/`record_memory`; `nexus knowledge`; desktop Knowledge view | unit + CLI E2E (round trip, hierarchy, approval, cross-workspace) + SDK interop + desktop E2E ✅ |
-| M17 | Branch-aware notes and session checkpoints (ADR-0018): `branch`/`commit` on documents, relevance from the live Git history (this branch / inherited / other branch), `record_memory` scope `branch`, task progress as checkpoints | CLI E2E with checkout + merge; desktop E2E ✅ (consolidating activity into proposed notes ☐) |
-| M18 | "Resume project" view: Git state + last sessions + checkpoints + open tasks + deterministic next step | Scenario H walkthrough |
+| M17 | Branch-aware notes and session checkpoints (ADR-0018): `branch`/`commit` on documents, relevance from the live Git history (this branch / inherited / other branch), `record_memory` scope `branch`, task progress as checkpoints | CLI E2E with checkout + merge; desktop E2E ✅. Proposed memories from session activity with human approval (ADR-0022) ✅ |
+| M18 | Resume project (ADR-0021): verified Git state vs saved history (tasks, branch notes, decisions, checkpoints, sessions, pending proposals) + one rule-based next step with evidence; desktop view with direct resume/launch, `nexus projects resume`, MCP `get_resume_summary` | rule unit tests + Git integration + CLI E2E + desktop E2E after a restart ✅ |
 
 ## Phase 4 — Engineering productivity
 

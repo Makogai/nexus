@@ -13,6 +13,7 @@ import {
   Sparkles,
   SquareTerminal,
   UserCog,
+  History,
 } from '@lucide/vue'
 import { fuzzyFilter } from '../lib/fuzzy'
 import { api } from '../lib/ipc'
@@ -92,6 +93,7 @@ const commands = computed<Command[]>(() => {
     list.push({ id: `project-${p.id}`, title: p.name, group: 'Projects', icon: FolderGit2, hint: p.stack.stacks.slice(0, 2).join(' · '), run: go(`/projects/${p.id}`) })
     if (p.available) {
       list.push({ id: `launch-${p.id}`, title: `Launch Claude in ${p.name}`, group: 'Projects', icon: Sparkles, run: () => app.openLaunch(p.id) })
+      list.push({ id: `resume-${p.id}`, title: `Resume ${p.name}`, group: 'Projects', icon: History, run: () => router.push(`/projects/${p.id}/resume`) })
     }
   }
   for (const s of sessions.resumable.slice(0, 20)) {

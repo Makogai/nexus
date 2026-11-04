@@ -132,6 +132,10 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
                 "UPDATE sessions SET end_reason = ?2, attention = NULL, last_activity_at = ?3 WHERE id = ?1",
                 params![s.id, reason, now_ms()],
             )?;
+            // Deterministic, SQL-only: candidate memories for human review (ADR-0022). Never fails the hook.
+            if let Err(e) = crate::knowledge::proposals::extract_for_session(conn, &s.id) {
+                tracing::debug!(error = %e, "memory proposal extraction skipped");
+            }
             Ok(Outcome::default())
         }
         HookEvent::PreCompact => {
@@ -303,7 +307,7 @@ fn mcp_enabled(s: &Session) -> bool {
 fn recovery_context(conn: &Connection, s: &Session, source: &str) -> Result<Option<String>> {
     use crate::knowledge::tasks::escape_untrusted as esc;
     let tools = if mcp_enabled(s) {
-        " Details: NEXUS MCP tools get_session_context, get_checkpoints, get_session_activity."
+        " Details: NEXUS MCP tools get_resume_summary, get_session_context, get_checkpoints, get_session_activity."
     } else {
         ""
     };

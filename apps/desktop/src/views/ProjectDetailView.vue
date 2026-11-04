@@ -8,6 +8,7 @@ import {
   FolderOpen,
   GitBranch,
   GitCommitHorizontal,
+  History,
   Link,
   ListTodo,
   NotebookPen,
@@ -126,6 +127,7 @@ async function unregister() {
         </button>
         <button class="btn" :disabled="!project.available" @click="reveal"><FolderOpen /> Open folder</button>
         <button class="btn" :disabled="!project.available" @click="openShell"><SquareTerminal /> Shell</button>
+        <button class="btn" data-resume-project @click="router.push(`/projects/${project.id}/resume`)"><History /> Resume project</button>
         <button class="btn btn-primary" :disabled="!project.available" @click="app.openLaunch(project.id)"><Sparkles /> Launch Claude</button>
       </div>
     </div>

@@ -37,7 +37,7 @@ a finished task, notable progress) — not for every step.";
 
 pub fn run(ctx: &Ctx, session_id: &str) -> nexus_core::Result<i32> {
     let conn = ctx.db()?;
-    let mut server = Server::new(conn, session_id, ctx.data_dir.clone());
+    let mut server = Server::new(conn, session_id, ctx.data_dir.clone()).with_home(ctx.home.clone());
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -62,12 +62,20 @@ pub struct Server {
     conn: Connection,
     binding: Result<Binding, String>,
     data_dir: PathBuf,
+    home: PathBuf,
 }
 
 impl Server {
     pub fn new(conn: Connection, session_id: &str, data_dir: PathBuf) -> Server {
         let binding = bind(&conn, session_id);
-        Server { conn, binding, data_dir }
+        let home = data_dir.clone();
+        Server { conn, binding, data_dir, home }
+    }
+
+    /// The user's home folder (to tell which past conversations can be resumed).
+    pub fn with_home(mut self, home: PathBuf) -> Server {
+        self.home = home;
+        self
     }
 
     /// One input line → at most one output line (notifications produce none).
@@ -127,6 +135,7 @@ impl Server {
                 "get_session_activity" => self.session_activity(b, &args),
                 "get_context_index" => self.context_index(b),
                 "get_task" => self.get_task(b, &args),
+                "get_resume_summary" => self.resume_summary(b, &args),
                 "search_knowledge" => self.search_knowledge(b, &args),
                 "get_document" => self.get_document(b, &args),
                 "list_tasks" => self.list_tasks(b, &args),
@@ -331,6 +340,16 @@ impl Server {
             .and_then(Value::as_str)
             .or(b.session.task_id.as_deref())
             .ok_or_else(|| "`id` is required (this session was not launched for a task)".to_string())
+    }
+
+    /// Where the project stands (ADR-0021): verified Git state now, saved history, one recommended next action.
+    fn resume_summary(&self, b: &Binding, args: &Value) -> Result<Value, String> {
+        let p = match args.get("project") {
+            Some(_) => self.target_project(b, args)?,
+            None => self.session_project(b).ok_or("this session has no project — pass `project`")?,
+        };
+        let s = nexus_core::resume::summarize(&self.conn, &self.data_dir, &self.home, &p.id).map_err(|e| e.to_string())?;
+        Ok(json!(s))
     }
 
     fn get_task(&self, b: &Binding, args: &Value) -> Result<Value, String> {
@@ -751,6 +770,12 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
         }),
         json!({
+            "name": "get_resume_summary", "title": "Resume project",
+            "description": "Where the project stands: `verified` = Git state read now; `saved` = open tasks, notes and decisions for this branch, latest checkpoints and sessions (history, not re-verified); `next` = one recommended action with its evidence.",
+            "inputSchema": { "type": "object", "properties": { "project": project_arg.clone() }, "additionalProperties": false },
+            "annotations": read_only,
+        }),
+        json!({
             "name": "get_task", "title": "Task",
             "description": "One task: status, description, checklist (numbered) and the last log entries. Without `id`: this session's task.",
             "inputSchema": { "type": "object", "properties": { "id": { "type": "string", "maxLength": 64 } }, "additionalProperties": false },
@@ -859,7 +884,7 @@ mod tests {
         assert_eq!(names, [
             "get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint",
             "get_session_activity", "get_context_index", "search_knowledge", "get_document", "list_tasks", "create_task",
-            "get_task", "update_task", "record_memory", "get_checkpoints",
+            "get_resume_summary", "get_task", "update_task", "record_memory", "get_checkpoints",
         ]);
         assert!(names.iter().all(|n| !n.starts_with("nexus_")), "Claude already prefixes mcp__nexus__");
     }

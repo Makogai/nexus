@@ -16,6 +16,7 @@ pub mod knowledge;
 pub mod paths;
 pub mod proc;
 pub mod project;
+pub mod resume;
 pub mod session;
 pub mod settings;
 pub mod workprofile;

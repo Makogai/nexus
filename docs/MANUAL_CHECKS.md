@@ -56,7 +56,12 @@
     default profile's personal instructions out of this profile's sessions" → the inspector shows those files as
     *excluded — NEXUS profile isolation*; in a new session `/memory` no longer lists them. `claude` started outside
     NEXUS still loads them (unchanged).
-18. Re-run the snapshot from step 1 → still unchanged (hooks, MCP and isolation are session-scoped, not profile edits).
+18. **Resume project**: project page → *Resume project* → the *Verified now* column matches `git status` / `git log`
+    in your terminal; *Saved context* shows the tasks and checkpoints from steps 14–15; the recommended button resumes
+    or launches as described.
+19. **Proposed memory**: in a session ask Claude to "record a NEXUS checkpoint of kind decision: we use X for Y",
+    then `/exit` → *Knowledge → Proposals* shows it; nothing appears under *Decisions* until you approve it.
+20. Re-run the snapshot from step 1 → still unchanged (hooks, MCP and isolation are session-scoped, not profile edits).
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.
