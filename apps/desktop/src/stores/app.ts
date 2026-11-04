@@ -1,0 +1,126 @@
+import { defineStore } from 'pinia'
+import { computed, reactive, ref, watch } from 'vue'
+import { api, toIpcError } from '../lib/ipc'
+import type { AppInfo, UiPreferences } from '../lib/types'
+
+export interface Toast {
+  id: number
+  tone: 'info' | 'success' | 'error'
+  message: string
+}
+
+export interface ConfirmRequest {
+  title: string
+  message: string
+  confirmLabel?: string
+  danger?: boolean
+  resolve: (ok: boolean) => void
+}
+
+const DEFAULT_PREFS: UiPreferences = {
+  theme: 'dark',
+  terminalFontSize: 13,
+  terminalHeight: 320,
+  terminalOpen: true,
+  sidebarCollapsed: false,
+  defaultShell: null,
+  lastLaunch: null,
+}
+
+export const useAppStore = defineStore('app', () => {
+  const info = ref<AppInfo | null>(null)
+  const prefs = reactive<UiPreferences>({ ...DEFAULT_PREFS })
+  const prefsLoaded = ref(false)
+  const toasts = ref<Toast[]>([])
+  const confirmRequest = ref<ConfirmRequest | null>(null)
+  const paletteOpen = ref(false)
+  const launchDialog = ref<{ open: boolean; projectId?: string | null; profileId?: string | null }>({ open: false })
+  let toastSeq = 0
+
+  const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)')
+  const resolvedTheme = computed<'dark' | 'light'>(() =>
+    prefs.theme === 'system' ? (systemDark?.matches ? 'dark' : 'light') : prefs.theme,
+  )
+
+  function applyTheme() {
+    document.documentElement.dataset.theme = resolvedTheme.value
+  }
+  systemDark?.addEventListener?.('change', applyTheme)
+
+  async function load() {
+    try {
+      const [i, p] = await Promise.all([api.appInfo(), api.uiPreferencesGet()])
+      info.value = i
+      if (p) Object.assign(prefs, DEFAULT_PREFS, p)
+    } catch (e) {
+      toast('error', `Could not load application state: ${toIpcError(e).message}`)
+    } finally {
+      prefsLoaded.value = true
+      applyTheme()
+    }
+  }
+
+  let saveTimer: ReturnType<typeof setTimeout> | undefined
+  watch(
+    prefs,
+    () => {
+      applyTheme()
+      if (!prefsLoaded.value) return
+      clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => {
+        api.uiPreferencesSet({ ...prefs }).catch(() => undefined)
+      }, 400)
+    },
+    { deep: true },
+  )
+
+  function toast(tone: Toast['tone'], message: string, ms = tone === 'error' ? 7000 : 3500) {
+    const id = ++toastSeq
+    toasts.value.push({ id, tone, message })
+    setTimeout(() => dismiss(id), ms)
+  }
+  function dismiss(id: number) {
+    toasts.value = toasts.value.filter((t) => t.id !== id)
+  }
+  /** Run an action and surface failures as an error toast. Returns undefined on failure. */
+  async function attempt<T>(fn: () => Promise<T>, failure = 'Action failed'): Promise<T | undefined> {
+    try {
+      return await fn()
+    } catch (e) {
+      toast('error', `${failure}: ${toIpcError(e).message}`)
+      return undefined
+    }
+  }
+
+  function confirm(opts: Omit<ConfirmRequest, 'resolve'>): Promise<boolean> {
+    return new Promise((resolve) => {
+      confirmRequest.value = { ...opts, resolve }
+    })
+  }
+  function settleConfirm(ok: boolean) {
+    confirmRequest.value?.resolve(ok)
+    confirmRequest.value = null
+  }
+
+  function openLaunch(projectId?: string | null, profileId?: string | null) {
+    launchDialog.value = { open: true, projectId, profileId }
+  }
+
+  return {
+    info,
+    prefs,
+    prefsLoaded,
+    resolvedTheme,
+    toasts,
+    confirmRequest,
+    paletteOpen,
+    launchDialog,
+    load,
+    toast,
+    dismiss,
+    attempt,
+    confirm,
+    settleConfirm,
+    openLaunch,
+  }
+})

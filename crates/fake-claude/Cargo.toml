@@ -1,0 +1,13 @@
+[package]
+name = "fake-claude"
+description = "Test double for Claude Code: prints argv, cwd and selected environment variables as JSON"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

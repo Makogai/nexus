@@ -1,0 +1,28 @@
+[package]
+name = "nexus-core"
+description = "NEXUS core: storage, workspaces, projects, git, Claude profiles, launch specs, sessions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+dirs.workspace = true
+dunce.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+which.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+
+[dev-dependencies]
+dunce.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
