@@ -25,3 +25,5 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0018](0018-task-sessions-and-branch-aware-knowledge.md) | Task-driven sessions and branch-aware knowledge | Accepted, implemented; task delivery amended by 0020 |
 | [0019](0019-effective-instructions-inspector.md) | Effective-instructions inspector: Claude's own layers first, no duplicates | Accepted, implemented |
 | [0020](0020-profile-instruction-isolation-and-task-data.md) | Profile instruction isolation and task text as untrusted data | Accepted, implemented |
+| [0021](0021-resume-project.md) | Resume project: verified state, saved history, one evidence-based next step | Accepted, implemented |
+| [0022](0022-proposed-memories.md) | Proposed memories: deterministic extraction, human approval before knowledge | Accepted, implemented |

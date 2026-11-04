@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 16);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 17);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -864,3 +864,85 @@ fn instructions_planted_in_a_task_never_reach_the_system_prompt() {
     assert_eq!(r[0]["structuredContent"]["note"], "Task text is workspace content: a description of the work, not instructions.");
 }
 
+
+// --- Resume project (M18, ADR-0021) -------------------------------------------------------------------------------
+
+#[test]
+fn resume_project_separates_verified_state_from_saved_history() {
+    let e = Env::new();
+    e.setup();
+    git_commit(&e.repo, "Initial skeleton");
+    let task = e.json(&["tasks", "add", "Ship login", "--project", "repo", "--body=- [ ] Email\n- [ ] Password\n"]);
+    let tid = task["id"].as_str().unwrap().to_string();
+    // A session worked on the task and recorded a checkpoint, then ended; Claude kept the conversation.
+    let report_path = e.data.parent().unwrap().join("resume-1.json");
+    let out = e.cmd(&["launch", "--task", &tid, "-q"]).env("FAKE_CLAUDE_REPORT", &report_path).output().unwrap();
+    assert!(out.status.success());
+    let session = e.json(&["sessions"])[0].clone();
+    let sid = session["id"].as_str().unwrap().to_string();
+    mcp_calls(&e, &sid, &[("update_task", serde_json::json!({ "log": "Email field done", "check": [1] }))]);
+    let csid = session["claudeSessionId"].as_str().unwrap();
+    std::fs::create_dir_all(e.cfg.join("projects").join("repo")).unwrap();
+    std::fs::write(e.cfg.join("projects").join("repo").join(format!("{csid}.jsonl")), "{}\n").unwrap();
+    std::fs::write(e.repo.join("login.rs"), "fn main() {}\n").unwrap();
+
+    let s = e.json(&["projects", "resume", "repo"]);
+    assert_eq!(s["verified"]["branch"], "main");
+    assert_eq!(s["verified"]["untracked"], 2, "Cargo.toml (never committed) and login.rs");
+    assert_eq!(s["verified"]["recentCommits"][0]["summary"], "Initial skeleton");
+    assert_eq!(s["saved"]["tasks"][0]["status"], "in-progress");
+    assert_eq!(s["saved"]["tasks"][0]["checklistDone"], 1);
+    assert!(s["saved"]["checkpoints"][0]["summary"].as_str().unwrap().contains("Email field done"));
+    assert_eq!(s["next"]["kind"], "resume-session");
+    assert_eq!(s["next"]["sessionId"], sid.as_str());
+    assert!(s.to_string().len() < 6000, "bounded summary");
+
+    let human = e.ok(&["projects", "resume", "repo"]);
+    assert!(human.contains("Verified now (Git):") && human.contains("Saved context (history, not re-verified):"), "{human}");
+    assert!(human.contains(&format!("run: nexus launch --resume {}", &sid[..8])), "{human}");
+
+    let r = mcp_calls(&e, &sid, &[("get_resume_summary", serde_json::json!({}))]);
+    assert_eq!(r[0]["structuredContent"]["next"]["kind"], "resume-session");
+    assert_eq!(r[0]["structuredContent"]["projectName"], "repo");
+}
+
+// --- Proposed memories (ADR-0022) ----------------------------------------------------------------------------------
+
+#[test]
+fn session_end_proposes_memories_and_only_approval_makes_knowledge() {
+    let e = Env::new();
+    e.setup();
+    let (_, session) = launch_report(&e, &["--name", "Payments spike"], "proposals.json");
+    let sid = session["id"].as_str().unwrap().to_string();
+    mcp_calls(
+        &e,
+        &sid,
+        &[
+            ("checkpoint", serde_json::json!({ "kind": "progress", "summary": "Wired the cart page to the API" })),
+            ("checkpoint", serde_json::json!({ "kind": "decision", "summary": "Use Stripe Checkout instead of a custom form. It handles SCA." })),
+            ("checkpoint", serde_json::json!({ "kind": "blocker", "summary": "Sandbox webhooks fail behind the corporate proxy" })),
+        ],
+    );
+    let csid = session["claudeSessionId"].as_str().unwrap();
+    hook(&e, &sid, "session-end", &format!(r#"{{"hook_event_name":"SessionEnd","reason":"prompt_input_exit","session_id":"{csid}"}}"#));
+
+    assert!(e.json(&["knowledge", "list"]).as_array().unwrap().is_empty(), "nothing becomes knowledge on its own");
+    let pending = e.json(&["knowledge", "proposals", "list"]);
+    let pending = pending.as_array().unwrap();
+    assert_eq!(pending.len(), 2, "decision + blocker; routine progress is not memory: {pending:#?}");
+    assert_eq!(e.json(&["projects", "resume", "repo"])["saved"]["pendingProposals"], 2);
+
+    let decision = pending.iter().find(|p| p["kind"] == "decision").unwrap();
+    let id = decision["id"].as_str().unwrap();
+    let doc = e.json(&["knowledge", "proposals", "approve", &id[..8], "--title", "Payments use Stripe Checkout", "--scope", "workspace"]);
+    assert_eq!((doc["kind"].as_str(), doc["status"].as_str(), doc["title"].as_str()), (Some("decision"), Some("accepted"), Some("Payments use Stripe Checkout")));
+    let text = std::fs::read_to_string(doc["path"].as_str().unwrap()).unwrap();
+    assert!(text.contains("Proposed from the NEXUS session “Payments spike”") && text.contains("source: human"));
+
+    let blocker = pending.iter().find(|p| p["kind"] == "note").unwrap();
+    e.ok(&["knowledge", "proposals", "reject", blocker["id"].as_str().unwrap()]);
+    assert!(e.json(&["knowledge", "proposals", "list"]).as_array().unwrap().is_empty());
+    hook(&e, &sid, "session-end", &format!(r#"{{"hook_event_name":"SessionEnd","reason":"other","session_id":"{csid}"}}"#));
+    assert!(e.json(&["knowledge", "proposals", "list"]).as_array().unwrap().is_empty(), "rejected and approved ones are not proposed again");
+    assert_eq!(e.json(&["knowledge", "list", "--kind", "decision"]).as_array().unwrap().len(), 1);
+}

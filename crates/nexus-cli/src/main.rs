@@ -111,6 +111,12 @@ enum ProjectCmd {
     Locate { project: String, folder: String },
     /// Unregister a project (its folder and repository are not touched).
     Remove { project: String },
+    /// Where a project stands: verified Git state, saved history (tasks, notes, checkpoints, sessions) and the next
+    /// recommended action with the command to run it.
+    Resume {
+        /// Project (default: the one containing the working directory).
+        project: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -390,6 +396,23 @@ fn cmd_projects(ctx: &Ctx, cmd: ProjectCmd) -> nexus_core::Result<()> {
                 println!("{} → {}", p.name, p.local_path.map(|l| l.display().to_string()).unwrap_or_default());
             }
         }
+        ProjectCmd::Resume { project: q } => {
+            let p = match q.as_deref() {
+                Some(q) => find(q)?,
+                None => {
+                    let dir = std::env::current_dir().map_err(|e| CoreError::io("cannot read", ".", e))?;
+                    launch::project_containing(&project::list(&conn, &ws.id)?, &dir)
+                        .ok_or_else(|| CoreError::invalid("not inside a registered project — name one: `nexus projects resume <project>`"))?
+                }
+            };
+            nexus_core::knowledge::proposals::extract_recent(&conn, &ws.id)?;
+            let s = nexus_core::resume::summarize(&conn, &ctx.data_dir, &ctx.home, &p.id)?;
+            if ctx.json {
+                out::json(&s);
+            } else {
+                print_resume(&s);
+            }
+        }
         ProjectCmd::Remove { project: q } => {
             let p = find(&q)?;
             project::unregister(&conn, &p.id)?;
@@ -399,6 +422,60 @@ fn cmd_projects(ctx: &Ctx, cmd: ProjectCmd) -> nexus_core::Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_resume(s: &nexus_core::resume::ResumeSummary) {
+    use nexus_core::resume::ActionKind;
+    let v = &s.verified;
+    println!("{} — resume project\n", s.project_name);
+    println!("Verified now (Git):");
+    if !v.available {
+        println!("  folder not available on this machine");
+    } else if !v.repo {
+        println!("  not a Git repository");
+    } else {
+        println!(
+            "  branch {}{}",
+            v.branch.as_deref().unwrap_or("(detached)"),
+            v.head.as_ref().map(|h| format!(" @ {} {}", h.oid, h.summary)).unwrap_or_default()
+        );
+        println!("  {} staged, {} modified, {} untracked, {} conflicted", v.staged, v.unstaged, v.untracked, v.conflicted);
+        if let Some(u) = &v.upstream {
+            println!("  {} ahead / {} behind {u} (as of the last fetch)", v.ahead, v.behind);
+        }
+    }
+    println!("\nSaved context (history, not re-verified):");
+    for t in &s.saved.tasks {
+        let check = if t.checklist_total > 0 { format!(" · {}/{}", t.checklist_done, t.checklist_total) } else { String::new() };
+        println!("  task  [{}{check}] {} ({})", t.status, t.title, nexus_core::knowledge::service::short_id(&t.id));
+        if let Some(l) = &t.last_progress {
+            println!("        last: {l}");
+        }
+    }
+    for n in s.saved.notes.iter().chain(&s.saved.decisions) {
+        println!("  {:<5} {}{}", n.kind, n.title, n.branch.as_deref().map(|b| format!(" (branch {b})")).unwrap_or_default());
+    }
+    for c in &s.saved.checkpoints {
+        println!("  [{}] {} — {}, {}{}", c.kind, c.summary, c.session_title, out::ago(Some(c.at)), if c.other_branch { " (other branch)" } else { "" });
+    }
+    if s.saved.hidden_other_branch > 0 {
+        println!("  ({} note(s) of other branches hidden)", s.saved.hidden_other_branch);
+    }
+    for w in &s.warnings {
+        println!("\nwarning: {w}");
+    }
+    println!("\nNext: {}", s.next.label);
+    for e in &s.next.evidence {
+        println!("  · {e}");
+    }
+    let cmd = match s.next.kind {
+        ActionKind::ResumeSession => s.next.session_id.as_ref().map(|id| format!("nexus launch --resume {}", out::short_id(id))),
+        ActionKind::LaunchTask => s.next.task_id.as_ref().map(|id| format!("nexus launch --task {}", nexus_core::knowledge::service::short_id(id))),
+        _ => Some(format!("nexus launch --project \"{}\"", s.project_name)),
+    };
+    if let Some(c) = cmd {
+        println!("  run: {c}");
+    }
 }
 
 fn cmd_profiles(ctx: &Ctx, cmd: ProfileCmd) -> nexus_core::Result<()> {

@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use nexus_core::knowledge::branches::{self, GitRef};
 use nexus_core::knowledge::index::{self as kindex, Item};
+use nexus_core::knowledge::proposals::{self, Approval};
 use nexus_core::knowledge::tasks::{self, TaskUpdate};
 use nexus_core::knowledge::service::{self as knowledge, Author, CreateInput, ItemView};
 use nexus_core::knowledge::{Kind, MAX_FILE_BYTES, context};
@@ -55,6 +56,34 @@ pub enum KnowledgeCmd {
     Approve { id: String },
     /// Create a document.
     New(Box<NewArgs>),
+    /// Memory proposed from session activity — reviewed and approved before it becomes knowledge (ADR-0022).
+    #[command(subcommand)]
+    Proposals(ProposalsCmd),
+}
+
+#[derive(Subcommand)]
+pub enum ProposalsCmd {
+    /// Pending proposals (extracts from recent sessions first).
+    List {
+        /// Also approved and rejected ones.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Approve a proposal: it becomes a knowledge document (optionally edited).
+    Approve {
+        id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
+        /// workspace | project (default) | branch (the session's branch)
+        #[arg(long)]
+        scope: Option<String>,
+        #[arg(long)]
+        local: bool,
+    },
+    /// Reject a proposal (it is not proposed again).
+    Reject { id: String },
 }
 
 #[derive(Args)]
@@ -174,6 +203,47 @@ pub fn cmd_knowledge(ctx: &Ctx, cmd: KnowledgeCmd) -> nexus_core::Result<()> {
     let conn = ctx.db()?;
     let ws = active_workspace(&conn)?;
     match cmd {
+        KnowledgeCmd::Proposals(p) => {
+            let find = |q: &str| -> nexus_core::Result<proposals::Proposal> {
+                let all = proposals::list(&conn, &ws.id, None)?;
+                resolve_ref(&all, q, |p| &p.id, |p| &p.title, "proposal").cloned()
+            };
+            match p {
+                ProposalsCmd::List { all } => {
+                    knowledge::refresh(&conn, &ctx.data_dir, &ws)?;
+                    proposals::extract_recent(&conn, &ws.id)?;
+                    let list = proposals::list(&conn, &ws.id, if all { None } else { Some("pending") })?;
+                    if ctx.json {
+                        out::json(&list);
+                    } else if list.is_empty() {
+                        println!("no memory proposals waiting for review");
+                    } else {
+                        for p in &list {
+                            println!("{} {:<8} {:<8} {}", out::short_id(&p.id), p.status, p.kind, p.title);
+                            println!("         from “{}”{} — {}", p.session_title, p.branch.as_deref().map(|b| format!(" on {b}")).unwrap_or_default(), out::ago(Some(p.created_at)));
+                        }
+                        println!("\napprove with `nexus knowledge proposals approve <id> [--title …] [--scope workspace|project|branch]`, or reject");
+                    }
+                }
+                ProposalsCmd::Approve { id, title, body, scope, local } => {
+                    knowledge::refresh(&conn, &ctx.data_dir, &ws)?;
+                    let p = find(&id)?;
+                    let item = proposals::approve(&conn, &ctx.data_dir, &ws, &p.id, &Approval { title, body, scope, local_only: local })?;
+                    if ctx.json {
+                        out::json(&item);
+                    } else {
+                        println!("approved: {} “{}” → {}", item.kind.as_deref().unwrap_or("?"), item.title, item.path.display());
+                    }
+                }
+                ProposalsCmd::Reject { id } => {
+                    let p = find(&id)?;
+                    proposals::reject(&conn, &p.id)?;
+                    if !ctx.json {
+                        println!("rejected “{}” (it will not be proposed again)", p.title);
+                    }
+                }
+            }
+        }
         KnowledgeCmd::Reindex { rebuild } => {
             let o = knowledge::overview(&conn, &ctx.data_dir, &ws, rebuild)?;
             if ctx.json {

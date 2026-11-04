@@ -1,22 +1,27 @@
 <script setup lang="ts">
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import { BookOpen, FileWarning, Globe, Info, Lock, Plus, RefreshCw, Search, ShieldAlert } from '@lucide/vue'
+import { useRoute } from 'vue-router'
+import { BookOpen, FileWarning, Globe, Info, Lightbulb, Lock, Plus, RefreshCw, Search, ShieldAlert } from '@lucide/vue'
 import { api, toIpcError } from '../lib/ipc'
 import { KIND_LABELS, STATUS_LABELS, fileName, problems, rulesInOrder } from '../lib/knowledge'
-import type { KnowledgeHit, KnowledgeItem, KnowledgeKind, KnowledgeOverview, TaskStatus } from '../lib/types'
+import type { KnowledgeHit, KnowledgeItem, KnowledgeKind, KnowledgeOverview, MemoryApproval, MemoryProposal, TaskStatus } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useWorkspaceStore } from '../stores/workspaces'
 import TaskBoard from '../components/TaskBoard.vue'
 import KnowledgeDialog from '../components/KnowledgeDialog.vue'
 import KnowledgeDocDialog from '../components/KnowledgeDocDialog.vue'
+import ProposalCard from '../components/ProposalCard.vue'
 
 const app = useAppStore()
 const workspaces = useWorkspaceStore()
 const projects = useProjectStore()
 
-type Tab = KnowledgeKind | 'health'
-const tab = ref<Tab>('task')
+type Tab = KnowledgeKind | 'health' | 'proposals'
+const route = useRoute()
+const tab = ref<Tab>(route.query.tab === 'proposals' ? 'proposals' : 'task')
+const proposals = ref<MemoryProposal[]>([])
+const proposalBusy = ref(false)
 const overview = ref<KnowledgeOverview | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -31,7 +36,7 @@ const projectNames = computed(() => Object.fromEntries(projects.list.map((p) => 
 const broken = computed(() => problems(items.value))
 const pending = computed(() => items.value.filter((i) => i.needsApproval))
 const counts = computed(() => {
-  const c: Record<string, number> = { health: broken.value.length }
+  const c: Record<string, number> = { health: broken.value.length, proposals: proposals.value.length }
   for (const k of Object.keys(KIND_LABELS)) c[k] = items.value.filter((i) => i.kind === k && i.valid && !i.conflict).length
   return c
 })
@@ -40,7 +45,7 @@ const ofKind = computed(() =>
     ? rulesInOrder(items.value)
     : items.value.filter((i) => i.kind === tab.value && i.valid && !i.conflict),
 )
-const tabs = computed<Tab[]>(() => [...(Object.keys(KIND_LABELS) as KnowledgeKind[]), ...(broken.value.length ? (['health'] as Tab[]) : [])])
+const tabs = computed<Tab[]>(() => [...(Object.keys(KIND_LABELS) as KnowledgeKind[]), 'proposals', ...(broken.value.length ? (['health'] as Tab[]) : [])])
 
 async function load(rebuild = false) {
   if (!wsId.value) return
@@ -48,6 +53,7 @@ async function load(rebuild = false) {
   try {
     overview.value = await api.knowledgeOverview(wsId.value, rebuild)
     error.value = null
+    await loadProposals(tab.value === 'proposals')
     if (rebuild) {
       const r = overview.value.report
       app.toast('success', `Index rebuilt from ${r.scanned} files${r.invalid ? ` (${r.invalid} invalid)` : ''}`)
@@ -58,6 +64,30 @@ async function load(rebuild = false) {
     loading.value = false
   }
 }
+
+/** Proposals are scanned from recent sessions when the tab is opened or on Rescan (cheap, deterministic). */
+async function loadProposals(extract: boolean) {
+  if (!wsId.value) return
+  proposals.value = await api.knowledgeProposals(wsId.value, extract).catch(() => proposals.value)
+}
+
+async function approveProposal(p: MemoryProposal, approval: MemoryApproval) {
+  if (!wsId.value) return
+  proposalBusy.value = true
+  const item = await app.attempt(() => api.knowledgeProposalApprove(wsId.value!, p.id, approval), 'Could not approve')
+  proposalBusy.value = false
+  if (item) app.toast('success', `Saved as ${item.kind}: “${item.title}”`)
+  await Promise.all([load(), loadProposals(false)])
+}
+
+async function rejectProposal(p: MemoryProposal) {
+  proposalBusy.value = true
+  await app.attempt(() => api.knowledgeProposalReject(p.id), 'Could not reject')
+  proposalBusy.value = false
+  await loadProposals(false)
+}
+
+watch(tab, (t) => t === 'proposals' && loadProposals(true))
 
 async function move(task: KnowledgeItem, status: TaskStatus) {
   if (!wsId.value || !task.id) return
@@ -177,11 +207,21 @@ watch(broken, (b) => {
             @click="tab = t"
           >
             <FileWarning v-if="t === 'health'" class="ic" />
-            {{ t === 'health' ? 'Problems' : KIND_LABELS[t] }} <span class="faint">{{ counts[t] }}</span>
+            <Lightbulb v-else-if="t === 'proposals'" class="ic" />
+            {{ t === 'health' ? 'Problems' : t === 'proposals' ? 'Proposals' : KIND_LABELS[t] }} <span class="faint">{{ counts[t] }}</span>
           </button>
         </div>
 
         <TaskBoard v-if="tab === 'task'" :tasks="ofKind" :project-names="projectNames" @move="move" @open="viewing = $event" @launch="launchTask" />
+
+        <div v-else-if="tab === 'proposals'" class="proposals" data-proposals>
+          <p class="notice notice-accent explain-proposals">
+            <Lightbulb />
+            <span>Proposed from what Claude recorded as decisions, blockers and notes in past sessions. They are <strong>not knowledge</strong> until you approve them — edit, choose a scope, or reject.</span>
+          </p>
+          <ProposalCard v-for="p in proposals" :key="p.id" :proposal="p" :busy="proposalBusy" @approve="(a) => approveProposal(p, a)" @reject="rejectProposal(p)" />
+          <p v-if="!proposals.length" class="faint">No proposals waiting for review.</p>
+        </div>
 
         <div v-else-if="tab === 'health'" class="list">
           <div v-for="p in broken" :key="p.path" class="list-row problem">
@@ -208,7 +248,7 @@ watch(broken, (b) => {
         </div>
         <div v-else class="empty">
           <BookOpen class="empty-icon" />
-          <h3>No {{ KIND_LABELS[tab as KnowledgeKind].toLowerCase() }} yet</h3>
+          <h3>No {{ KIND_LABELS[tab as KnowledgeKind]?.toLowerCase() }} yet</h3>
           <p>Create one here, write a Markdown file in the workspace folder, or let Claude record tasks, notes and decisions through the NEXUS tools.</p>
         </div>
       </template>
@@ -219,7 +259,7 @@ watch(broken, (b) => {
       </p>
     </template>
 
-    <KnowledgeDialog v-if="wsId" :open="creating" :workspace-id="wsId" :projects="projects.list" :initial-kind="tab === 'health' ? 'task' : tab" @close="creating = false" @created="load()" />
+    <KnowledgeDialog v-if="wsId" :open="creating" :workspace-id="wsId" :projects="projects.list" :initial-kind="tab === 'health' || tab === 'proposals' ? 'task' : tab" @close="creating = false" @created="load()" />
     <KnowledgeDocDialog v-if="wsId" :item="viewing" :workspace-id="wsId" @close="viewing = null" @approved="load()" @changed="load()" @launch="(t) => { viewing = null; launchTask(t) }" />
   </div>
 </template>
@@ -319,5 +359,10 @@ watch(broken, (b) => {
 }
 .explain {
   margin-top: 20px;
+}
+.proposals {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 </style>

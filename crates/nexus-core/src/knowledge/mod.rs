@@ -5,6 +5,7 @@ pub mod branches;
 pub mod context;
 pub mod frontmatter;
 pub mod index;
+pub mod proposals;
 pub mod service;
 pub mod skills;
 pub mod store;

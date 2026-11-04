@@ -12,7 +12,12 @@ const api = vi.hoisted(() => ({
   knowledgeUpdateTask: vi.fn(),
   knowledgeApprove: vi.fn(),
   knowledgeTask: vi.fn(),
+  knowledgeProposals: vi.fn((): Promise<unknown[]> => Promise.resolve([])),
+  knowledgeProposalApprove: vi.fn(),
+  knowledgeProposalReject: vi.fn(),
   instructionsInspect: vi.fn(),
+  projectResume: vi.fn(),
+  sessionResume: vi.fn(),
 }))
 
 vi.mock('../src/lib/ipc', () => ({
@@ -33,7 +38,9 @@ import KnowledgeView from '../src/views/KnowledgeView.vue'
 import KnowledgeDocDialog from '../src/components/KnowledgeDocDialog.vue'
 import InstructionsPanel from '../src/components/InstructionsPanel.vue'
 import { useProfileStore } from '../src/stores/profiles'
-import type { ClaudeProfile, InstructionsPreview, TaskView } from '../src/lib/types'
+import type { ClaudeProfile, InstructionsPreview, ResumeSummary, TaskView } from '../src/lib/types'
+import ResumeProjectView from '../src/views/ResumeProjectView.vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAppStore } from '../src/stores/app'
 import { useWorkspaceStore } from '../src/stores/workspaces'
 
@@ -136,7 +143,8 @@ describe('KnowledgeView', () => {
   })
 
   function mountView() {
-    return mount(KnowledgeView, { global: { stubs: { teleport: true, transition: false } } })
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { template: '<div />' } }] })
+    return mount(KnowledgeView, { global: { plugins: [router], stubs: { teleport: true, transition: false } } })
   }
 
   it('shows pending approvals and approves only after the rule was opened', async () => {
@@ -251,3 +259,99 @@ describe('task workflow UI', () => {
     expect(w.find('[data-isolation-on]').text()).toContain('1 pattern(s)')
   })
 })
+
+describe('ResumeProjectView', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  const summary: ResumeSummary = {
+    projectId: 'p1',
+    projectName: 'shop',
+    verified: {
+      checkedAt: Date.now(), available: true, repo: true, branch: 'main', detached: false,
+      head: { oid: 'abcdef123456', summary: 'Add cart', at: Date.now() }, upstream: 'origin/main', ahead: 0, behind: 2,
+      staged: 0, unstaged: 1, untracked: 0, conflicted: 0, recentCommits: [{ oid: 'abcdef123456', summary: 'Add cart', at: Date.now() }],
+    },
+    saved: {
+      tasks: [{ id: 't1', title: 'Ship checkout', status: 'in-progress', priority: null, branch: null, checklistDone: 1, checklistTotal: 2, lastProgress: '2026-11-04 [claude] Cart done', updated: null }],
+      notes: [{ id: 'n1', kind: 'note', title: 'Sandbox keys', status: null, relevance: 'this-branch', branch: 'main', updated: null }],
+      decisions: [],
+      checkpoints: [{ kind: 'progress', summary: 'Cart done', sessionTitle: 'Ship checkout', at: Date.now(), branch: 'feature/old', otherBranch: true }],
+      sessions: [{ id: 's1', title: 'Ship checkout', state: 'interrupted', startedAt: Date.now(), endedAt: null, resumable: true, taskId: 't1', branch: 'main' }],
+      hiddenOtherBranch: 1,
+      pendingProposals: 2,
+    },
+    next: { kind: 'resume-session', label: 'Resume work on “Ship checkout”', evidence: ['saved: task “Ship checkout” is in-progress', 'saved: its last session can be resumed'], sessionId: 's1', taskId: 't1' },
+    warnings: ['Some checkpoints were recorded on another branch than the one checked out now.'],
+  }
+
+  function mountView() {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { template: '<div />' } }] })
+    return mount(ResumeProjectView, { props: { id: 'p1' }, global: { plugins: [router], stubs: { teleport: true } } })
+  }
+
+  it('keeps verified Git state apart from saved history and resumes the recommended session', async () => {
+    api.projectResume.mockResolvedValue(summary)
+    api.sessionResume.mockResolvedValue({ id: 's2', running: true, state: 'running' })
+    const w = mountView()
+    await flushPromises()
+    const verified = w.find('[data-section="verified"]').text()
+    const saved = w.find('[data-section="saved"]').text()
+    expect(verified).toContain('main')
+    expect(verified).toContain('2 behind')
+    expect(verified).not.toContain('Ship checkout')
+    expect(saved).toContain('Ship checkout')
+    expect(saved).toContain('recorded on feature/old')
+    expect(saved).toContain('1 note(s) of other branches hidden')
+    expect(w.findAll('.evidence .badge').map((b) => b.text())).toEqual(['saved', 'saved'])
+    expect(w.text()).toContain('recorded on another branch')
+    expect(w.find('[data-pending-proposals]').text()).toContain('2 memory proposal(s)')
+    await w.find('[data-next-action]').trigger('click')
+    await flushPromises()
+    expect(api.sessionResume).toHaveBeenCalledWith('s1', expect.anything(), expect.anything())
+  })
+
+  it('launches the recommended task through the task launch dialog', async () => {
+    api.projectResume.mockResolvedValue({ ...summary, next: { ...summary.next, kind: 'launch-task', sessionId: null, label: 'Continue “Ship checkout”' } })
+    const w = mountView()
+    await flushPromises()
+    await w.find('[data-next-action]').trigger('click')
+    expect(useAppStore().launchDialog).toMatchObject({ open: true, projectId: 'p1', task: { id: 't1', title: 'Ship checkout' } })
+  })
+})
+
+describe('memory proposals', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    useWorkspaceStore().active = WS
+  })
+
+  it('are reviewed in the Knowledge view: edited, then approved — or rejected', async () => {
+    const proposal = {
+      id: 'mp1', workspaceId: 'ws', projectId: 'p1', sessionId: 's1', sessionTitle: 'Payments spike', kind: 'decision' as const,
+      title: 'Use Stripe Checkout', body: 'It handles SCA.', source: 'decision', branch: 'main', status: 'pending' as const,
+      documentId: null, createdAt: Date.now(), decidedAt: null,
+    }
+    api.knowledgeOverview.mockResolvedValue({ report: { scanned: 0, changed: 0, removed: 0, invalid: 0, conflicts: 0 }, items: [] })
+    api.knowledgeProposals.mockResolvedValue([proposal])
+    api.knowledgeProposalApprove.mockResolvedValue(item('Payments use Stripe Checkout', { kind: 'decision' }))
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: { template: '<div />' } }] })
+    await router.push('/knowledge?tab=proposals')
+    const w = mount(KnowledgeView, { global: { plugins: [router], stubs: { teleport: true, transition: false } } })
+    await flushPromises()
+    expect(w.find('[data-proposals]').text()).toContain('not knowledge')
+    const card = w.find('[data-proposal="mp1"]')
+    await card.find('input.title').setValue('Payments use Stripe Checkout')
+    await card.find('select').setValue('branch')
+    await card.find('[data-approve]').trigger('click')
+    await flushPromises()
+    expect(api.knowledgeProposalApprove).toHaveBeenCalledWith('ws', 'mp1', { title: 'Payments use Stripe Checkout', body: 'It handles SCA.', scope: 'branch', localOnly: false })
+    await w.find('[data-proposal="mp1"] [data-reject]').trigger('click')
+    await flushPromises()
+    expect(api.knowledgeProposalReject).toHaveBeenCalledWith('mp1')
+  })
+})
+

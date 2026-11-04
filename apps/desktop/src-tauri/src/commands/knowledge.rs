@@ -170,6 +170,57 @@ pub async fn project_knowledge(ctx: State<'_, Ctx>, project_id: String) -> IpcRe
     .await
 }
 
+/// Memory proposals of the workspace (ADR-0022); `extract` first scans recent sessions.
+#[tauri::command]
+pub async fn knowledge_proposals(ctx: State<'_, Ctx>, workspace_id: String, extract: Option<bool>) -> IpcResult<Vec<nexus_core::knowledge::proposals::Proposal>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let ws = available(&ctx, &workspace_id)?;
+        let db = ctx.db();
+        if extract.unwrap_or(true) {
+            knowledge::refresh(&db, &ctx.data_dir, &ws)?;
+            nexus_core::knowledge::proposals::extract_recent(&db, &ws.id)?;
+        }
+        Ok(nexus_core::knowledge::proposals::list(&db, &ws.id, Some("pending"))?)
+    })
+    .await
+}
+
+/// A person approves a proposal: only now does it become a knowledge document.
+#[tauri::command]
+pub async fn knowledge_proposal_approve(
+    ctx: State<'_, Ctx>,
+    workspace_id: String,
+    id: String,
+    approval: nexus_core::knowledge::proposals::Approval,
+) -> IpcResult<Item> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let ws = available(&ctx, &workspace_id)?;
+        Ok(nexus_core::knowledge::proposals::approve(&ctx.db(), &ctx.data_dir, &ws, &id, &approval)?)
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn knowledge_proposal_reject(ctx: State<'_, Ctx>, id: String) -> IpcResult<()> {
+    Ok(nexus_core::knowledge::proposals::reject(&ctx.db(), &id)?)
+}
+
+/// "Resume project" (ADR-0021): verified Git state, saved history and one recommended next action.
+#[tauri::command]
+pub async fn project_resume(ctx: State<'_, Ctx>, project_id: String) -> IpcResult<nexus_core::resume::ResumeSummary> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let db = ctx.db();
+        // Sessions that ended without NEXUS hooks (e.g. NEXUS was closed) still get their proposals surfaced.
+        let ws = nexus_core::project::get(&db, &project_id)?.workspace_id;
+        nexus_core::knowledge::proposals::extract_recent(&db, &ws)?;
+        Ok(nexus_core::resume::summarize(&db, &ctx.data_dir, &ctx.home, &project_id)?)
+    })
+    .await
+}
+
 /// Effective-instructions inspector (ADR-0019): what Claude loads for this profile and folder, and what NEXUS
 /// would append. Read-only.
 #[tauri::command]

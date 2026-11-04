@@ -132,6 +132,26 @@ pub fn history(repo: &Path, max: usize) -> Option<Vec<String>> {
     out.success().then(|| out.stdout_str().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
 }
 
+/// The last `n` commits on HEAD (newest first).
+pub fn recent_commits(repo: &Path, n: usize) -> Option<Vec<CommitInfo>> {
+    let count = format!("-{}", n.clamp(1, 50));
+    let out = run_git(Some(repo), &["log", &count, "--format=%H%x00%ct%x00%s"]).ok()?;
+    if !out.success() {
+        return None;
+    }
+    Some(
+        out.stdout_str()
+            .lines()
+            .filter_map(|l| {
+                let mut parts = l.splitn(3, '\0');
+                let oid = parts.next()?.to_string();
+                let ts: i64 = parts.next()?.parse().ok()?;
+                Some(CommitInfo { oid, timestamp_ms: ts * 1000, summary: parts.next().unwrap_or("").to_string() })
+            })
+            .collect(),
+    )
+}
+
 pub fn last_commit(repo: &Path) -> Option<CommitInfo> {
     let out = run_git(Some(repo), &["log", "-1", "--format=%H%x00%ct%x00%s"]).ok()?;
     if !out.success() {
