@@ -8,6 +8,11 @@ import type {
   DetectedProfile,
   GitStatus,
   Installation,
+  KnowledgeCreate,
+  KnowledgeDoc,
+  KnowledgeEntry,
+  KnowledgeHit,
+  KnowledgeOverview,
   LaunchOptions,
   PathInspection,
   ProfileDetails,
@@ -109,6 +114,17 @@ export const api = {
   sessionRename: (id: string, title: string) => call<SessionView>('session_rename', { id, title }),
   sessionSetArchived: (id: string, archived: boolean) =>
     call<SessionView>('session_set_archived', { id, archived }),
+
+  knowledgeOverview: (workspaceId: string, rebuild = false) =>
+    call<KnowledgeOverview>('knowledge_overview', { workspaceId, rebuild }),
+  knowledgeRead: (workspaceId: string, id: string) => call<KnowledgeDoc>('knowledge_read', { workspaceId, id }),
+  knowledgeSearch: (workspaceId: string, query: string, kinds?: string[]) =>
+    call<KnowledgeHit[]>('knowledge_search', { workspaceId, query, kinds }),
+  knowledgeCreate: (workspaceId: string, input: KnowledgeCreate) =>
+    call<KnowledgeEntry>('knowledge_create', { workspaceId, input }),
+  knowledgeUpdateTask: (workspaceId: string, id: string, status: string | null, log?: string | null, expectedHash?: string | null) =>
+    call<KnowledgeEntry>('knowledge_update_task', { workspaceId, id, status, log, expectedHash }),
+  knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
 }
 
 export type Api = typeof api

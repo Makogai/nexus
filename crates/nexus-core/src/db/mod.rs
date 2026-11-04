@@ -45,6 +45,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0004_session_activity.sql"),
         disable_foreign_keys: true,
     },
+    Migration {
+        name: "0005_knowledge_index",
+        sql: include_str!("migrations/0005_knowledge_index.sql"),
+        disable_foreign_keys: false,
+    },
 ];
 
 /// Schema version this build understands.

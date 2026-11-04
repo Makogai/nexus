@@ -39,6 +39,8 @@ pub struct LaunchRequest<'a> {
     pub mcp_config: Option<&'a Path>,
     /// Session-scoped lifecycle-hook settings (`--settings`), when policy allows it (see `claude::hooks`).
     pub settings: Option<&'a Path>,
+    /// Approved always-on rules (ADR-0017), appended to the system prompt after the work profile.
+    pub rules_prompt: Option<&'a str>,
 }
 
 /// Everything needed to spawn the process. `env` is the *complete* environment (the spawner clears the
@@ -112,8 +114,12 @@ pub fn build(req: &LaunchRequest<'_>, base_env: &[(String, String)]) -> Result<L
         validate_model(model)?;
         args.extend(["--model".to_string(), model.to_string()]);
     }
-    if let Some(wp) = req.work_profile {
-        args.extend(["--append-system-prompt".to_string(), wp.prompt.to_string()]);
+    let appended: Vec<&str> = [req.work_profile.map(|w| w.prompt), req.rules_prompt.filter(|r| !r.trim().is_empty())]
+        .into_iter()
+        .flatten()
+        .collect();
+    if !appended.is_empty() {
+        args.extend(["--append-system-prompt".to_string(), appended.join("\n\n")]);
     }
     if let Some(cfg) = req.mcp_config {
         if !cfg.is_absolute() {
@@ -207,6 +213,7 @@ mod tests {
             project_id: Some("pr-1"),
             mcp_config: None,
             settings: None,
+            rules_prompt: None,
         }
     }
 
@@ -282,6 +289,23 @@ mod tests {
         );
         assert_eq!(spec.program, Path::new("claude"));
         assert_eq!(spec.cwd, t.path());
+    }
+
+    #[test]
+    fn rules_follow_the_work_profile_in_one_appended_prompt() {
+        let t = tempfile::tempdir().unwrap();
+        let p = profile(None);
+        let mut r = request(&p, t.path(), Mode::New);
+        r.rules_prompt = Some("NEXUS rules (always apply):\n\n### Tests\nAlways add tests.");
+        let spec = build(&r, &base_env()).unwrap();
+        let i = spec.args.iter().position(|a| a == "--append-system-prompt").unwrap();
+        assert!(spec.args[i + 1].starts_with("NEXUS work profile: PROTOTYPE"));
+        assert!(spec.args[i + 1].ends_with("Always add tests."));
+        assert_eq!(spec.args.iter().filter(|a| *a == "--append-system-prompt").count(), 1);
+        r.work_profile = None;
+        let spec = build(&r, &base_env()).unwrap();
+        let i = spec.args.iter().position(|a| a == "--append-system-prompt").unwrap();
+        assert!(spec.args[i + 1].starts_with("NEXUS rules"));
     }
 
     #[test]

@@ -9,12 +9,13 @@ company repositories or the user's real NEXUS database in automated tests; every
 | --- | --- | --- | --- |
 | Rust unit | `cargo test -p nexus-core` | path validation, migrations, manifest I/O, stack detection, porcelain parsing, profile detection, policy parsing, launch-spec building, env scrubbing, session state transitions | `tempfile` dirs; synthetic homes/config dirs passed explicitly (no global `HOME` mutation) |
 | Rust integration | `cargo test -p nexus-core --test '*'`, `cargo test -p nexus-desktop` | real `git` against temp repos; real PTY spawn (echo round trip); full launch through the PTY of the `fake-claude` binary that prints argv + selected env as JSON | temp dirs, `NEXUS_DATA_DIR`-style explicit paths |
-| Frontend unit/component | `vitest` + `@vue/test-utils` + `happy-dom` | pure logic (fuzzy, format, launch defaults); LaunchDialog, ProfileDialog, SessionRow, CommandPalette mounted with real Pinia stores and a mocked `lib/ipc` boundary | no Tauri runtime |
+| Frontend unit/component | `vitest` + `@vue/test-utils` + `happy-dom` | pure logic (fuzzy, format, launch defaults); LaunchDialog, ProfileDialog, SessionRow, CommandPalette, TaskBoard, KnowledgeDialog, KnowledgeView (approval only after review, hash-carrying task moves, broken files under Problems) mounted with real Pinia stores and a mocked `lib/ipc` boundary | no Tauri runtime |
 | Desktop E2E | `apps/desktop/e2e/smoke.mjs` over the WebView2 DevTools protocol (Windows, today); `tauri-driver` WebDriver for CI later | workspace → project → profile → UI launch → env isolation → exit → resume, against the real app | empty `NEXUS_DATA_DIR`, `fake-claude` profile, temp fixtures |
 | Security | part of unit/integration suites | hostile paths, injection strings in names, scrub list in every letter case, helper spawns (`auth status`, `--version`) under a hostile parent env (`tests/isolation.rs`), golden argv, malicious `core.fsmonitor`, policy-parser allowlist, newer-DB refusal | fixtures only |
-| CLI end-to-end | `cargo test -p nexus-cli` | the real `nexus` binary: setup, launch isolation under a hostile parent env, exit-code propagation, `--resume last`, killed-host reconciliation, MCP binding, policy-blocked MCP, JSON-RPC over stdio | temp data dirs, fake-claude |
+| Knowledge | `cargo test -p nexus-core knowledge::` | strict frontmatter (rejects anchors, tags, nested maps, duplicates), schema/privacy validation, secret refusal, atomic + optimistic writes, frozen keys, incremental refresh, deletions, duplicate-id conflicts, rebuild, context hierarchy order, approval per content hash, prompt budget, skills catalog | temp dirs, in-memory DB |
+| CLI end-to-end | `cargo test -p nexus-cli` | the real `nexus` binary: setup, launch isolation under a hostile parent env, exit-code propagation, `--resume last`, killed-host reconciliation, MCP binding, policy-blocked MCP, JSON-RPC over stdio, knowledge/tasks round trip through files and index (editor edits, broken files, duplicate ids, rebuild), always-on rules reaching launches by hierarchy only once approved (and withdrawn on edit), MCP knowledge scoped to the session's workspace | temp data dirs, fake-claude |
 | Real-Claude hooks | `node e2e/hooks-real-claude.mjs` (local; skips without `claude`) | the real Claude CLI runs the NEXUS-generated exec-form hooks in a synthetic signed-out profile; SessionStart/SessionEnd reach NEXUS | synthetic config dir |
-| MCP interoperability | `node e2e/mcp-interop.mjs` | the official MCP TypeScript SDK client against `nexus mcp`: handshake, tools/list, annotations, calls, errors | temp data dir |
+| MCP interoperability | `node e2e/mcp-interop.mjs` | the official MCP TypeScript SDK client against `nexus mcp`: handshake, tools/list (15), annotations, calls, knowledge write + lazy context index, errors | temp data dir |
 | Storage reliability | `cargo test -p nexus-core db:: --test db_crash` | incremental migration with data, failed migration rolls back, FK-checked table rebuilds, backup + rotation, real-process crash (abort mid-transaction), garbage and page-damaged files quarantined | temp dirs |
 | Manual smoke | checklist below | things automation cannot see (TUI rendering, real auth) | user's real profiles, read-only, by the developer |
 
@@ -48,8 +49,11 @@ Ad hoc: `node e2e/cdp.mjs eval|wait|shot|send|console …`.
 
 Native folder pickers cannot be automated; the smoke test calls the same IPC commands they feed and drives
 everything else through the UI. It also checks cross-process behaviour: a checkpoint written by `nexus mcp` and a
-`nexus launch` session and a Notification hook ("waiting for you") appear live in the running desktop. Last run:
-2026-11-04, 20/20 passed.
+`nexus launch` session and a Notification hook ("waiting for you") appear live in the running desktop. Knowledge:
+a rule file dropped into the workspace (as by `git pull`) is flagged, reviewed and approved in the Knowledge view and
+then reaches the launched session's system prompt; a task created and moved on the board is a Markdown file whose
+status changes on disk; a task Claude creates through `nexus mcp` appears on the board. Last run: 2026-11-04,
+27/27 passed.
 
 ## Commands
 

@@ -12,6 +12,7 @@ pub mod env;
 pub mod error;
 pub mod git;
 pub mod host;
+pub mod knowledge;
 pub mod paths;
 pub mod proc;
 pub mod project;

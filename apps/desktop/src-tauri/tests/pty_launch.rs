@@ -97,6 +97,7 @@ fn launch(
             project_id: Some("pr-1"),
             mcp_config: None,
             settings: None,
+            rules_prompt: None,
         },
         base,
     )

@@ -10,6 +10,7 @@ use clap::Args;
 
 use nexus_core::claude::install;
 use nexus_core::claude::hooks;
+use nexus_core::knowledge::context::{self, LaunchRules as LaunchRulesOut};
 use nexus_core::claude::mcp::{self, Integrations};
 use nexus_core::claude::policy::{self, MachinePolicyLocations};
 use nexus_core::claude::launch::{self, LaunchRequest, Mode};
@@ -78,9 +79,11 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     let nexus_id = new_id();
     let policy = policy::evaluate(&plan.profile.effective_config_dir(&ctx.home), &MachinePolicyLocations::system());
     let exe_self = mcp::nexus_next_to_current_exe();
+    let rules = launch_rules(&conn, &ctx.data_dir, plan.workspace_id.as_deref(), plan.project_id.as_deref())?;
     let integrations = Integrations {
         mcp: mcp::prepare(&policy, exe_self.as_deref(), &ctx.data_dir, &nexus_id)?,
         hooks: hooks::prepare(&policy, exe_self.as_deref(), &ctx.data_dir, &nexus_id)?,
+        rules: Some(rules),
     };
     let spec = launch::build(
         &LaunchRequest {
@@ -98,6 +101,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             project_id: plan.project_id.as_deref(),
             mcp_config: integrations.mcp.config_path(),
             settings: integrations.hooks.config_path(),
+            rules_prompt: integrations.rules.as_ref().and_then(|r| r.text.as_deref()),
         },
         &env::current(),
     )?;
@@ -172,6 +176,16 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     session::mark_exited(&conn, &session.id, code)?;
     host::shutdown(&conn, &me.id)?;
     Ok(code.map(|c| c as i32).unwrap_or(1))
+}
+
+/// Always-on rules for the workspace/project of a launch (ADR-0017); empty without a workspace.
+fn launch_rules(conn: &Connection, data_dir: &Path, workspace_id: Option<&str>, project_id: Option<&str>) -> Result<LaunchRulesOut> {
+    let Some(ws) = workspace_id.and_then(|id| workspace::get(conn, id).ok()).filter(|w| w.available) else {
+        return Ok(LaunchRulesOut::default());
+    };
+    let project = project_id.and_then(|id| project::get(conn, id).ok());
+    let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
+    context::prepare_launch(conn, data_dir, &ws.id, &ws.root_path, project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice())))
 }
 
 /// Lease refresh on its own connection (a `Connection` is not shared across threads).

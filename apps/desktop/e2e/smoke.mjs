@@ -8,7 +8,8 @@
 // Uses only synthetic fixtures in a temp directory; never touches real Claude profiles.
 // Native folder pickers cannot be automated, so setup calls the same IPC commands those dialogs feed.
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -54,6 +55,38 @@ try {
   check('remote URL credentials are redacted', setup.project.remoteUrl === 'https://example.invalid/acme/smoke.git', setup.project.remoteUrl)
   check('stack detected deterministically', setup.project.stack.stacks.includes('vue'))
 
+  // Knowledge (ADR-0013/0017): a rule arriving through sync must be approved in the UI before Claude sees it.
+  const wsDir = join(root, 'ws')
+  const ruleId = randomUUID()
+  mkdirSync(join(wsDir, 'rules'), { recursive: true })
+  writeFileSync(
+    join(wsDir, 'rules', `${ruleId}.md`),
+    `---\nnexus: 1\nid: ${ruleId}\nkind: rule\ntitle: Smoke synced rule\napplies: always\ncreated: 2026-01-01T00:00:00Z\nupdated: 2026-01-01T00:00:00Z\nsource: human\n---\nSMOKE-RULE-BODY: keep the smoke test green.\n`,
+  )
+  const setInput = (sel, value, event = 'input') =>
+    cdp.evaluate(`(() => { const el = document.querySelector(${js(sel)}); el.value = ${js(value)}; el.dispatchEvent(new Event(${js(event)}, { bubbles: true })); return true })()`)
+  await cdp.evaluate(`location.hash = '#/knowledge'; location.reload(); true`)
+  await cdp.waitFor(`document.querySelector('.shell .page-actions')`, 20000)
+  const flagged = await cdp.waitFor(`document.querySelector('.approvals')?.innerText.includes('Smoke synced rule')`, 15000).catch(() => false)
+  check('unapproved synced rule is flagged in the Knowledge view', !!flagged)
+  await cdp.evaluate(`document.querySelector('.approvals button').click(), true`)
+  const reviewed = await cdp.waitFor(`document.querySelector('[role=dialog] .body')?.innerText.includes('SMOKE-RULE-BODY')`, 10000).catch(() => false)
+  check('approval dialog shows the rule text before approving', !!reviewed)
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] footer button')].find((b) => b.innerText.includes('Approve this version')).click(), true`)
+  const approved = await cdp.waitFor(`!document.querySelector('[role=dialog]') && !document.querySelector('.approvals')`, 10000).catch(() => false)
+  check('approving clears the pending-approval banner', !!approved)
+
+  await cdp.evaluate(`document.querySelector('.page-actions .btn-primary').click(), true`)
+  await cdp.waitFor(`document.querySelector('#k-title')`, 5000)
+  await setInput('#k-title', 'Smoke task from the UI')
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] footer .btn-primary')][0].click(), true`)
+  const card = await cdp.waitFor(`document.querySelector('[data-status="backlog"]')?.innerText.includes('Smoke task from the UI')`, 10000).catch(() => false)
+  const taskFiles = () => readdirSync(join(wsDir, 'tasks')).map((f) => readFileSync(join(wsDir, 'tasks', f), 'utf8'))
+  check('task created in the UI is a Markdown file in the workspace', !!card && taskFiles().some((t) => t.includes('title: Smoke task from the UI')))
+  await setInput('[data-status="backlog"] select', 'in-progress', 'change')
+  const moved = await cdp.waitFor(`document.querySelector('[data-status="in-progress"]')?.innerText.includes('Smoke task from the UI')`, 10000).catch(() => false)
+  check('moving a task on the board rewrites its file', !!moved && taskFiles().some((t) => t.includes('status: in-progress')))
+
   // Drive the real UI: reload, open the launch dialog, launch.
   await cdp.evaluate(`location.hash = '#/'; location.reload(); true`)
   await cdp.waitFor(`document.querySelector('.shell .topbar .btn-primary')`, 20000)
@@ -78,6 +111,8 @@ try {
   check('work profile prompt appended', report.args.some((a) => a.startsWith('NEXUS work profile: PROTOTYPE')))
   check('session-scoped NEXUS MCP config passed', report.args.includes('--mcp-config'))
   check('session-scoped lifecycle hook settings passed', report.args.includes('--settings'))
+  const appended = report.args[report.args.indexOf('--append-system-prompt') + 1] ?? ''
+  check('approved always-on rule reaches the system prompt', appended.includes('SMOKE-RULE-BODY'))
 
   // Exit is recorded; a conversation without a transcript is not offered for resume.
   const session = await cdp.waitFor(`(async () => {
@@ -101,6 +136,7 @@ try {
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
     { jsonrpc: '2.0', method: 'notifications/initialized' },
     { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'checkpoint', arguments: { kind: 'decision', summary: 'Smoke checkpoint from MCP' } } },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'create_task', arguments: { title: 'Smoke task from Claude', priority: 'high' } } },
   ]) {
     mcp.stdin.write(`${js(m)}\n`)
   }
@@ -109,6 +145,9 @@ try {
   await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}', true`)
   const shown = await cdp.waitFor(`document.body.innerText.includes('Smoke checkpoint from MCP')`, 15000).catch(() => false)
   check('MCP checkpoint appears in the desktop project view', !!shown)
+  await cdp.evaluate(`location.hash = '#/knowledge', true`)
+  const claudeTask = await cdp.waitFor(`document.querySelector('[data-status="backlog"]')?.innerText.includes('Smoke task from Claude')`, 15000).catch(() => false)
+  check('task Claude created through MCP appears on the desktop board', !!claudeTask)
 
   // Cross-process: a `nexus launch` session in another terminal is shown live (owned by the CLI host).
   const cliRun = spawn(nexusCli, ['--data-dir', dataDir, 'launch', '--project', setup.project.name, '--name', 'From a terminal', '-q'], {

@@ -2,6 +2,7 @@
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
 mod hook;
+mod knowledge;
 mod launch;
 mod mcp;
 mod out;
@@ -48,6 +49,12 @@ enum Command {
     Profiles(ProfileCmd),
     /// Sessions NEXUS started (desktop and `nexus launch`).
     Sessions(SessionsArgs),
+    /// Portable workspace knowledge: rules, decisions, notes, specs, workflows (Markdown files, indexed locally).
+    #[command(subcommand)]
+    Knowledge(knowledge::KnowledgeCmd),
+    /// Tasks of the active workspace (Markdown files under tasks/).
+    #[command(subcommand)]
+    Tasks(knowledge::TasksCmd),
     /// Start Claude Code in this terminal with a profile's own configuration.
     Launch(launch::LaunchArgs),
     /// NEXUS MCP server over stdio, bound to one NEXUS session (started by Claude from the session's --mcp-config).
@@ -180,6 +187,8 @@ fn main() -> ExitCode {
         Command::Projects(c) => cmd_projects(&ctx, c).map(|_| 0),
         Command::Profiles(c) => cmd_profiles(&ctx, c).map(|_| 0),
         Command::Sessions(a) => cmd_sessions(&ctx, a).map(|_| 0),
+        Command::Knowledge(c) => knowledge::cmd_knowledge(&ctx, c).map(|_| 0),
+        Command::Tasks(c) => knowledge::cmd_tasks(&ctx, c).map(|_| 0),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),

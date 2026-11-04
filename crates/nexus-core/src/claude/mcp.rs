@@ -28,6 +28,9 @@ pub enum IntegrationStatus {
 pub struct Integrations {
     pub mcp: IntegrationStatus,
     pub hooks: IntegrationStatus,
+    /// Always-on rules included in the system prompt (and those pending approval or over budget).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rules: Option<crate::knowledge::context::LaunchRules>,
 }
 
 impl IntegrationStatus {

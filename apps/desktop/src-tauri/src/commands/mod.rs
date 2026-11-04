@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod claude;
+pub mod knowledge;
 pub mod projects;
 pub mod sessions;
 pub mod workspaces;

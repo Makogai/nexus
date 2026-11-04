@@ -279,3 +279,74 @@ export interface IntegrationStatus {
   reason?: string
   config?: string
 }
+
+// --- Workspace knowledge (ADR-0013/0017) -------------------------------------------------------------------------
+
+export type KnowledgeKind = 'rule' | 'task' | 'decision' | 'note' | 'spec' | 'workflow'
+export type TaskStatus = 'backlog' | 'ready' | 'in-progress' | 'review' | 'blocked' | 'done'
+export type KnowledgeScope = 'global' | 'workspace' | 'stack' | 'project'
+
+/** One indexed file (`knowledge::index::Item`). Invalid files have `valid: false` and an `error`. */
+export interface KnowledgeEntry {
+  id: string | null
+  workspaceId: string | null
+  path: string
+  kind: KnowledgeKind | null
+  title: string
+  status: string | null
+  projectId: string | null
+  priority: 'low' | 'medium' | 'high' | 'urgent' | null
+  stacks: string[]
+  applies: 'always' | 'on-demand' | null
+  privacy: 'shared' | 'local-only'
+  updated: string | null
+  hash: string
+  valid: boolean
+  error: string | null
+  conflict: string | null
+}
+
+export interface KnowledgeItem extends KnowledgeEntry {
+  scope: KnowledgeScope
+  /** Always-on rule whose current version is not approved on this machine (not given to Claude). */
+  needsApproval: boolean
+}
+
+export interface KnowledgeReport {
+  scanned: number
+  changed: number
+  removed: number
+  invalid: number
+  conflicts: number
+}
+
+export interface KnowledgeOverview {
+  report: KnowledgeReport
+  items: KnowledgeItem[]
+}
+
+export interface KnowledgeDoc extends KnowledgeEntry {
+  fields: Record<string, unknown>
+  body: string
+  truncated: boolean
+  approved: boolean
+  relativePath: string
+}
+
+export interface KnowledgeHit extends KnowledgeEntry {
+  snippet: string
+}
+
+export interface KnowledgeCreate {
+  kind: KnowledgeKind
+  title: string
+  body: string
+  projectId?: string | null
+  localOnly?: boolean
+  priority?: string | null
+  status?: string | null
+  applies?: 'always' | 'on-demand' | null
+  stacks?: string[]
+  labels?: string[]
+  global?: boolean
+}

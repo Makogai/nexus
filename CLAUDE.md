@@ -28,7 +28,10 @@ cd apps/desktop && node e2e/hooks-real-claude.mjs # real Claude runs NEXUS hooks
 * Claude integration is session-scoped CLI flags only (ADR-0004). Never write into a Claude config dir NEXUS did
   not create.
 * Every process that owns sessions is a session host (ADR-0014): register, heartbeat, `host::shutdown` on exit.
-* MCP tools stay workspace-scoped, bounded and free of exec/file/network access (ADR-0009).
+* MCP tools stay workspace-scoped, bounded and free of exec/network/arbitrary-file access (ADR-0009); their only file
+  writes are knowledge records (task/note/decision) through `knowledge::service` (ADR-0017).
+* Knowledge files are authoritative; SQLite only indexes them (rebuildable). Writes go through `knowledge::store`
+  (validated, atomic, optimistic). Always-on workspace rules reach Claude only when their current hash is approved.
 * Hooks stay deterministic and cheap: no model calls, no prompt text or raw commands stored, always exit 0 (ADR-0016).
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
   older Tauri crates than the npm packages and `tauri build` fails its version check.

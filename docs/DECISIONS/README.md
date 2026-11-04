@@ -17,7 +17,8 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0010](0010-usage-metrics-provenance.md) | Usage metrics with explicit provenance | Accepted (Phase 5) |
 | [0011](0011-work-profiles.md) | Work profiles as data, separate from native effort | Accepted |
 | [0012](0012-workflows-reuse-native.md) | Workflows reuse native skills/subagents; no custom orchestrator | Accepted (Phase 4) |
-| [0013](0013-portable-knowledge-format.md) | Portable knowledge files: identity, schema, atomic writes, indexing, sync boundaries | Accepted (Phase 3–4) |
+| [0013](0013-portable-knowledge-format.md) | Portable knowledge files: identity, schema, atomic writes, indexing, sync boundaries | Accepted, implemented (sync keys: Phase 6) |
 | [0014](0014-session-hosts-and-lifecycle.md) | Session hosts and lifecycle (prepares background-service mode) | Accepted |
 | [0015](0015-production-webview-hardening.md) | Production webview hardening (threat T18) | Accepted, implemented |
 | [0016](0016-lifecycle-hooks.md) | Claude lifecycle hooks: deterministic activity capture and checkpoint recovery | Accepted, implemented |
+| [0017](0017-context-hierarchy-and-lazy-loading.md) | Context hierarchy and lazy context loading | Accepted, implemented |

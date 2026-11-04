@@ -341,14 +341,33 @@ fn recovery_context(conn: &Connection, s: &Session, source: &str) -> Result<Opti
             t
         }
         _ => {
-            let n = project_cps(50)?.len();
-            if n == 0 || tools.is_empty() {
+            if tools.is_empty() {
                 return Ok(None);
             }
-            format!("NEXUS: {n} checkpoint(s) from earlier sessions of this project are available.{tools}")
+            let n = project_cps(50)?.len();
+            let mut parts = Vec::new();
+            if n > 0 {
+                parts.push(format!("NEXUS: {n} checkpoint(s) from earlier sessions of this project are available."));
+            }
+            if let Some(line) = knowledge_line(conn, s)? {
+                parts.push(line);
+            }
+            if parts.is_empty() {
+                return Ok(None);
+            }
+            format!("{}{tools} Workspace knowledge: get_context_index, search_knowledge.", parts.join(" "))
         }
     };
     Ok(Some(clip_block(&text, MAX_CONTEXT_CHARS)))
+}
+
+/// "NEXUS knowledge: 3 rules, 2 open tasks." from the index (no file access — hooks must stay fast).
+fn knowledge_line(conn: &Connection, s: &Session) -> Result<Option<String>> {
+    let Some(ws) = &s.workspace_id else { return Ok(None) };
+    let project = s.project_id.as_deref().and_then(|id| crate::project::get(conn, id).ok());
+    let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
+    let summary = crate::knowledge::context::summary(conn, ws, project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice())))?;
+    Ok(crate::knowledge::context::summary_line(&summary))
 }
 
 fn clip_block(text: &str, max: usize) -> String {
@@ -477,7 +496,8 @@ mod tests {
         assert_eq!(none.additional_context, None, "nothing to point at → nothing injected");
         checkpoint::add(&conn, &id, CheckpointKind::Progress, &"long ".repeat(300), Source::Claude).unwrap();
         let ptr = handle(&conn, &id, HookEvent::SessionStart, &json!({ "source": "startup" })).unwrap().additional_context.unwrap();
-        assert!(ptr.starts_with("NEXUS: 1 checkpoint(s)") && ptr.len() < 200, "lazy: count only, never content: {ptr}");
+        assert!(ptr.starts_with("NEXUS: 1 checkpoint(s)") && ptr.len() < 300, "lazy: a pointer: {ptr}");
+        assert!(!ptr.contains("long long"), "never checkpoint content at startup");
 
         let (conn2, id2, _) = setup(false);
         checkpoint::add(&conn2, &id2, CheckpointKind::Progress, "x", Source::Claude).unwrap();
