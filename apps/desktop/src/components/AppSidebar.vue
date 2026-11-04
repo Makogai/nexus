@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { BookOpen, FolderGit2, House, Package, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
+import { Bell, BookOpen, FolderGit2, House, Package, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
 import { useAppStore } from '../stores/app'
+import { useNotificationStore } from '../stores/notifications'
 import { useSessionStore } from '../stores/sessions'
 
 const app = useAppStore()
 const sessions = useSessionStore()
+const notifications = useNotificationStore()
 const route = useRoute()
 
 const items = computed(() => [
@@ -19,6 +21,13 @@ const items = computed(() => [
     icon: SquareTerminal,
     match: (p: string) => p.startsWith('/sessions'),
     badge: sessions.running.length || undefined,
+  },
+  {
+    to: '/notifications',
+    label: 'Notifications',
+    icon: Bell,
+    match: (p: string) => p.startsWith('/notifications'),
+    badge: notifications.waitingCount || undefined,
   },
   { to: '/profiles', label: 'Claude profiles', icon: UserCog, match: (p: string) => p.startsWith('/profiles') },
   { to: '/kits', label: 'AI Kits', icon: Package, match: (p: string) => p.startsWith('/kits') },

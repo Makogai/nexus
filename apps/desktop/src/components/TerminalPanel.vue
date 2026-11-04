@@ -71,6 +71,7 @@ function tone(id: string) {
           :key="id"
           class="tab"
           role="tab"
+          :data-tab-session="id"
           :aria-selected="id === sessions.activeTab"
           :class="{ active: id === sessions.activeTab }"
           @click="(sessions.activeTab = id), (app.prefs.terminalOpen = true)"

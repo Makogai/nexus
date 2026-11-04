@@ -20,6 +20,7 @@ cd apps/desktop && node e2e/instructions-real-claude.mjs # inspector vs. real Cl
 cd apps/desktop && node e2e/security-real-claude.mjs # isolation + task-text-as-data vs. real Claude
 cd apps/desktop && node e2e/profiles-kits.mjs # diagnostics + kits through the desktop UI (E2E build)
 cd apps/desktop && node e2e/kits-real-claude.mjs # diagnostics + per-profile kits vs. real Claude
+cd apps/desktop && node e2e/attention.mjs   # notifications + multi-session attention (E2E build, recording notifier)
 ```
 
 ## Architecture rules
@@ -43,6 +44,9 @@ cd apps/desktop && node e2e/kits-real-claude.mjs # diagnostics + per-profile kit
 * NEXUS reads Claude's instruction files (inspector) but never writes, reorders or replaces them (ADR-0019).
 * Profile diagnostics are read-only and allowlisted (never `.credentials.json`; from `.claude.json` only `mcpServers`;
   names/counts instead of values). Kits reach sessions only via per-profile `--plugin-dir` overlays (ADR-0023/0024).
+* User-facing events go through `notify::publish` (ADR-0025); attention comes only from reported signals (hooks, MCP,
+  process lifecycle), identity from the session row; NEXUS hooks never print a decision for PermissionRequest/PreToolUse.
+* Constitutions, Context, Memory, Skills and Workflows stay separate subsystems on shared infrastructure (ADR-0026).
 * Workspace-controlled text (task titles/descriptions, synced files) never goes into the system prompt or `--name`;
   it reaches Claude only as escaped, labelled data (SessionStart context, tool output) — ADR-0020, threat T22.
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks

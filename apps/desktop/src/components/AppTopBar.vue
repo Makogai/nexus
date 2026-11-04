@@ -5,6 +5,7 @@ import { Check, ChevronDown, Layers, Plus, Search, Sparkles } from '@lucide/vue'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
 import { useProfileStore } from '../stores/profiles'
+import NotificationBell from './NotificationBell.vue'
 
 const app = useAppStore()
 const workspaces = useWorkspaceStore()
@@ -65,6 +66,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
     </button>
 
     <div class="spacer" />
+
+    <NotificationBell />
 
     <button v-if="lastProfile" class="context" title="Change launch defaults" @click="app.openLaunch()">
       <span class="pdot" :style="{ background: lastProfile.color }" />

@@ -89,6 +89,22 @@ async function rejectProposal(p: MemoryProposal) {
 
 watch(tab, (t) => t === 'proposals' && loadProposals(true))
 
+// Opened from a notification (kept alive: react to later navigations too).
+watch(
+  () => [route.name, route.query.tab, route.query.task],
+  async () => {
+    if (route.name !== 'knowledge') return
+    if (route.query.tab === 'proposals') tab.value = 'proposals'
+    const taskId = typeof route.query.task === 'string' ? route.query.task : null
+    if (taskId) {
+      tab.value = 'task'
+      if (!overview.value) await load()
+      viewing.value = items.value.find((i) => i.id === taskId) ?? null
+      if (!viewing.value) app.toast('info', 'That task no longer exists in this workspace.')
+    }
+  },
+)
+
 async function move(task: KnowledgeItem, status: TaskStatus) {
   if (!wsId.value || !task.id) return
   try {

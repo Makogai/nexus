@@ -23,6 +23,12 @@ import type {
   KitView,
   MemoryApproval,
   MemoryProposal,
+  AppNotification,
+  NotificationCounts,
+  NotificationFilter,
+  NotificationPrefs,
+  NotificationTarget,
+  NotifierAvailability,
   TaskUpdateInput,
   TaskView,
   LaunchOptions,
@@ -65,6 +71,10 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const SESSION_EVENT = 'nexus://session'
+/** The notification set changed (any process). */
+export const NOTIFICATIONS_EVENT = 'nexus://notifications'
+/** A desktop notification was clicked: payload = notification id. */
+export const NOTIFICATION_ACTIVATED_EVENT = 'nexus://notification-activated'
 
 export const api = {
   appInfo: () => call<AppInfo>('app_info'),
@@ -158,6 +168,19 @@ export const api = {
   instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
+
+  notificationsList: (filter?: NotificationFilter) => call<AppNotification[]>('notifications_list', { filter }),
+  notificationsCounts: () => call<NotificationCounts>('notifications_counts'),
+  notificationsMarkRead: (ids: string[], all = false) => call<number>('notifications_mark_read', { ids, all }),
+  notificationsDismiss: (ids: string[]) => call<number>('notifications_dismiss', { ids }),
+  notificationsSnooze: (id: string, minutes: number) => call<void>('notifications_snooze', { id, minutes }),
+  notificationsPrefs: () => call<NotificationPrefs>('notifications_prefs'),
+  notificationsSetPrefs: (prefs: NotificationPrefs) => call<NotificationPrefs>('notifications_set_prefs', { prefs }),
+  notificationsSetView: (visibleSession: string | null, utcOffsetMinutes: number) =>
+    call<void>('notifications_set_view', { visibleSession, utcOffsetMinutes }),
+  notificationsAvailability: () => call<NotifierAvailability>('notifications_availability'),
+  notificationsTest: () => call<void>('notifications_test'),
+  notificationTarget: (id: string) => call<NotificationTarget>('notification_target', { id }),
 }
 
 export type Api = typeof api

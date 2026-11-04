@@ -8,6 +8,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::attention::{self, Signal};
 use crate::checkpoint;
 use crate::error::Result;
 use crate::session::{self, Session};
@@ -30,6 +31,12 @@ pub enum HookEvent {
     PostToolUse,
     Notification,
     SubagentStop,
+    /// Attention events (ADR-0025) — observed only; NEXUS never answers them.
+    PermissionRequest,
+    StopFailure,
+    /// `PreToolUse` with matcher `AskUserQuestion`: Claude is about to ask the user a question.
+    AskUser,
+    Elicitation,
 }
 
 impl HookEvent {
@@ -43,6 +50,10 @@ impl HookEvent {
             "post-tool-use" => Self::PostToolUse,
             "notification" => Self::Notification,
             "subagent-stop" => Self::SubagentStop,
+            "permission-request" => Self::PermissionRequest,
+            "stop-failure" => Self::StopFailure,
+            "ask-user" => Self::AskUser,
+            "elicitation" => Self::Elicitation,
             _ => return None,
         })
     }
@@ -101,6 +112,11 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
         return Ok(Outcome::default());
     };
     let str_field = |k: &str| payload.get(k).and_then(Value::as_str);
+    if !matches!(event, HookEvent::SessionStart) && !attention::owns(&s, payload) {
+        // A different Claude conversation (e.g. this session's settings file reused elsewhere): not this session's.
+        tracing::debug!(session = %s.id, "hook event for a foreign conversation ignored");
+        return Ok(Outcome::default());
+    }
     match event {
         HookEvent::SessionStart => {
             let source = one_of(str_field("source"), &["startup", "resume", "clear", "compact", "fork"], "other");
@@ -116,7 +132,7 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
                 conn.execute("UPDATE sessions SET transcript_path = ?2 WHERE id = ?1", params![s.id, tp])?;
             }
             record(conn, &s.id, "session-start", source, Some(data))?;
-            touch(conn, &s.id, ", attention = NULL")?;
+            touch(conn, &s.id, ", attention = NULL, attention_kind = NULL, attention_at = NULL")?;
             Ok(Outcome {
                 additional_context: recovery_context(conn, &s, source)?,
             })
@@ -128,10 +144,8 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
                 "other",
             );
             record(conn, &s.id, "session-end", reason, None)?;
-            conn.execute(
-                "UPDATE sessions SET end_reason = ?2, attention = NULL, last_activity_at = ?3 WHERE id = ?1",
-                params![s.id, reason, now_ms()],
-            )?;
+            conn.execute("UPDATE sessions SET end_reason = ?2, last_activity_at = ?3 WHERE id = ?1", params![s.id, reason, now_ms()])?;
+            attention::clear_on_end(conn, &s.id)?;
             // Deterministic, SQL-only: candidate memories for human review (ADR-0022). Never fails the hook.
             if let Err(e) = crate::knowledge::proposals::extract_for_session(conn, &s.id) {
                 tracing::debug!(error = %e, "memory proposal extraction skipped");
@@ -145,11 +159,39 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
             Ok(Outcome::default())
         }
         HookEvent::Stop => {
-            touch(conn, &s.id, ", turns = turns + 1, attention = NULL")?;
+            touch(conn, &s.id, ", turns = turns + 1")?;
+            attention::apply(conn, &s, Signal::TurnEnded)?;
             Ok(Outcome::default())
         }
         HookEvent::UserPrompt => {
-            touch(conn, &s.id, ", prompts = prompts + 1, attention = NULL")?;
+            touch(conn, &s.id, ", prompts = prompts + 1")?;
+            attention::apply(conn, &s, Signal::Continued)?;
+            Ok(Outcome::default())
+        }
+        HookEvent::PermissionRequest => {
+            let tool = attention::tool_name(payload);
+            if s.attention_kind.as_deref() != Some(attention::PERMISSION) {
+                record(conn, &s.id, "attention", "permission", tool.as_ref().map(|t| json!({ "tool": t })))?;
+            }
+            attention::apply(conn, &s, Signal::Permission { tool, message: None })?;
+            Ok(Outcome::default())
+        }
+        HookEvent::AskUser => {
+            record(conn, &s.id, "attention", "question", None)?;
+            attention::apply(conn, &s, Signal::Input { title: "Claude asked a question".into() })?;
+            Ok(Outcome::default())
+        }
+        HookEvent::Elicitation => {
+            let server = crate::knowledge::tasks::escape_untrusted(str_field("mcp_server_name").unwrap_or("MCP"), 60);
+            record(conn, &s.id, "attention", "elicitation", None)?;
+            attention::apply(conn, &s, Signal::Input { title: format!("MCP server “{server}” asks for input") })?;
+            Ok(Outcome::default())
+        }
+        HookEvent::StopFailure => {
+            let error = str_field("error").unwrap_or("unknown").to_string();
+            record(conn, &s.id, "stop-failure", attention::failure_title(&error), None)?;
+            touch(conn, &s.id, ", turns = turns + 1")?;
+            attention::apply(conn, &s, Signal::Failure { error })?;
             Ok(Outcome::default())
         }
         HookEvent::SubagentStop => {
@@ -161,10 +203,11 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
             if s.attention.as_deref() != Some(message.as_str()) {
                 record(conn, &s.id, "attention", &message, None)?;
             }
-            conn.execute(
-                "UPDATE sessions SET attention = ?2, last_activity_at = ?3 WHERE id = ?1",
-                params![s.id, message, now_ms()],
-            )?;
+            match attention::from_notification(payload) {
+                Some(Signal::Input { title }) => attention::apply(conn, &s, Signal::Input { title: clip(&title, MAX_ITEM_CHARS) })?,
+                Some(signal) => attention::apply(conn, &s, signal)?,
+                None => touch(conn, &s.id, "")?,
+            }
             Ok(Outcome::default())
         }
         HookEvent::PostToolUse => {
@@ -194,7 +237,8 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
                 }
                 _ => {}
             }
-            touch(conn, &s.id, ", attention = NULL")?;
+            touch(conn, &s.id, "")?;
+            attention::apply(conn, &s, Signal::Continued)?;
             Ok(Outcome::default())
         }
     }

@@ -20,10 +20,16 @@ pub const SUBSCRIPTIONS: &[(&str, &str, Option<&str>)] = &[
     ("PreCompact", "pre-compact", None),
     ("Stop", "stop", None),
     ("UserPromptSubmit", "user-prompt", None),
-    // Only tools whose effects matter for continuity; reads and searches would only add process spawns.
-    ("PostToolUse", "post-tool-use", Some("Write|Edit|MultiEdit|NotebookEdit|Bash")),
+    // Only tools whose effects matter for continuity (and the answered question, which ends a wait); reads and
+    // searches would only add process spawns.
+    ("PostToolUse", "post-tool-use", Some("Write|Edit|MultiEdit|NotebookEdit|Bash|AskUserQuestion")),
     ("Notification", "notification", None),
     ("SubagentStop", "subagent-stop", None),
+    // Attention (ADR-0025). Observe-only: the handler prints nothing for these, so Claude's own dialogs decide.
+    ("PermissionRequest", "permission-request", None),
+    ("PreToolUse", "ask-user", Some("AskUserQuestion")),
+    ("Elicitation", "elicitation", None),
+    ("StopFailure", "stop-failure", None),
 ];
 
 /// Seconds Claude waits for one hook; NEXUS handlers finish in milliseconds.
@@ -120,7 +126,9 @@ mod tests {
         assert_eq!(start["command"], "/opt/nexus");
         let args: Vec<&str> = start["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
         assert_eq!(args, ["--data-dir", "/data", "hook", "--session", SID, "session-start"]);
-        assert_eq!(hooks["PostToolUse"][0]["matcher"], "Write|Edit|MultiEdit|NotebookEdit|Bash");
+        assert_eq!(hooks["PostToolUse"][0]["matcher"], "Write|Edit|MultiEdit|NotebookEdit|Bash|AskUserQuestion");
+        assert_eq!(hooks["PreToolUse"][0]["matcher"], "AskUserQuestion", "only the question tool, never a permission decision");
+        assert!(hooks["PermissionRequest"][0].get("matcher").is_none());
         assert!(hooks["Stop"][0].get("matcher").is_none());
     }
 

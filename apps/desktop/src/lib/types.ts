@@ -227,10 +227,124 @@ export interface SessionView {
   lastActivityAt: number | null
   /** Set while Claude waits for the user (Notification hook). */
   attention: string | null
+  /** Structured attention reported by a supported hook (ADR-0025). */
+  attentionKind: 'permission' | 'input' | 'idle' | 'error' | null
+  attentionAt: number | null
   endReason: string | null
   transcriptPath: string | null
   taskId: string | null
   conversationRecorded: boolean | null
+  resumable: boolean
+  status: SessionStatus
+}
+
+export type AttentionStatus =
+  | 'running'
+  | 'waiting-for-input'
+  | 'permission-required'
+  | 'idle'
+  | 'error'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'unknown'
+
+export interface SessionStatus {
+  status: AttentionStatus
+  /** `reported` by Claude/the process, or `assumed` (no signal — NEXUS never guesses prompts). */
+  certainty: 'reported' | 'assumed'
+  since: number | null
+  detail: string | null
+}
+
+export type NotificationCategory =
+  | 'input-required'
+  | 'permission-requested'
+  | 'agent-finished'
+  | 'task-completed'
+  | 'task-blocked'
+  | 'session-finished'
+  | 'session-interrupted'
+  | 'workflow-failed'
+  | 'process-issue'
+  | 'review-required'
+  | 'info'
+
+export type NotificationPriority = 'critical' | 'action' | 'success' | 'warning' | 'info'
+
+export interface AppNotification {
+  id: string
+  category: NotificationCategory
+  priority: NotificationPriority
+  source: string
+  title: string
+  body: string
+  workspaceId: string | null
+  projectId: string | null
+  profileId: string | null
+  sessionId: string | null
+  taskId: string | null
+  workflowId: string | null
+  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | null
+  targetId: string | null
+  dedupeKey: string | null
+  occurrences: number
+  createdAt: number
+  updatedAt: number
+  readAt: number | null
+  dismissedAt: number | null
+  snoozedUntil: number | null
+  resolvedAt: number | null
+  desktopState: 'pending' | 'sent' | 'suppressed'
+  desktopReason: string | null
+}
+
+export interface NotificationFilter {
+  workspaceId?: string | null
+  projectId?: string | null
+  profileId?: string | null
+  sessionId?: string | null
+  priority?: NotificationPriority | null
+  unreadOnly?: boolean
+  includeDismissed?: boolean
+  limit?: number
+}
+
+export interface NotificationCounts {
+  unread: number
+  actionRequired: number
+}
+
+export interface CategoryPref {
+  inApp: boolean
+  desktop: boolean
+}
+
+export interface NotificationPrefs {
+  desktopEnabled: boolean
+  sound: boolean
+  notifyFocusedSession: boolean
+  quietHours: [string, string] | null
+  categories: Record<NotificationCategory, CategoryPref>
+  mutedWorkspaces: string[]
+  mutedProfiles: string[]
+}
+
+export interface NotifierAvailability {
+  backend: string
+  available: boolean
+  reason: string | null
+  clickToOpen: boolean
+}
+
+export interface NotificationTarget {
+  kind: AppNotification['targetKind']
+  id: string | null
+  exists: boolean
+  workspaceId: string | null
+  projectId: string | null
+  attached: boolean
+  liveElsewhere: boolean
   resumable: boolean
 }
 

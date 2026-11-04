@@ -100,6 +100,19 @@ pub fn extract_for_session(conn: &Connection, session_id: &str) -> Result<usize>
         )?;
         created += inserted;
     }
+    if created > 0 {
+        let mut e = crate::notify::NewEvent::for_session(
+            crate::notify::Category::ReviewRequired,
+            "knowledge",
+            &s,
+            format!("{created} memory proposal(s) from “{}” to review", s.title),
+        )
+        .body("Nothing becomes project memory until you approve it.")
+        .target("proposals", ws.clone())
+        .dedupe(format!("proposals:{ws}"));
+        e.session_id = None; // about the workspace's review queue, not a live session
+        crate::notify::publish(conn, e)?;
+    }
     Ok(created)
 }
 

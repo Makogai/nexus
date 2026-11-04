@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 17);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 18);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -406,6 +406,68 @@ fn hook_handler_records_activity_and_never_fails_claude() {
         assert_eq!(out.status.code(), Some(0), "{event} {payload}");
         assert!(out.stdout.is_empty());
     }
+}
+
+/// ADR-0025: attention signals from real `nexus hook` processes and the MCP tool become notifications; NEXUS never
+/// answers (no hook output), ignores foreign conversations, deduplicates and rate-limits.
+#[test]
+fn attention_hooks_and_mcp_raise_notifications_without_acting() {
+    let e = Env::new();
+    e.setup();
+    let (_, session) = launch_report(&e, &["--name", "Checkout"], "attention.json");
+    let sid = session["id"].as_str().unwrap();
+    let csid = session["claudeSessionId"].as_str().unwrap();
+    let notifications = || e.json(&["notifications", "list", "--all"]);
+    let open = |cat: &str| {
+        notifications()["notifications"].as_array().unwrap().iter().filter(|n| n["category"] == cat && n["resolvedAt"].is_null()).count()
+    };
+    assert_eq!(open("session-finished"), 1, "the launched session ended normally");
+
+    for (event, payload) in [
+        ("permission-request", format!(r#"{{"session_id":"{csid}","tool_name":"Bash","tool_input":{{"command":"deploy --token s3cr3t"}}}}"#)),
+        ("notification", format!(r#"{{"session_id":"{csid}","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}}"#)),
+        ("ask-user", format!(r#"{{"session_id":"{csid}","tool_name":"AskUserQuestion","tool_input":{{"questions":[]}}}}"#)),
+    ] {
+        let out = hook(&e, sid, event, &payload);
+        assert_eq!(out.status.code(), Some(0));
+        assert!(out.stdout.is_empty(), "{event}: no output — never a permission decision or an answer");
+    }
+    let list = notifications();
+    let perm = list["notifications"].as_array().unwrap().iter().find(|n| n["category"] == "permission-requested").unwrap().clone();
+    assert_eq!((perm["occurrences"].as_i64(), perm["title"].as_str()), (Some(2), Some("Permission requested: Bash")), "one notification for one situation");
+    assert_eq!(perm["workspaceId"], session["workspaceId"], "identity from the session row");
+    assert!(!list.to_string().contains("s3cr3t"), "tool input is never stored");
+    assert!(list["counts"]["actionRequired"].as_u64().unwrap() >= 2);
+
+    // A hook payload of another conversation is ignored.
+    hook(&e, sid, "stop-failure", r#"{"session_id":"11111111-2222-4333-8444-555555555555","error":"rate_limit"}"#);
+    assert_eq!(open("process-issue"), 0);
+    // The question was answered (PostToolUse AskUserQuestion), then the turn failed on sign-in.
+    hook(&e, sid, "post-tool-use", &format!(r#"{{"session_id":"{csid}","tool_name":"AskUserQuestion"}}"#));
+    assert_eq!((open("input-required"), open("permission-requested")), (0, 0), "Claude continued: resolved");
+    hook(&e, sid, "stop-failure", &format!(r#"{{"session_id":"{csid}","error":"authentication_failed"}}"#));
+    assert_eq!(open("process-issue"), 1);
+
+    // MCP request_attention: bound to the session, deduplicated, rate-limited.
+    let r = mcp_calls(&e, sid, &[
+        ("request_attention", json(r#"{"reason":"question","message":"Which payment provider?"}"#)),
+        ("request_attention", json(r#"{"reason":"question","message":"Which payment provider?"}"#)),
+        ("request_attention", json(r#"{"reason":"review","message":"PR ready"}"#)),
+        ("request_attention", json(r#"{"reason":"done","message":"Finished"}"#)),
+        ("request_attention", json(r#"{"reason":"impersonate","message":"x"}"#)),
+    ]);
+    let delivered: Vec<&str> = r[..4].iter().map(|v| v["structuredContent"]["delivered"].as_str().unwrap()).collect();
+    assert_eq!(delivered, ["notified", "already-notified", "notified", "notified"]);
+    assert_eq!(r[4]["isError"], true);
+    hook(&e, sid, "user-prompt", &format!(r#"{{"session_id":"{csid}"}}"#));
+    let again = mcp_calls(&e, sid, &[("request_attention", json(r#"{"reason":"question","message":"Another one?"}"#))]);
+    assert_eq!(again[0]["structuredContent"]["delivered"], "rate-limited", "at most 3 MCP notifications per session in 10 minutes");
+
+    let sessions = e.run(&["sessions"]);
+    assert!(String::from_utf8_lossy(&sessions.stdout).contains("ATTENTION"));
+    let out = e.run(&["notifications", "read", "--all"]);
+    assert!(out.status.success());
+    assert_eq!(e.json(&["notifications", "list"])["counts"]["unread"], 0);
 }
 
 #[test]

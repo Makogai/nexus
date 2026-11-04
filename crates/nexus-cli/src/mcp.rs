@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use std::path::PathBuf;
 
-use nexus_core::activity;
+use nexus_core::{activity, attention, notify};
 use nexus_core::knowledge::service::{self as knowledge, Author, CreateInput};
 use nexus_core::knowledge::branches::{self, GitRef, Relevance};
 use nexus_core::knowledge::tasks::{self, TaskUpdate};
@@ -142,6 +142,7 @@ impl Server {
                 "create_task" => self.create_task(b, &args),
                 "update_task" => self.update_task(b, &args),
                 "record_memory" => self.record_memory(b, &args),
+                "request_attention" => self.request_attention(b, &args),
                 _ => unreachable!("checked above"),
             },
         };
@@ -275,6 +276,28 @@ impl Server {
         let summary = args.get("summary").and_then(Value::as_str).ok_or("`summary` is required")?;
         let c = checkpoint::add(&self.conn, &b.session.id, kind, summary, Source::Claude).map_err(|e| e.to_string())?;
         Ok(json!({ "recorded": checkpoint_json(&c) }))
+    }
+
+    /// Tell the user (in-app and desktop notification) that this session needs them. Bound to this session only.
+    fn request_attention(&self, b: &Binding, args: &Value) -> Result<Value, String> {
+        let reason = args
+            .get("reason")
+            .and_then(Value::as_str)
+            .and_then(attention::Request::parse)
+            .ok_or("`reason` must be one of question, review, done")?;
+        let message = args.get("message").and_then(Value::as_str).ok_or("`message` is required")?;
+        if message.trim().is_empty() || message.chars().count() > 200 {
+            return Err("`message` must be 1–200 characters".into());
+        }
+        let delivered = match attention::request(&self.conn, &b.session, reason, message).map_err(|e| e.to_string())? {
+            notify::Published::Created(_) => "notified",
+            notify::Published::Merged(_) => "already-notified",
+            notify::Published::Limited => "rate-limited",
+        };
+        Ok(json!({
+            "delivered": delivered,
+            "note": "NEXUS shows this to the user; it never answers for them. Wait for the user's reply in this conversation."
+        }))
     }
 
     fn get_checkpoints(&self, b: &Binding, args: &Value) -> Result<Value, String> {
@@ -551,6 +574,10 @@ impl Server {
             }
             checkpoint::add(&self.conn, &b.session.id, kind, &summary, checkpoint::Source::Claude).map_err(|e| e.to_string())?;
         }
+        if let Some(s @ ("done" | "blocked")) = status {
+            // Best effort: the update itself succeeded.
+            let _ = notify::task_status(&self.conn, &b.session, &id, &v.title, s, log);
+        }
         let unchecked = v.checklist.len() - v.checked();
         let mut out = json!({ "updated": {
             "id": item.id, "status": item.status, "hash": item.hash, "branch": v.branch,
@@ -808,6 +835,15 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
         }),
         json!({
+            "name": "request_attention", "title": "Request the user's attention",
+            "description": "Notify the user (NEXUS notification center and desktop notification) that this session needs them: a question you cannot continue without, something ready for review, or finished work. Use sparingly — only when the user is likely away; it is rate-limited. NEXUS never answers for the user.",
+            "inputSchema": { "type": "object", "properties": {
+                "reason": { "type": "string", "enum": ["question", "review", "done"] },
+                "message": { "type": "string", "minLength": 1, "maxLength": 200, "description": "One short sentence shown to the user" }
+            }, "required": ["reason", "message"], "additionalProperties": false },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
+        }),
+        json!({
             "name": "get_checkpoints", "title": "Checkpoints",
             "description": "Recent checkpoints of a project in this workspace (across its sessions), newest first.",
             "inputSchema": { "type": "object", "properties": {
@@ -884,7 +920,7 @@ mod tests {
         assert_eq!(names, [
             "get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint",
             "get_session_activity", "get_context_index", "search_knowledge", "get_document", "list_tasks", "create_task",
-            "get_resume_summary", "get_task", "update_task", "record_memory", "get_checkpoints",
+            "get_resume_summary", "get_task", "update_task", "record_memory", "request_attention", "get_checkpoints",
         ]);
         assert!(names.iter().all(|n| !n.starts_with("nexus_")), "Claude already prefixes mcp__nexus__");
     }

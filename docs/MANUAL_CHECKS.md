@@ -67,6 +67,13 @@
     a new NEXUS session of Personal lists `<kit>:<skill>` in `/skills`; a session of another profile does not; plain
     `claude` outside NEXUS does not.
 22. Re-run the snapshot from step 1 → still unchanged (hooks, MCP, isolation and kits are session-scoped, not profile edits).
+23. **Notifications** (needs a signed-in session): *Notifications → Preferences → Send a test notification* → a
+    Windows notification appears (in development builds titled by "Windows PowerShell"). Start a Personal session,
+    ask Claude to run `git status`, switch to another NEXUS view or minimise NEXUS → when Claude asks for permission a
+    notification "Permission requested: Bash" appears; clicking it brings NEXUS back with that terminal; the bell
+    shows it and the session row says *Permission required*. Approve in the terminal → it shows as handled. After the
+    answer, the turn end shows *Your turn* and (if NEXUS is not focused) "Claude finished in …". Nothing was
+    approved or typed by NEXUS.
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

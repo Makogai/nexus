@@ -70,6 +70,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0009_kits.sql"),
         disable_foreign_keys: false,
     },
+    Migration {
+        name: "0010_notifications",
+        sql: include_str!("migrations/0010_notifications.sql"),
+        disable_foreign_keys: false,
+    },
 ];
 
 /// Schema version this build understands.

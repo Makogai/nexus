@@ -91,6 +91,9 @@ jobs:
       - name: End-to-end profile diagnostics and AI Kits
         working-directory: apps/desktop
         run: node e2e/profiles-kits.mjs
+      - name: End-to-end notifications and session attention
+        working-directory: apps/desktop
+        run: node e2e/attention.mjs
       - name: MCP interoperability (official TypeScript SDK client)
         working-directory: apps/desktop
         run: node e2e/mcp-interop.mjs
