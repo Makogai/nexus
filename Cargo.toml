@@ -27,7 +27,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 which = "8"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# deny (not forbid): one audited exception exists — `webview_guard::harden` (env removal before any thread starts).
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 dbg_macro = "warn"

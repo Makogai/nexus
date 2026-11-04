@@ -93,6 +93,6 @@ These are deliberately open and must be closed before anything is published:
    installer/registry identity and updater identity, so it cannot change after release without a migration.
 2. **License** — none yet; no LICENSE file is added until the owner decides.
 3. **Code signing** — Windows Authenticode / macOS notarization certificates (Tauri updater key is separate).
-4. **Release builds must not honour WebView2 remote debugging** (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), which the
-   development E2E tooling uses (threat T18).
+4. ~~Release builds must not honour WebView2 remote debugging~~ — done (ADR-0015, `e2e/t18-check.mjs`); remaining:
+   make sure no distributed build enables the `e2e-webview-debugging` feature (release CI check).
 5. Manual check with a real profile (`docs/MANUAL_CHECKS.md`) passed on the release candidate.

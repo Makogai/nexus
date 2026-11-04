@@ -73,9 +73,15 @@ jobs:
         run: npm ci
       - name: Build test double and CLI (desktop sessions start `nexus mcp`)
         run: cargo build -p fake-claude -p nexus-cli
-      - name: Build app (debug, embedded frontend)
+      - name: Build app in production mode (embedded frontend, no test feature)
         working-directory: apps/desktop
         run: npx tauri build --debug --no-bundle
+      - name: T18 — production build ignores WebView2 debugging overrides
+        working-directory: apps/desktop
+        run: node e2e/t18-check.mjs
+      - name: Build app for E2E (explicit e2e-webview-debugging feature)
+        working-directory: apps/desktop
+        run: npx tauri build --debug --no-bundle --features e2e-webview-debugging
       - name: End-to-end smoke test
         working-directory: apps/desktop
         run: node e2e/run-smoke.mjs

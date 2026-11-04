@@ -33,10 +33,12 @@ real PTY, real UI) can be driven without extra drivers. **Development/CI only** 
 Self-contained run (what CI does) — production-mode frontend and CSP embedded in a debug build:
 
 ```bash
-cargo build -p fake-claude
+cargo build -p fake-claude -p nexus-cli
 cd apps/desktop
-npx tauri build --debug --no-bundle     # check the exit code: it fails on npm/crate version mismatches
-node e2e/run-smoke.mjs                  # starts the app with an empty temp database, 15 checks, stops the app
+npx tauri build --debug --no-bundle     # production mode; check the exit code (fails on npm/crate version mismatches)
+node e2e/t18-check.mjs                  # T18: hostile WebView2 env is ignored by the production build
+npx tauri build --debug --no-bundle --features e2e-webview-debugging   # explicit test-only build
+node e2e/run-smoke.mjs                  # starts the app with an empty temp database, stops it afterwards
 ```
 
 Against a running dev app (for iterating on UI): start `npm run tauri dev` with an **empty** `NEXUS_DATA_DIR` and

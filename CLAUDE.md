@@ -11,7 +11,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cd apps/desktop && npm test && npm run typecheck && npx vite build
 cargo build -p nexus-cli                    # desktop sessions start `nexus mcp` from next to nexus-desktop.exe
 cd apps/desktop && npm run tauri dev        # use NEXUS_DATA_DIR=<empty dir> for an isolated database
-cd apps/desktop && npx tauri build --debug --no-bundle && node e2e/run-smoke.mjs   # real-app E2E (Windows)
+cd apps/desktop && npx tauri build --debug --no-bundle && node e2e/t18-check.mjs   # production build ignores CDP env
+cd apps/desktop && npx tauri build --debug --no-bundle --features e2e-webview-debugging && node e2e/run-smoke.mjs
 cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `nexus mcp`
 ```
 
@@ -37,6 +38,8 @@ cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `n
 * Paths from the UI or from workspace files go through `paths::validate_user_path` / `paths::resolve_within`.
 * Git read calls go through `git.rs` (fsmonitor disabled, no prompts). Strip credentials from URLs.
 * Never log or display secrets: env values, auth payloads, policy values other than the allowlisted keys.
+* `webview_guard::harden` stays the first call in `main`; the `e2e-webview-debugging` feature is test-only (ADR-0015).
+* `unsafe` is denied workspace-wide; the only exception is the audited env removal in `webview_guard`.
 * Tests use temp dirs and `fake-claude`; never run tests against real Claude profiles or real repositories.
 
 ## Working style

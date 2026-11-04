@@ -19,3 +19,4 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0012](0012-workflows-reuse-native.md) | Workflows reuse native skills/subagents; no custom orchestrator | Accepted (Phase 4) |
 | [0013](0013-portable-knowledge-format.md) | Portable knowledge files: identity, schema, atomic writes, indexing, sync boundaries | Accepted (Phase 3–4) |
 | [0014](0014-session-hosts-and-lifecycle.md) | Session hosts and lifecycle (prepares background-service mode) | Accepted |
+| [0015](0015-production-webview-hardening.md) | Production webview hardening (threat T18) | Accepted, implemented |
