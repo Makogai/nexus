@@ -74,6 +74,10 @@
     shows it and the session row says *Permission required*. Approve in the terminal → it shows as handled. After the
     answer, the turn end shows *Your turn* and (if NEXUS is not focused) "Claude finished in …". Nothing was
     approved or typed by NEXUS.
+24. **Constitution** (optional): *Constitutions → New constitution* (starter) in your test workspace → start a
+    Personal session in the test project → ask Claude "which NEXUS constitution rules apply here?" → it names the
+    rule ids from the *Effective rules* tab (mandatory policies first) and can read a guideline with
+    `get_constitution`.
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

@@ -2,6 +2,7 @@
 //! Markdown files with strict frontmatter. Files are authoritative; SQLite holds a rebuildable index.
 
 pub mod branches;
+pub mod constitution;
 pub mod context;
 pub mod frontmatter;
 pub mod index;
@@ -199,6 +200,23 @@ impl Doc {
         }
         if kind == Kind::Rule {
             one_of(fm, "applies", &["always", "on-demand"], false)?;
+            // Constitutions (ADR-0027): structured rule documents, optionally scoped to one task or workflow.
+            let constitution = one_of(fm, "format", &[constitution::FORMAT], false)?.is_some();
+            for key in ["task", "workflow"] {
+                if let Some(v) = fm.get(key).filter(|v| **v != Value::Null) {
+                    if !constitution {
+                        return Err(format!("`{key}` scope is only available for constitutions (`format: constitution`)"));
+                    }
+                    if v.as_str().and_then(|s| uuid::Uuid::parse_str(s).ok()).is_none() {
+                        return Err(format!("`{key}` must be the id of a {key}"));
+                    }
+                }
+            }
+            if let Some(p) = fm.get("prefix").filter(|v| **v != Value::Null)
+                && !p.as_str().is_some_and(|p| constitution::valid_id(p) && p.len() <= 12)
+            {
+                return Err("`prefix` must be a short rule id prefix (letters and digits)".into());
+            }
         }
         if let Some(v) = fm.get("branch").filter(|v| **v != Value::Null) {
             match v.as_str() {

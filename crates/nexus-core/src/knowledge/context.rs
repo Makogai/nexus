@@ -17,6 +17,8 @@ use super::{Kind, roots, store};
 use crate::error::Result;
 
 pub const MAX_ALWAYS_RULES_CHARS: usize = 1500;
+/// Constitutions always get at least this much room (mandatory policies are at least named).
+pub const MIN_CONSTITUTION_CHARS: usize = 600;
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +33,9 @@ pub struct LaunchRules {
     /// Always-on rules skipped because their text is already in an instruction file Claude loads (ADR-0019).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub already_loaded: Vec<String>,
+    /// Constitutions (ADR-0027): what of the effective rules reached the prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constitution: Option<super::constitution::Delivery>,
 }
 
 /// Refresh the workspace's knowledge index and compute the always-on rules for a launch.
@@ -46,7 +51,7 @@ pub fn prepare_launch(
 }
 
 pub fn launch_rules(conn: &Connection, workspace_id: &str, project: Option<(&str, &[String])>) -> Result<LaunchRules> {
-    launch_rules_with(conn, workspace_id, project, None)
+    launch_rules_with(conn, workspace_id, project, None, None)
 }
 
 /// Like [`launch_rules`], skipping rules whose body is already part of an instruction file Claude loads itself, so
@@ -56,15 +61,17 @@ pub fn launch_rules_with(
     workspace_id: &str,
     project: Option<(&str, &[String])>,
     loaded: Option<&crate::claude::instructions::Inspection>,
+    task_id: Option<&str>,
 ) -> Result<LaunchRules> {
     let mut out = LaunchRules::default();
+    let constitutions = super::constitution::paths(conn, workspace_id)?;
     let always: Vec<Item> = index::effective_rules(conn, workspace_id, project)?
         .into_iter()
         .filter(|r| r.applies.as_deref() == Some("always"))
         .collect();
     let mut text = String::from("NEXUS rules (always apply; from the user's NEXUS knowledge):");
     let header = text.len();
-    for r in always {
+    for r in always.into_iter().filter(|r| !constitutions.contains(&r.path)) {
         if !index::is_approved(conn, &r)? {
             out.pending_approval.push(r.title.clone());
             continue;
@@ -94,8 +101,33 @@ pub fn launch_rules_with(
             out.over_budget.join("; ")
         ));
     }
+    let mut parts: Vec<String> = Vec::new();
     if text.len() > header {
-        out.text = Some(text);
+        parts.push(text);
+    }
+    // Constitutions: structured, effective rules (mandatory first), bounded by what the plain rules left.
+    if !constitutions.is_empty() {
+        let mut e = super::constitution::effective_indexed(conn, workspace_id, &super::constitution::Target { project, task_id, include_pending: false })?;
+        if let Some(inspection) = loaded {
+            e.rules.retain(|r| match inspection.containing(r.text.trim()).filter(|_| r.text.trim().len() >= 20) {
+                Some(layer) => {
+                    let file = layer.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    out.already_loaded.push(format!("{} (in {file})", r.id));
+                    false
+                }
+                None => true,
+            });
+        }
+        let used: usize = parts.iter().map(|p| p.chars().count()).sum();
+        let budget = MAX_ALWAYS_RULES_CHARS.saturating_sub(used).max(MIN_CONSTITUTION_CHARS);
+        let d = super::constitution::delivery(&e, budget, true);
+        out.pending_approval.extend(d.pending_approval.iter().cloned());
+        parts.extend(d.text.clone());
+        out.included.extend(d.included.iter().cloned());
+        out.constitution = Some(d);
+    }
+    if !parts.is_empty() {
+        out.text = Some(parts.join("\n\n"));
     }
     Ok(out)
 }

@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod claude;
+pub mod constitutions;
 pub mod kits;
 pub mod knowledge;
 pub mod notifications;

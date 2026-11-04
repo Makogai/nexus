@@ -16,7 +16,7 @@ use nexus_core::{activity, attention, notify};
 use nexus_core::knowledge::service::{self as knowledge, Author, CreateInput};
 use nexus_core::knowledge::branches::{self, GitRef, Relevance};
 use nexus_core::knowledge::tasks::{self, TaskUpdate};
-use nexus_core::knowledge::{Kind, context, index as kindex, skills};
+use nexus_core::knowledge::{Kind, constitution, context, index as kindex, skills};
 use nexus_core::checkpoint::{self, CheckpointKind, Source};
 use nexus_core::claude::profile;
 use nexus_core::db::Connection;
@@ -143,6 +143,7 @@ impl Server {
                 "update_task" => self.update_task(b, &args),
                 "record_memory" => self.record_memory(b, &args),
                 "request_attention" => self.request_attention(b, &args),
+                "get_constitution" => self.get_constitution(b, &args),
                 _ => unreachable!("checked above"),
             },
         };
@@ -276,6 +277,47 @@ impl Server {
         let summary = args.get("summary").and_then(Value::as_str).ok_or("`summary` is required")?;
         let c = checkpoint::add(&self.conn, &b.session.id, kind, summary, Source::Claude).map_err(|e| e.to_string())?;
         Ok(json!({ "recorded": checkpoint_json(&c) }))
+    }
+
+    /// Effective constitution rules for this session (ADR-0027): approved versions only, narrower scopes applied,
+    /// mandatory policies never overridden. Bounded.
+    fn get_constitution(&self, b: &Binding, args: &Value) -> Result<Value, String> {
+        self.refresh_knowledge(b)?;
+        let project = if args.get("project").is_some() { Some(self.target_project(b, args)?) } else { self.session_project(b) };
+        let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
+        let target = constitution::Target {
+            project: project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice())),
+            task_id: b.session.task_id.as_deref(),
+            include_pending: false,
+        };
+        let e = constitution::effective_indexed(&self.conn, &b.workspace_id, &target).map_err(|e| e.to_string())?;
+        let ids: Option<Vec<String>> = match args.get("ids") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(a)) if a.len() <= 50 => Some(a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()),
+            Some(_) => return Err("`ids` must be an array of at most 50 rule ids".into()),
+        };
+        let guidelines = args.get("includeGuidelines").and_then(Value::as_bool).unwrap_or(true);
+        let rules: Vec<Value> = e
+            .rules
+            .iter()
+            .filter(|r| ids.as_ref().is_none_or(|ids| ids.contains(&r.id)))
+            .filter(|r| guidelines || r.enforcement != constitution::Enforcement::Guideline)
+            .take(100)
+            .map(|r| {
+                json!({
+                    "id": r.id, "enforcement": r.enforcement, "title": r.title, "text": r.text.chars().take(1500).collect::<String>(),
+                    "article": r.article, "section": r.section, "constitution": r.doc_title, "scope": r.scope,
+                    "replaces": r.replaces.as_ref().map(|x| &x.id),
+                })
+            })
+            .collect();
+        Ok(json!({
+            "project": project.map(|p| p.name),
+            "rules": rules,
+            "conflicts": e.conflicts.len(),
+            "pendingApproval": e.pending.iter().map(|d| &d.title).collect::<Vec<_>>(),
+            "note": "Approved rules of this workspace (mandatory policies always apply). Organisation-managed Claude settings and instructions take precedence over them.",
+        }))
     }
 
     /// Tell the user (in-app and desktop notification) that this session needs them. Bound to this session only.
@@ -835,6 +877,16 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
         }),
         json!({
+            "name": "get_constitution", "title": "Constitution rules",
+            "description": "The effective constitution rules for this session (workspace, stack, project and task scopes applied; mandatory policies cannot be overridden): ids, enforcement (mandatory, rule, guideline) and text. Use it to read rules that are listed by id only, or to check a rule before acting.",
+            "inputSchema": { "type": "object", "properties": {
+                "project": project_arg,
+                "ids": { "type": "array", "items": { "type": "string", "maxLength": 48 }, "maxItems": 50 },
+                "includeGuidelines": { "type": "boolean" }
+            }, "additionalProperties": false },
+            "annotations": read_only,
+        }),
+        json!({
             "name": "request_attention", "title": "Request the user's attention",
             "description": "Notify the user (NEXUS notification center and desktop notification) that this session needs them: a question you cannot continue without, something ready for review, or finished work. Use sparingly — only when the user is likely away; it is rate-limited. NEXUS never answers for the user.",
             "inputSchema": { "type": "object", "properties": {
@@ -920,7 +972,8 @@ mod tests {
         assert_eq!(names, [
             "get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint",
             "get_session_activity", "get_context_index", "search_knowledge", "get_document", "list_tasks", "create_task",
-            "get_resume_summary", "get_task", "update_task", "record_memory", "request_attention", "get_checkpoints",
+            "get_resume_summary", "get_task", "update_task", "record_memory", "get_constitution", "request_attention",
+            "get_checkpoints",
         ]);
         assert!(names.iter().all(|n| !n.starts_with("nexus_")), "Claude already prefixes mcp__nexus__");
     }

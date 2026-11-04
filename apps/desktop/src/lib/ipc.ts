@@ -23,6 +23,13 @@ import type {
   KitView,
   MemoryApproval,
   MemoryProposal,
+  ConstitutionHistory,
+  ConstitutionStructure,
+  ConstitutionSummary,
+  ConstitutionView,
+  EffectiveConstitution,
+  NewConstitution,
+  RuleHit,
   AppNotification,
   NotificationCounts,
   NotificationFilter,
@@ -168,6 +175,19 @@ export const api = {
   instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
+
+  constitutionList: (workspaceId: string) => call<ConstitutionSummary[]>('constitution_list', { workspaceId }),
+  constitutionGet: (workspaceId: string, id: string) => call<ConstitutionView>('constitution_get', { workspaceId, id }),
+  constitutionCreate: (workspaceId: string, input: NewConstitution) => call<ConstitutionView>('constitution_create', { workspaceId, input }),
+  constitutionSave: (workspaceId: string, id: string, structure: ConstitutionStructure, expectedHash: string) =>
+    call<ConstitutionView>('constitution_save', { workspaceId, id, structure, expectedHash }),
+  constitutionSaveRaw: (workspaceId: string, id: string, body: string, expectedHash: string) =>
+    call<ConstitutionView>('constitution_save_raw', { workspaceId, id, body, expectedHash }),
+  constitutionEffective: (workspaceId: string, projectId: string | null, taskId: string | null, includePending = false) =>
+    call<EffectiveConstitution>('constitution_effective', { workspaceId, projectId, taskId, includePending }),
+  constitutionSearch: (workspaceId: string, query: string) => call<RuleHit[]>('constitution_search', { workspaceId, query }),
+  constitutionHistory: (workspaceId: string, id: string) => call<ConstitutionHistory>('constitution_history', { workspaceId, id }),
+  constitutionVersion: (workspaceId: string, id: string, commit: string) => call<string>('constitution_version', { workspaceId, id, commit }),
 
   notificationsList: (filter?: NotificationFilter) => call<AppNotification[]>('notifications_list', { filter }),
   notificationsCounts: () => call<NotificationCounts>('notifications_counts'),

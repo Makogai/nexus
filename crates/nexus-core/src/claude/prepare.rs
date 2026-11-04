@@ -154,7 +154,7 @@ pub fn preview(r: &PreviewRequest<'_>) -> Result<Preview> {
         let project = r.project_id.and_then(|id| project::get(r.conn, id).ok());
         let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
         let scope = project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice()));
-        let rules = context::launch_rules_with(r.conn, &ws.id, scope, Some(&claude))?;
+        let rules = context::launch_rules_with(r.conn, &ws.id, scope, Some(&claude), r.task_id)?;
         if let Some(tid) = r.task_id {
             let v = tasks::view(r.conn, &ws, tid, 4000)?;
             nexus.task_brief_chars = tasks::pointer(&v.id, "session-start").chars().count();
@@ -184,8 +184,22 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
             service::refresh(r.conn, r.data_dir, ws)?;
             let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
             let scope = project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice()));
-            let lr = context::launch_rules_with(r.conn, &ws.id, scope, Some(&inspection))?;
+            let lr = context::launch_rules_with(r.conn, &ws.id, scope, Some(&inspection), r.task_id)?;
             parts.extend(lr.text.clone());
+            if !lr.pending_approval.is_empty() {
+                // Synced rule changes are not used until reviewed (T19): make the review queue visible.
+                let mut e = crate::notify::NewEvent::new(
+                    crate::notify::Category::ReviewRequired,
+                    "knowledge",
+                    format!("{} rule document(s) changed and wait for your approval", lr.pending_approval.len()),
+                )
+                .body(lr.pending_approval.join(", "))
+                .target("rules", ws.id.clone())
+                .dedupe(format!("rules:{}", ws.id));
+                e.workspace_id = Some(ws.id.clone());
+                e.project_id = r.project_id.map(str::to_string);
+                let _ = crate::notify::publish(r.conn, e);
+            }
             rules = Some(lr);
             if let Some(tid) = r.task_id {
                 let v = tasks::view(r.conn, ws, tid, 4000)?;

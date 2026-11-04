@@ -1,6 +1,7 @@
 //! `nexus` — the NEXUS command-line interface. Every command is a thin layer over `nexus-core`; nothing here
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
+mod constitution;
 mod diagnose;
 mod hook;
 mod instructions;
@@ -62,6 +63,9 @@ enum Command {
     /// AI Kits: Claude Code plugins or skill folders, enabled per profile for NEXUS sessions.
     #[command(subcommand)]
     Kits(kits::KitCmd),
+    /// Constitutions: structured rules (articles, sections, rules with ids and enforcement) by scope.
+    #[command(subcommand)]
+    Constitution(constitution::ConstitutionCmd),
     /// Notifications from sessions, tasks and reviews (the desktop's notification center).
     #[command(subcommand)]
     Notifications(notifications::NotificationsCmd),
@@ -224,6 +228,7 @@ fn main() -> ExitCode {
         Command::Kits(c) => kits::run(&ctx, c).map(|_| 0),
         Command::Instructions(a) => instructions::run(&ctx, a).map(|_| 0),
         Command::Notifications(c) => notifications::run(&ctx, c).map(|_| 0),
+        Command::Constitution(c) => constitution::run(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),

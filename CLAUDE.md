@@ -21,6 +21,7 @@ cd apps/desktop && node e2e/security-real-claude.mjs # isolation + task-text-as-
 cd apps/desktop && node e2e/profiles-kits.mjs # diagnostics + kits through the desktop UI (E2E build)
 cd apps/desktop && node e2e/kits-real-claude.mjs # diagnostics + per-profile kits vs. real Claude
 cd apps/desktop && node e2e/attention.mjs   # notifications + multi-session attention (E2E build, recording notifier)
+cd apps/desktop && node e2e/constitutions.mjs # Constitution Manager through the UI (E2E build)
 ```
 
 ## Architecture rules
@@ -47,6 +48,8 @@ cd apps/desktop && node e2e/attention.mjs   # notifications + multi-session atte
 * User-facing events go through `notify::publish` (ADR-0025); attention comes only from reported signals (hooks, MCP,
   process lifecycle), identity from the session row; NEXUS hooks never print a decision for PermissionRequest/PreToolUse.
 * Constitutions, Context, Memory, Skills and Workflows stay separate subsystems on shared infrastructure (ADR-0026).
+  Constitutions are rule documents (`format: constitution`, ADR-0027): stable rule ids, mandatory policies are never
+  overridable by narrower scopes, synced versions need approval, delivery is compact and budgeted.
 * Workspace-controlled text (task titles/descriptions, synced files) never goes into the system prompt or `--name`;
   it reaches Claude only as escaped, labelled data (SessionStart context, tool output) — ADR-0020, threat T22.
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks

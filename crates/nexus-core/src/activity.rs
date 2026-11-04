@@ -365,7 +365,7 @@ fn recovery_context(conn: &Connection, s: &Session, source: &str) -> Result<Opti
         "compact" => {
             let cps = checkpoint::for_session(conn, &s.id, 5)?;
             let files: Vec<String> = conn
-                .prepare("SELECT summary FROM session_events WHERE session_id = ?1 AND kind = 'file' ORDER BY created_at DESC LIMIT 10")?
+                .prepare("SELECT summary FROM session_events WHERE session_id = ?1 AND kind = 'file' ORDER BY created_at DESC, rowid DESC LIMIT 10")?
                 .query_map([&s.id], |r| r.get(0))?
                 .collect::<std::result::Result<_, _>>()?;
             if cps.is_empty() && files.is_empty() && task.is_none() {
@@ -482,7 +482,7 @@ pub struct Activity {
 pub fn activity(conn: &Connection, session_id: &str) -> Result<Activity> {
     let s = session::get(conn, session_id)?;
     let files: Vec<String> = conn
-        .prepare("SELECT summary FROM session_events WHERE session_id = ?1 AND kind = 'file' ORDER BY created_at LIMIT 200")?
+        .prepare("SELECT summary FROM session_events WHERE session_id = ?1 AND kind = 'file' ORDER BY created_at, rowid LIMIT 200")?
         .query_map([session_id], |r| r.get(0))?
         .collect::<std::result::Result<_, _>>()?;
     let commands: Vec<(String, i64)> = conn

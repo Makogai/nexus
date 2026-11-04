@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 18);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 19);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -573,6 +573,61 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     let report = e.json(&["knowledge", "reindex", "--rebuild"]);
     assert_eq!(report["invalid"], 1);
     assert_eq!(e.json(&["knowledge", "list"]).as_array().unwrap().len(), before);
+}
+
+/// ADR-0027: constitutions reach launches as effective rules (mandatory first, compact, never raw markup), synced
+/// documents only once approved, narrower scopes cannot override mandatory policies, Claude reads the rest by id.
+#[test]
+fn constitutions_reach_launches_by_scope_only_approved_and_through_mcp() {
+    let e = Env::new();
+    e.setup();
+    let created = e.json(&["constitution", "new", "Team charter", "--starter"]);
+    assert_eq!(created["prefix"], "TC");
+    let mandatory = created["structure"]["articles"].as_array().unwrap().iter()
+        .flat_map(|a| a["sections"].as_array().unwrap().iter().flat_map(|s| s["rules"].as_array().unwrap().clone()))
+        .find(|r| r["enforcement"] == "mandatory").unwrap()["id"].as_str().unwrap().to_string();
+
+    // A constitution arrives through a synced workspace folder (as by `git pull`): not used until approved.
+    let ops = write_rule(&ws_dir(&e).join("rules"), "Ops policy", "format: constitution\nprefix: OPS\n",
+        "## Operations\n\n#### Deploy only from main\n<!-- rule: id=OPS-1 enforcement=mandatory -->\n\nProduction deploys run from the main branch only.\n");
+    let list = e.json(&["constitution", "list"]);
+    let synced = list.as_array().unwrap().iter().find(|c| c["title"] == "Ops policy").unwrap();
+    assert_eq!(synced["approved"], false);
+
+    // A project constitution tries to switch off the team's mandatory policy: a conflict, the policy stays.
+    let repo_rules = e.json(&["constitution", "new", "Repo rules", "--scope", "project", "--project", "repo"]);
+    let path = ws_dir(&e).join(repo_rules["relativePath"].as_str().unwrap());
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(&format!("\n## Exceptions\n\n#### Secrets allowed here\n<!-- rule: id={mandatory} enforcement=rule enabled=false -->\n\nNot really.\n"));
+    std::fs::write(&path, text).unwrap();
+    e.ok(&["knowledge", "approve", repo_rules["id"].as_str().unwrap()]);
+    let check = e.run(&["constitution", "check"]);
+    assert_eq!(check.status.code(), Some(1), "conflicts fail the check");
+    assert!(String::from_utf8_lossy(&check.stdout).contains("mandatory policies cannot be overridden"));
+
+    let (report, session) = launch_report(&e, &[], "constitution.json");
+    let prompt = appended_prompt(&report);
+    assert!(prompt.contains("NEXUS constitution"), "{prompt}");
+    assert!(prompt.contains(&format!("[{mandatory} · mandatory] Never commit credentials")), "{prompt}");
+    assert!(prompt.find(&mandatory).unwrap() < prompt.find("TC-1").unwrap_or(usize::MAX), "mandatory first");
+    assert!(!prompt.contains("<!-- rule") && !prompt.contains("OPS-1"), "no markup; the unapproved synced document is not used");
+    assert!(prompt.contains("get_constitution"), "guidelines are named for on-demand reading");
+    assert_eq!(session["integrations"]["rules"]["constitution"]["pendingApproval"][0], "Ops policy");
+    let inbox = e.json(&["notifications", "list"]);
+    assert!(inbox["notifications"].as_array().unwrap().iter().any(|n| n["category"] == "review-required" && n["targetKind"] == "rules"), "the pending approval is a review notification");
+
+    e.ok(&["knowledge", "approve", &ops]);
+    let (report, session) = launch_report(&e, &[], "constitution-2.json");
+    assert!(appended_prompt(&report).contains("[OPS-1 · mandatory] Deploy only from main"));
+
+    let sid = session["id"].as_str().unwrap();
+    let r = mcp_calls(&e, sid, &[("get_constitution", json(r#"{"ids":["TC-3"]}"#)), ("get_constitution", json(r#"{"includeGuidelines":false}"#))]);
+    let one = r[0]["structuredContent"]["rules"].as_array().unwrap();
+    assert_eq!((one.len(), one[0]["enforcement"].as_str()), (1, Some("guideline")));
+    let all = r[1]["structuredContent"]["rules"].as_array().unwrap();
+    assert!(all.iter().any(|x| x["id"] == "OPS-1") && all.iter().all(|x| x["enforcement"] != "guideline"));
+    let effective = e.json(&["constitution", "effective", "--project", "repo"]);
+    assert!(effective["conflicts"].as_array().unwrap().iter().any(|c| c["kind"] == "mandatory-override"));
 }
 
 #[test]

@@ -210,6 +210,39 @@ pub fn recent_commits(repo: &Path, n: usize) -> Option<Vec<CommitInfo>> {
     )
 }
 
+/// Commits that changed `rel_path` (following renames), newest first (version history of a document).
+pub fn file_history(repo: &Path, rel_path: &str, n: usize) -> Option<Vec<CommitInfo>> {
+    if rel_path.starts_with('-') || rel_path.contains("..") {
+        return None;
+    }
+    let count = format!("-{}", n.clamp(1, 100));
+    let out = run_git(Some(repo), &["log", &count, "--follow", "--format=%H%x00%ct%x00%s", "--", rel_path]).ok()?;
+    if !out.success() {
+        return None;
+    }
+    Some(
+        out.stdout_str()
+            .lines()
+            .filter_map(|l| {
+                let mut parts = l.splitn(3, '\0');
+                let oid = parts.next()?.to_string();
+                let ts: i64 = parts.next()?.parse().ok()?;
+                Some(CommitInfo { oid, timestamp_ms: ts * 1000, summary: parts.next().unwrap_or("").to_string() })
+            })
+            .collect(),
+    )
+}
+
+/// A file's content at a commit (`git show <commit>:<path>`), at most 2 MiB.
+pub fn show_file(repo: &Path, commit: &str, rel_path: &str) -> Option<String> {
+    if !commit.chars().all(|c| c.is_ascii_hexdigit()) || rel_path.starts_with('-') || rel_path.contains("..") {
+        return None;
+    }
+    let spec = format!("{commit}:{rel_path}");
+    let out = run_git(Some(repo), &["show", &spec]).ok()?;
+    (out.success() && out.stdout.len() <= 2 * 1024 * 1024).then(|| out.stdout_str())
+}
+
 pub fn last_commit(repo: &Path) -> Option<CommitInfo> {
     let out = run_git(Some(repo), &["log", "-1", "--format=%H%x00%ct%x00%s"]).ok()?;
     if !out.success() {

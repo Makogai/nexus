@@ -8,8 +8,8 @@ _Last updated: 2026-11-04 (session 7, in progress)._ Read this first, then `docs
   a `--no-ff` merge. Nothing has been pushed.
 * Branch **`milestone/attention-constitutions-context`** (off `main` after `c3c90f9`, not merged, not pushed): the
   owner's stage "Intelligence, Constitutions, Context & Notifications". Order: notifications ✅ → Constitution
-  Manager 🚧 → Context Manager ☐. No workflow engine in this stage.
-* Phases: Phase 1 ✅ · M9–M10 ✅ · M11 partial · M12–M14 ✅ · M16–M21 ✅ · stage milestones A–C ✅, D 🚧.
+  Manager ✅ → Context Manager 🚧. No workflow engine in this stage. Commits: `5641872` (A–C), D (this commit).
+* Phases: Phase 1 ✅ · M9–M10 ✅ · M11 partial · M12–M14 ✅ · M16–M21 ✅ · stage milestones A–D ✅, E 🚧.
 
 ## What exists now (session 7)
 
@@ -25,6 +25,13 @@ _Last updated: 2026-11-04 (session 7, in progress)._ Read this first, then `docs
   muted workspaces/profiles, test notification, OS availability), session badges, attention board; native WinRT
   toasts with click → focus → workspace → terminal; recording adapter for E2E. CLI: `nexus notifications`,
   ATTENTION column in `nexus sessions`.
+* **Constitution Manager** (ADR-0027): constitutions are rule documents (`format: constitution`) with articles →
+  sections → rules, stable ids, enforcement (mandatory policy / rule / guideline), scopes global → workspace → stack
+  → project → task/workflow with overrides and disabling — never of mandatory policies (conflict). Synced versions
+  need approval (review notification). Launch delivery: compact, mandatory first, budgeted; the rest by id through
+  MCP `get_constitution` (19 tools). Desktop *Constitutions*: documents by scope, rule search, tree editor, Markdown
+  mode, problems, approval, applicable projects, Git history, *Effective rules* preview (project/task, conflicts,
+  overrides, what-if). CLI `nexus constitution list|show|effective|check|new`.
 * Earlier: profile diagnostics, AI Kits, lifecycle hooks, knowledge and tasks with lazy context, task-driven
   sessions, branch-aware notes, instruction inspector, profile instruction isolation, resume project, proposals.
 
@@ -32,10 +39,10 @@ _Last updated: 2026-11-04 (session 7, in progress)._ Read this first, then `docs
 
 | Area | Evidence |
 | --- | --- |
-| Rust | `cargo test --workspace`: 192 passed — core 140 unit + git 5 + crash 2 + isolation 4; CLI 25 E2E + 6 MCP unit; desktop 6 unit + 4 PTY |
-| Frontend | 51 vitest (new: bell, notification click routing incl. workspace switch / vanished session, status badges); `vue-tsc` clean; `vite build` OK |
-| Desktop E2E | `run-smoke.mjs` 27/27 · `task-flow.mjs` 29/29 · `profiles-kits.mjs` 9/9 · **`attention.mjs` 23/23** |
-| T18 / MCP interop | production build check OK · official SDK 18 tools |
+| Rust | `cargo test --workspace`: 198 passed — core 145 unit + git 5 + crash 2 + isolation 4; CLI 26 E2E + 6 MCP unit; desktop 6 unit + 4 PTY |
+| Frontend | 55 vitest (bell, click routing, status badges, Constitution Manager approve/edit/save/raw/effective); `vue-tsc` clean; `vite build` OK |
+| Desktop E2E | `run-smoke.mjs` 27/27 · `task-flow.mjs` 29/29 · `profiles-kits.mjs` 9/9 · **`attention.mjs` 23/23** · **`constitutions.mjs` 13/13** |
+| T18 / MCP interop | production build check OK · official SDK 19 tools |
 | Real Claude 2.1.311 (synthetic profiles) | hooks (now incl. attention: hooks accepted; real `StopFailure` → "Claude is not signed in for this profile" notification of that session) · instructions · security · kits — all OK |
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` clean (also with the E2E feature) |
 
@@ -45,11 +52,11 @@ their click from the Action Center; macOS/Linux notifier (compiles in CI only).
 
 ## Next actions (in order)
 
-1. Milestone D — Constitution Manager (in progress, uncommitted start: `knowledge/constitution.rs`, git file history
-   helpers, schema keys `format`/`prefix`/`task`/`workflow`): IPC + desktop view (tree + raw editor, search,
-   conflicts, effective preview, applicable projects, history), launch delivery, MCP `get_constitution`, CLI, tests.
-2. Milestone E — Context Manager; then F (integration).
-3. Owner: MANUAL_CHECKS 13–23 with the Personal profile.
+1. Milestone E — Context Manager (in progress, uncommitted start: `crates/nexus-core/src/context/` — strategies and
+   settings, project-docs index with cited search — and migration 0011): analysis + wizard, InstructionsLoaded
+   observation, retrieval recording + metrics, inspector, MCP integration, desktop view, CLI, tests, ADR-0028.
+2. Milestone F (integration); then the owner reviews the branch.
+3. Owner: MANUAL_CHECKS 13–24 with the Personal profile.
 
 ## Known issues / decisions to revisit
 
