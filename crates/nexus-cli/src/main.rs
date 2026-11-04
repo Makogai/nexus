@@ -2,6 +2,7 @@
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
 mod hook;
+mod instructions;
 mod knowledge;
 mod launch;
 mod mcp;
@@ -55,6 +56,9 @@ enum Command {
     /// Tasks of the active workspace (Markdown files under tasks/).
     #[command(subcommand)]
     Tasks(knowledge::TasksCmd),
+    /// Show the instruction files Claude loads for a profile and project (CLAUDE.md layers, rules, imports) and what
+    /// NEXUS appends. Read-only.
+    Instructions(instructions::InstructionsArgs),
     /// Start Claude Code in this terminal with a profile's own configuration.
     Launch(launch::LaunchArgs),
     /// NEXUS MCP server over stdio, bound to one NEXUS session (started by Claude from the session's --mcp-config).
@@ -119,6 +123,14 @@ enum ProfileCmd {
     Add(ProfileAddArgs),
     /// Show the sign-in status of a profile (`claude auth status` with the profile's environment).
     Status { profile: String },
+    /// Keep the default profile's personal instructions (~/.claude/CLAUDE.md, ~/.claude/rules) out of this profile's
+    /// NEXUS sessions (session-scoped claudeMdExcludes; organisation-managed instructions are never affected).
+    Isolate {
+        profile: String,
+        /// Turn isolation off again.
+        #[arg(long)]
+        off: bool,
+    },
 }
 
 #[derive(Args)]
@@ -141,6 +153,9 @@ struct ProfileAddArgs {
     effort: Option<String>,
     #[arg(long)]
     model: Option<String>,
+    /// Keep the default profile's personal instructions out of this profile's NEXUS sessions.
+    #[arg(long)]
+    isolate_instructions: bool,
 }
 
 #[derive(Args)]
@@ -189,6 +204,7 @@ fn main() -> ExitCode {
         Command::Sessions(a) => cmd_sessions(&ctx, a).map(|_| 0),
         Command::Knowledge(c) => knowledge::cmd_knowledge(&ctx, c).map(|_| 0),
         Command::Tasks(c) => knowledge::cmd_tasks(&ctx, c).map(|_| 0),
+        Command::Instructions(a) => instructions::run(&ctx, a).map(|_| 0),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),
@@ -436,6 +452,7 @@ fn cmd_profiles(ctx: &Ctx, cmd: ProfileCmd) -> nexus_core::Result<()> {
                 default_work_profile: a.work_profile,
                 default_effort: a.effort,
                 default_model: a.model,
+                isolate_instructions: a.isolate_instructions,
                 ..Default::default()
             };
             let p = if a.create {
@@ -452,6 +469,34 @@ fn cmd_profiles(ctx: &Ctx, cmd: ProfileCmd) -> nexus_core::Result<()> {
                     p.name,
                     p.config_dir.map(|d| d.display().to_string()).unwrap_or_else(|| "default location".into())
                 );
+            }
+        }
+        ProfileCmd::Isolate { profile: q, off } => {
+            let list = profile::list(&conn, false)?;
+            let p = resolve_ref(&list, &q, |p| &p.id, |p| &p.name, "profile")?.clone();
+            let input = ProfileInput {
+                name: p.name.clone(),
+                description: p.description.clone(),
+                color: Some(p.color.clone()),
+                executable: p.executable.as_ref().map(|e| e.display().to_string()),
+                extra_args: p.extra_args.clone(),
+                inherit_provider_env: p.inherit_provider_env,
+                isolate_instructions: !off,
+                default_work_profile: p.default_work_profile.clone(),
+                default_effort: p.default_effort.clone(),
+                default_model: p.default_model.clone(),
+                config_dir: None,
+            };
+            let updated = profile::update(&conn, &p.id, &input)?;
+            if ctx.json {
+                out::json(&updated);
+            } else if updated.isolate_instructions {
+                println!(
+                    "{}: NEXUS sessions will not load the default profile's ~/.claude/CLAUDE.md and ~/.claude/rules                      (organisation-managed and project instructions still load; plain `claude` runs are unaffected)",
+                    updated.name
+                );
+            } else {
+                println!("{}: isolation off — Claude loads the default profile's home-folder instructions again", updated.name);
             }
         }
         ProfileCmd::Status { profile: q } => {

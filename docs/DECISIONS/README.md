@@ -22,3 +22,6 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0015](0015-production-webview-hardening.md) | Production webview hardening (threat T18) | Accepted, implemented |
 | [0016](0016-lifecycle-hooks.md) | Claude lifecycle hooks: deterministic activity capture and checkpoint recovery | Accepted, implemented |
 | [0017](0017-context-hierarchy-and-lazy-loading.md) | Context hierarchy and lazy context loading | Accepted, implemented |
+| [0018](0018-task-sessions-and-branch-aware-knowledge.md) | Task-driven sessions and branch-aware knowledge | Accepted, implemented; task delivery amended by 0020 |
+| [0019](0019-effective-instructions-inspector.md) | Effective-instructions inspector: Claude's own layers first, no duplicates | Accepted, implemented |
+| [0020](0020-profile-instruction-isolation-and-task-data.md) | Profile instruction isolation and task text as untrusted data | Accepted, implemented |

@@ -39,8 +39,8 @@ pub struct LaunchRequest<'a> {
     pub mcp_config: Option<&'a Path>,
     /// Session-scoped lifecycle-hook settings (`--settings`), when policy allows it (see `claude::hooks`).
     pub settings: Option<&'a Path>,
-    /// Approved always-on rules (ADR-0017), appended to the system prompt after the work profile.
-    pub rules_prompt: Option<&'a str>,
+    /// NEXUS context (approved always-on rules, task brief — `claude::prepare`), appended after the work profile.
+    pub context_prompt: Option<&'a str>,
 }
 
 /// Everything needed to spawn the process. `env` is the *complete* environment (the spawner clears the
@@ -59,7 +59,12 @@ pub struct LaunchSpec {
 
 pub fn sanitize_title(raw: &str) -> String {
     raw.chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| match c {
+            c if c.is_control() => ' ',
+            '<' => '‹',
+            '>' => '›',
+            c => c,
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -114,7 +119,7 @@ pub fn build(req: &LaunchRequest<'_>, base_env: &[(String, String)]) -> Result<L
         validate_model(model)?;
         args.extend(["--model".to_string(), model.to_string()]);
     }
-    let appended: Vec<&str> = [req.work_profile.map(|w| w.prompt), req.rules_prompt.filter(|r| !r.trim().is_empty())]
+    let appended: Vec<&str> = [req.work_profile.map(|w| w.prompt), req.context_prompt.filter(|r| !r.trim().is_empty())]
         .into_iter()
         .flatten()
         .collect();
@@ -172,6 +177,7 @@ mod tests {
             extra_args: vec!["--permission-mode".into(), "acceptEdits".into()],
             managed_by_nexus: false,
             inherit_provider_env: false,
+            isolate_instructions: false,
             default_work_profile: None,
             default_effort: None,
             default_model: None,
@@ -213,7 +219,7 @@ mod tests {
             project_id: Some("pr-1"),
             mcp_config: None,
             settings: None,
-            rules_prompt: None,
+            context_prompt: None,
         }
     }
 
@@ -296,7 +302,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let p = profile(None);
         let mut r = request(&p, t.path(), Mode::New);
-        r.rules_prompt = Some("NEXUS rules (always apply):\n\n### Tests\nAlways add tests.");
+        r.context_prompt = Some("NEXUS rules (always apply):\n\n### Tests\nAlways add tests.");
         let spec = build(&r, &base_env()).unwrap();
         let i = spec.args.iter().position(|a| a == "--append-system-prompt").unwrap();
         assert!(spec.args[i + 1].starts_with("NEXUS work profile: PROTOTYPE"));

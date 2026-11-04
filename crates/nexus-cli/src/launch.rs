@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 use clap::Args;
 
 use nexus_core::claude::install;
-use nexus_core::claude::hooks;
-use nexus_core::knowledge::context::{self, LaunchRules as LaunchRulesOut};
-use nexus_core::claude::mcp::{self, Integrations};
-use nexus_core::claude::policy::{self, MachinePolicyLocations};
+use nexus_core::claude::mcp;
+use nexus_core::claude::policy::MachinePolicyLocations;
+use nexus_core::claude::prepare;
+use nexus_core::knowledge::{Kind as DocKind, service as knowledge};
 use nexus_core::claude::launch::{self, LaunchRequest, Mode};
 use nexus_core::claude::profile::{self, ClaudeProfile};
 use nexus_core::db::{self, Connection};
@@ -46,8 +46,12 @@ pub struct LaunchArgs {
     #[arg(long)]
     name: Option<String>,
     /// Resume a NEXUS session (id or id prefix), or `last` for the most recent resumable one here.
-    #[arg(long, value_name = "SESSION|last")]
+    #[arg(long, value_name = "SESSION|last", conflicts_with = "task")]
     resume: Option<String>,
+    /// Work on a task of the active workspace (id, its last digits, or title): its project is used, a backlog/ready task
+    /// moves to in-progress, and Claude gets a short brief plus the NEXUS task tools.
+    #[arg(long)]
+    task: Option<String>,
     /// Do not print the one-line launch summary.
     #[arg(long, short = 'q')]
     quiet: bool,
@@ -65,6 +69,7 @@ struct Plan {
     effort: Option<String>,
     model: Option<String>,
     resumed_from: Option<String>,
+    task_id: Option<String>,
 }
 
 pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
@@ -72,19 +77,31 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     let plan = if let Some(r) = a.resume.as_deref() {
         plan_resume(&conn, ctx, &a, r)?
     } else {
-        plan_new(&conn, &a)?
+        plan_new(&conn, ctx, &a)?
     };
     let exe = install::resolve(plan.profile.executable.as_deref(), &ctx.home)?;
     let me = host::register(&conn, HostKind::Cli)?;
     let nexus_id = new_id();
-    let policy = policy::evaluate(&plan.profile.effective_config_dir(&ctx.home), &MachinePolicyLocations::system());
     let exe_self = mcp::nexus_next_to_current_exe();
-    let rules = launch_rules(&conn, &ctx.data_dir, plan.workspace_id.as_deref(), plan.project_id.as_deref())?;
-    let integrations = Integrations {
-        mcp: mcp::prepare(&policy, exe_self.as_deref(), &ctx.data_dir, &nexus_id)?,
-        hooks: hooks::prepare(&policy, exe_self.as_deref(), &ctx.data_dir, &nexus_id)?,
-        rules: Some(rules),
-    };
+    let base_env = env::current();
+    let prepared = prepare::prepare(&prepare::Request {
+        conn: &conn,
+        data_dir: &ctx.data_dir,
+        home: &ctx.home,
+        profile: &plan.profile,
+        machine: &MachinePolicyLocations::system(),
+        nexus_exe: exe_self.as_deref(),
+        nexus_session_id: &nexus_id,
+        workspace_id: plan.workspace_id.as_deref(),
+        project_id: plan.project_id.as_deref(),
+        task_id: plan.task_id.as_deref(),
+        cwd: &plan.cwd,
+        base_env: &base_env,
+        start_task: plan.mode == Mode::New,
+    })?;
+    let settings_path = prepared.settings.clone();
+    let claude_name = prepared.claude_name.clone().unwrap_or_else(|| plan.title.clone());
+    let integrations = prepared.integrations;
     let spec = launch::build(
         &LaunchRequest {
             profile: &plan.profile,
@@ -92,7 +109,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             cwd: &plan.cwd,
             mode: plan.mode,
             claude_session_id: &plan.claude_session_id,
-            title: (plan.mode == Mode::New).then_some(plan.title.as_str()),
+            title: (plan.mode == Mode::New).then_some(claude_name.as_str()),
             work_profile: plan.work_profile,
             effort: plan.effort.as_deref(),
             model: plan.model.as_deref(),
@@ -100,10 +117,10 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             workspace_id: plan.workspace_id.as_deref(),
             project_id: plan.project_id.as_deref(),
             mcp_config: integrations.mcp.config_path(),
-            settings: integrations.hooks.config_path(),
-            rules_prompt: integrations.rules.as_ref().and_then(|r| r.text.as_deref()),
+            settings: settings_path.as_deref(),
+            context_prompt: prepared.prompt.as_deref(),
         },
-        &env::current(),
+        &base_env,
     )?;
     let session = session::insert_starting(
         &conn,
@@ -124,6 +141,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             model: plan.model.clone(),
             program: exe.display().to_string(),
             resumed_from: plan.resumed_from.clone(),
+            task_id: plan.task_id.clone(),
         },
     )?;
     session::set_integrations(&conn, &session.id, &integrations)?;
@@ -136,7 +154,13 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             mcp::IntegrationStatus::Enabled { .. } => format!("{label} on"),
             mcp::IntegrationStatus::Blocked { reason } | mcp::IntegrationStatus::Unavailable { reason } => format!("{label} off ({reason})"),
         };
-        let tools = format!("{} · {}", state("NEXUS tools", &integrations.mcp), state("hooks", &integrations.hooks));
+        let mut tools = format!("{} · {}", state("NEXUS tools", &integrations.mcp), state("hooks", &integrations.hooks));
+        if let Some(t) = &integrations.task {
+            tools.push_str(&format!(" · task “{}” ({})", t.title, t.status));
+        }
+        if integrations.isolation.is_some() {
+            tools.push_str(" · default-profile instructions excluded");
+        }
         eprintln!(
             "nexus: {} Claude · profile {} · {} · {} · {tools} · session {}",
             if plan.mode == Mode::Resume { "resuming" } else { "launching" },
@@ -178,16 +202,6 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     Ok(code.map(|c| c as i32).unwrap_or(1))
 }
 
-/// Always-on rules for the workspace/project of a launch (ADR-0017); empty without a workspace.
-fn launch_rules(conn: &Connection, data_dir: &Path, workspace_id: Option<&str>, project_id: Option<&str>) -> Result<LaunchRulesOut> {
-    let Some(ws) = workspace_id.and_then(|id| workspace::get(conn, id).ok()).filter(|w| w.available) else {
-        return Ok(LaunchRulesOut::default());
-    };
-    let project = project_id.and_then(|id| project::get(conn, id).ok());
-    let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
-    context::prepare_launch(conn, data_dir, &ws.id, &ws.root_path, project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice())))
-}
-
 /// Lease refresh on its own connection (a `Connection` is not shared across threads).
 fn spawn_heartbeat(db_path: PathBuf, host_id: String, session_id: String, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
@@ -203,7 +217,7 @@ fn spawn_heartbeat(db_path: PathBuf, host_id: String, session_id: String, stop: 
     })
 }
 
-fn find_profile(conn: &Connection, query: Option<&str>) -> Result<ClaudeProfile> {
+pub(crate) fn find_profile(conn: &Connection, query: Option<&str>) -> Result<ClaudeProfile> {
     let list = profile::list(conn, false)?;
     match query {
         Some(q) => resolve_ref(&list, q, |p| &p.id, |p| &p.name, "profile").cloned(),
@@ -218,8 +232,8 @@ fn find_profile(conn: &Connection, query: Option<&str>) -> Result<ClaudeProfile>
     }
 }
 
-fn current_dir(a: &LaunchArgs) -> Result<PathBuf> {
-    match a.cwd.as_deref() {
+pub(crate) fn current_dir_of(cwd: Option<&str>) -> Result<PathBuf> {
+    match cwd {
         Some(dir) => paths::validate_user_path(dir, Expect::ExistingDir),
         None => {
             let cwd = std::env::current_dir().map_err(|e| CoreError::io("cannot read", ".", e))?;
@@ -229,7 +243,7 @@ fn current_dir(a: &LaunchArgs) -> Result<PathBuf> {
 }
 
 /// The deepest registered project of the active workspace that contains `dir`.
-fn project_containing(projects: &[project::Project], dir: &Path) -> Option<project::Project> {
+pub(crate) fn project_containing(projects: &[project::Project], dir: &Path) -> Option<project::Project> {
     projects
         .iter()
         .filter(|p| p.local_path.as_deref().is_some_and(|lp| starts_with_path(dir, lp)))
@@ -246,14 +260,24 @@ fn starts_with_path(path: &Path, prefix: &Path) -> bool {
     }
 }
 
-fn plan_new(conn: &Connection, a: &LaunchArgs) -> Result<Plan> {
+/// The task a launch works on: id, id prefix or exact title among the active workspace's tasks.
+fn find_task(conn: &Connection, data_dir: &Path, ws: Option<&workspace::Workspace>, q: &str) -> Result<nexus_core::knowledge::index::Item> {
+    let ws = ws.ok_or_else(|| CoreError::invalid("tasks belong to a workspace — activate one first"))?;
+    knowledge::refresh(conn, data_dir, ws)?;
+    let tasks: Vec<_> = knowledge::list(conn, ws, &[DocKind::Task], false)?.into_iter().filter(|t| t.id.is_some()).collect();
+    knowledge::resolve(&tasks, q).cloned()
+}
+
+fn plan_new(conn: &Connection, ctx: &Ctx, a: &LaunchArgs) -> Result<Plan> {
     let profile = find_profile(conn, a.profile.as_deref())?;
     let ws = workspace::active(conn)?;
     let projects = match &ws {
         Some(w) => project::list(conn, &w.id)?,
         None => Vec::new(),
     };
-    let (cwd, proj) = match a.project.as_deref() {
+    let task = a.task.as_deref().map(|q| find_task(conn, &ctx.data_dir, ws.as_ref(), q)).transpose()?;
+    let project_query = a.project.clone().or_else(|| task.as_ref().and_then(|t| t.project_id.clone()));
+    let (cwd, proj) = match project_query.as_deref() {
         Some(q) => {
             let p = resolve_ref(&projects, q, |p| &p.id, |p| &p.name, "project")?.clone();
             let lp = p
@@ -264,7 +288,7 @@ fn plan_new(conn: &Connection, a: &LaunchArgs) -> Result<Plan> {
             (lp, Some(p))
         }
         None => {
-            let dir = current_dir(a)?;
+            let dir = current_dir_of(a.cwd.as_deref())?;
             let p = project_containing(&projects, &dir);
             (dir, p)
         }
@@ -281,6 +305,7 @@ fn plan_new(conn: &Connection, a: &LaunchArgs) -> Result<Plan> {
         .as_deref()
         .map(launch::sanitize_title)
         .filter(|t| !t.is_empty())
+        .or_else(|| task.as_ref().map(|t| launch::sanitize_title(&t.title)))
         .or_else(|| proj.as_ref().map(|p| p.name.clone()))
         .unwrap_or_else(|| cwd.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "session".into()));
     Ok(Plan {
@@ -295,6 +320,7 @@ fn plan_new(conn: &Connection, a: &LaunchArgs) -> Result<Plan> {
         claude_session_id: uuid::Uuid::new_v4().to_string(),
         work_profile,
         resumed_from: None,
+        task_id: task.and_then(|t| t.id),
     })
 }
 
@@ -313,7 +339,7 @@ fn plan_resume(conn: &Connection, ctx: &Ctx, a: &LaunchArgs, which: &str) -> Res
     };
     let all = session::list(conn, &Filter { kind: Some(Kind::Claude), include_archived: true, limit: Some(1000), ..Default::default() })?;
     let prev: Session = if which == "last" {
-        let dir = current_dir(a)?;
+        let dir = current_dir_of(a.cwd.as_deref())?;
         all.into_iter()
             .filter(|s| !s.state.is_live() && paths::same_path(&s.cwd, &dir) && recorded(s))
             .find(|s| wanted_profile.is_none() || s.profile_id == wanted_profile)
@@ -349,6 +375,7 @@ fn plan_resume(conn: &Connection, ctx: &Ctx, a: &LaunchArgs, which: &str) -> Res
         project_id: prev.project_id.clone(),
         title: prev.title.clone(),
         mode: Mode::Resume,
+        task_id: prev.task_id.clone(),
         resumed_from: Some(prev.id),
         profile,
     })

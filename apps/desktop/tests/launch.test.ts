@@ -13,6 +13,7 @@ function profile(id: string, over: Partial<ClaudeProfile> = {}): ClaudeProfile {
     extraArgs: [],
     managedByNexus: false,
     inheritProviderEnv: false,
+    isolateInstructions: false,
     defaultWorkProfile: null,
     defaultEffort: null,
     defaultModel: null,

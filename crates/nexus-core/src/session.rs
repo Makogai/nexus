@@ -72,6 +72,8 @@ pub struct Session {
     pub attention: Option<String>,
     pub end_reason: Option<String>,
     pub transcript_path: Option<PathBuf>,
+    /// Knowledge task this session works on (ADR-0018).
+    pub task_id: Option<String>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,
     pub profile_id: Option<String>,
@@ -111,12 +113,13 @@ pub struct NewSession {
     pub model: Option<String>,
     pub program: String,
     pub resumed_from: Option<String>,
+    pub task_id: Option<String>,
 }
 
 const SELECT: &str = "SELECT id, kind, workspace_id, project_id, profile_id, claude_session_id, title, cwd, branch,
     work_profile, effort, model, program, pid, state, exit_code, error, resumed_from, started_at, ended_at,
     archived_at, host, host_id, integrations, turns, prompts, subagents, last_activity_at, attention, end_reason,
-    transcript_path FROM sessions";
+    transcript_path, task_id FROM sessions";
 
 fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
     let kind: String = r.get(1)?;
@@ -134,6 +137,7 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
         attention: r.get(28)?,
         end_reason: r.get(29)?,
         transcript_path: r.get::<_, Option<String>>(30)?.map(PathBuf::from),
+        task_id: r.get(31)?,
         workspace_id: r.get(2)?,
         project_id: r.get(3)?,
         profile_id: r.get(4)?,
@@ -160,8 +164,8 @@ pub fn insert_starting(conn: &Connection, s: NewSession) -> Result<Session> {
     let id = s.id.unwrap_or_else(new_id);
     conn.execute(
         "INSERT INTO sessions(id, kind, workspace_id, project_id, profile_id, claude_session_id, title, cwd, branch,
-            work_profile, effort, model, program, state, resumed_from, started_at, host, host_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'starting', ?14, ?15, ?16, ?17)",
+            work_profile, effort, model, program, state, resumed_from, started_at, host, host_id, task_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'starting', ?14, ?15, ?16, ?17, ?18)",
         params![
             id,
             s.kind.unwrap_or(Kind::Claude).as_str(),
@@ -180,6 +184,7 @@ pub fn insert_starting(conn: &Connection, s: NewSession) -> Result<Session> {
             now_ms(),
             s.host.unwrap_or(HostKind::Desktop).as_str(),
             s.host_id,
+            s.task_id,
         ],
     )?;
     get(conn, &id)

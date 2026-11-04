@@ -28,6 +28,9 @@ pub struct LaunchRules {
     pub pending_approval: Vec<String>,
     /// Always-on rules that did not fit the budget (listed by title so Claude can fetch them).
     pub over_budget: Vec<String>,
+    /// Always-on rules skipped because their text is already in an instruction file Claude loads (ADR-0019).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub already_loaded: Vec<String>,
 }
 
 /// Refresh the workspace's knowledge index and compute the always-on rules for a launch.
@@ -43,6 +46,17 @@ pub fn prepare_launch(
 }
 
 pub fn launch_rules(conn: &Connection, workspace_id: &str, project: Option<(&str, &[String])>) -> Result<LaunchRules> {
+    launch_rules_with(conn, workspace_id, project, None)
+}
+
+/// Like [`launch_rules`], skipping rules whose body is already part of an instruction file Claude loads itself, so
+/// the same instruction is not sent twice.
+pub fn launch_rules_with(
+    conn: &Connection,
+    workspace_id: &str,
+    project: Option<(&str, &[String])>,
+    loaded: Option<&crate::claude::instructions::Inspection>,
+) -> Result<LaunchRules> {
     let mut out = LaunchRules::default();
     let always: Vec<Item> = index::effective_rules(conn, workspace_id, project)?
         .into_iter()
@@ -59,6 +73,11 @@ pub fn launch_rules(conn: &Connection, workspace_id: &str, project: Option<(&str
         let Ok((doc, hash)) = store::read(&r.path) else { continue };
         if hash != r.hash {
             out.pending_approval.push(r.title.clone());
+            continue;
+        }
+        if let Some(layer) = loaded.and_then(|i| i.containing(doc.body.trim())) {
+            let file = layer.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            out.already_loaded.push(format!("{} (in {file})", r.title));
             continue;
         }
         let block = format!("\n\n### {}\n{}", r.title, doc.body.trim());

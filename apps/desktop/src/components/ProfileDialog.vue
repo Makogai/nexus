@@ -33,12 +33,16 @@ function blank() {
     executable: null as string | null,
     extraArgsText: '',
     inheritProviderEnv: false,
+    isolateInstructions: false,
     defaultWorkProfile: null as string | null,
     defaultEffort: null as string | null,
     defaultModel: null as string | null,
     useDefaultLocation: false,
   }
 }
+
+/** The default-location profile *is* the owner of ~/.claude — there is nothing to isolate it from. */
+const isDefaultLocation = computed(() => (props.mode === 'edit' ? props.profile?.configDir === null : form.value.useDefaultLocation && props.mode === 'register'))
 
 const title = computed(() =>
   props.mode === 'create' ? 'Create a new Claude profile' : props.mode === 'edit' ? 'Edit profile' : 'Register a Claude configuration',
@@ -67,6 +71,7 @@ watch(
         executable: p.executable,
         extraArgsText: p.extraArgs.join('\n'),
         inheritProviderEnv: p.inheritProviderEnv,
+        isolateInstructions: p.isolateInstructions,
         defaultWorkProfile: p.defaultWorkProfile,
         defaultEffort: p.defaultEffort,
         defaultModel: p.defaultModel,
@@ -114,6 +119,7 @@ async function save() {
       .map((a) => a.trim())
       .filter(Boolean),
     inheritProviderEnv: f.inheritProviderEnv,
+    isolateInstructions: !isDefaultLocation.value && f.isolateInstructions,
     defaultWorkProfile: f.defaultWorkProfile || null,
     defaultEffort: f.defaultEffort || null,
     defaultModel: f.defaultModel?.trim() || null,
@@ -219,6 +225,23 @@ async function save() {
         </span>
       </label>
     </details>
+
+    <div class="field isolation" data-isolation>
+      <label class="checkbox">
+        <input v-model="form.isolateInstructions" type="checkbox" :disabled="isDefaultLocation" />
+        <span>
+          Keep my default profile's personal instructions out of this profile's sessions
+          <span class="hint block">
+            Claude loads <code>~/.claude/CLAUDE.md</code> and <code>~/.claude/rules/</code> as project memory for every
+            project inside your home folder — even under another profile. When this is on, NEXUS adds
+            <code>claudeMdExcludes</code> for exactly those files to each session's own settings. Organisation-managed
+            and project instructions still load; your Claude configuration is not changed; <code>claude</code> started
+            outside NEXUS is not affected.
+          </span>
+          <span v-if="isDefaultLocation" class="hint block">Not available for the default-location profile — those files are its own memory.</span>
+        </span>
+      </label>
+    </div>
 
     <div v-if="error" class="notice notice-error selectable"><TriangleAlert /> {{ error }}</div>
 

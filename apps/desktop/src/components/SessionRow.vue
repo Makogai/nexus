@@ -95,6 +95,7 @@ async function archive() {
         </span>
         <span v-if="workName" class="badge">{{ workName }}</span>
         <span v-if="live && s.attention" class="badge badge-warn attention" :title="s.attention">Waiting for you</span>
+        <span v-if="s.taskId && s.integrations?.task" class="chip task-chip" :title="`Launched for task “${s.integrations.task.title}”`">Task: {{ s.integrations.task.title }}</span>
       </div>
       <div class="meta">
         <span :class="{ live: tone === 'live' }">{{ sessionStatus(s) }}</span>

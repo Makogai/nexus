@@ -23,7 +23,14 @@ pub fn data_dir() -> Result<PathBuf> {
         .ok_or_else(|| CoreError::Unsupported("cannot determine the local data directory".into()))
 }
 
+/// The home folder as Claude Code sees it: Node's `os.homedir()` reads `USERPROFILE` on Windows (and `HOME`
+/// elsewhere, which `dirs` already follows), so `~` means the same folder to NEXUS and to Claude.
 pub fn home_dir() -> Result<PathBuf> {
+    if cfg!(windows)
+        && let Some(p) = std::env::var_os("USERPROFILE").map(PathBuf::from).filter(|p| p.is_absolute() && p.is_dir())
+    {
+        return Ok(p);
+    }
     dirs::home_dir().ok_or_else(|| CoreError::Unsupported("cannot determine the home directory".into()))
 }
 

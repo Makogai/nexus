@@ -8,11 +8,10 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
 
 use nexus_core::claude::install;
-use nexus_core::claude::hooks;
-use nexus_core::knowledge::context;
-use nexus_core::claude::mcp::{self, Integrations, IntegrationStatus};
-use nexus_core::claude::policy;
+use nexus_core::claude::mcp::{self, IntegrationStatus};
+use nexus_core::claude::prepare::{self, Prepared};
 use nexus_core::claude::launch::{self, LaunchRequest, Mode};
+use nexus_core::knowledge::{index as kindex, service as knowledge};
 use nexus_core::claude::profile::{self, ClaudeProfile};
 use nexus_core::env;
 use nexus_core::paths::{self, Expect};
@@ -109,6 +108,10 @@ pub struct StartClaude {
     pub effort: Option<String>,
     pub model: Option<String>,
     pub title: Option<String>,
+    /// Work on this knowledge task (ADR-0018): its project is used when none is given.
+    pub task_id: Option<String>,
+    /// Move a backlog/ready task to in-progress (default: yes).
+    pub start_task: Option<bool>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
 }
@@ -147,39 +150,50 @@ fn resolve_target(ctx: &Ctx, project_id: Option<&str>, cwd: Option<&str>) -> Ipc
     })
 }
 
-/// Session-scoped NEXUS integrations — MCP server and lifecycle hooks — when the profile's organisation policy
-/// allows them (ADR-0004, ADR-0009, ADR-0016).
-fn session_integrations(
+/// Session-scoped NEXUS integrations and appended context (shared with `nexus launch`: `claude::prepare`).
+#[allow(clippy::too_many_arguments)]
+fn prepare_session(
     ctx: &Ctx,
     profile: &ClaudeProfile,
     nexus_id: &str,
     workspace_id: Option<&str>,
     project_id: Option<&str>,
-) -> IpcResult<Integrations> {
-    let pol = policy::evaluate(&profile.effective_config_dir(&ctx.home), &ctx.machine_policy);
+    task_id: Option<&str>,
+    cwd: &std::path::Path,
+    start_task: bool,
+) -> IpcResult<Prepared> {
     let exe = mcp::nexus_next_to_current_exe();
-    let rules = {
-        let db = ctx.db();
-        match workspace_id.and_then(|id| workspace::get(&db, id).ok()).filter(|w| w.available) {
-            Some(ws) => {
-                let project = project_id.and_then(|id| project::get(&db, id).ok());
-                let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
-                Some(context::prepare_launch(&db, &ctx.data_dir, &ws.id, &ws.root_path, project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice())))?)
-            }
-            None => None,
-        }
-    };
-    let integrations = Integrations {
-        mcp: mcp::prepare(&pol, exe.as_deref(), &ctx.data_dir, nexus_id)?,
-        hooks: hooks::prepare(&pol, exe.as_deref(), &ctx.data_dir, nexus_id)?,
-        rules,
-    };
-    for (name, status) in [("MCP tools", &integrations.mcp), ("lifecycle hooks", &integrations.hooks)] {
+    let base_env = env::current();
+    let db = ctx.db();
+    let prepared = prepare::prepare(&prepare::Request {
+        conn: &db,
+        data_dir: &ctx.data_dir,
+        home: &ctx.home,
+        profile,
+        machine: &ctx.machine_policy,
+        nexus_exe: exe.as_deref(),
+        nexus_session_id: nexus_id,
+        workspace_id,
+        project_id,
+        task_id,
+        cwd,
+        base_env: &base_env,
+        start_task,
+    })?;
+    for (name, status) in [("MCP tools", &prepared.integrations.mcp), ("lifecycle hooks", &prepared.integrations.hooks)] {
         if let IntegrationStatus::Blocked { reason } | IntegrationStatus::Unavailable { reason } = status {
             tracing::info!(profile = %profile.name, integration = name, %reason, "NEXUS integration not enabled for this session");
         }
     }
-    Ok(integrations)
+    Ok(prepared)
+}
+
+/// The project of a task in the active workspace (a task launch without an explicit project).
+fn task_project(ctx: &Ctx, task_id: &str) -> IpcResult<Option<String>> {
+    let db = ctx.db();
+    let ws = workspace::active(&db)?.ok_or_else(|| IpcError::invalid("no active workspace"))?;
+    knowledge::refresh(&db, &ctx.data_dir, &ws)?;
+    Ok(kindex::get(&db, &ws.id, task_id)?.project_id)
 }
 
 fn pty_size(cols: Option<u16>, rows: Option<u16>) -> (u16, u16) {
@@ -194,7 +208,11 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
         if profile.archived_at.is_some() {
             return Err(IpcError::invalid("this profile is archived"));
         }
-        let target = resolve_target(&ctx, args.project_id.as_deref(), args.cwd.as_deref())?;
+        let project_id = match (&args.project_id, &args.task_id) {
+            (None, Some(t)) => task_project(&ctx, t)?,
+            (p, _) => p.clone(),
+        };
+        let target = resolve_target(&ctx, project_id.as_deref(), args.cwd.as_deref())?;
         let exe = install::resolve(profile.executable.as_deref(), &ctx.home)?;
 
         let wp_id = args.work_profile.or_else(|| profile.default_work_profile.clone());
@@ -213,7 +231,23 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
 
         let nexus_id = new_id();
         let claude_session_id = uuid::Uuid::new_v4().to_string();
-        let integrations = session_integrations(&ctx, &profile, &nexus_id, target.workspace_id.as_deref(), target.project_id.as_deref())?;
+        let prepared = prepare_session(
+            &ctx,
+            &profile,
+            &nexus_id,
+            target.workspace_id.as_deref(),
+            target.project_id.as_deref(),
+            args.task_id.as_deref(),
+            &target.cwd,
+            args.start_task.unwrap_or(true),
+        )?;
+        let title = match (&args.title, &prepared.integrations.task) {
+            (None, Some(t)) => launch::sanitize_title(&t.title),
+            _ => title,
+        };
+        let settings_path = prepared.settings.clone();
+        let claude_name = prepared.claude_name.clone();
+        let integrations = prepared.integrations;
         let spec = launch::build(
             &LaunchRequest {
                 profile: &profile,
@@ -221,7 +255,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 cwd: &target.cwd,
                 mode: Mode::New,
                 claude_session_id: &claude_session_id,
-                title: Some(&title),
+                title: Some(claude_name.as_deref().unwrap_or(&title)),
                 work_profile: wp,
                 effort: effort.as_deref(),
                 model: model.as_deref(),
@@ -229,8 +263,8 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 workspace_id: target.workspace_id.as_deref(),
                 project_id: target.project_id.as_deref(),
                 mcp_config: integrations.mcp.config_path(),
-                settings: integrations.hooks.config_path(),
-                rules_prompt: integrations.rules.as_ref().and_then(|r| r.text.as_deref()),
+                settings: settings_path.as_deref(),
+                context_prompt: prepared.prompt.as_deref(),
             },
             &env::current(),
         )?;
@@ -257,6 +291,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                     model,
                     program: exe.display().to_string(),
                     resumed_from: None,
+                    task_id: integrations.task.as_ref().map(|t| t.id.clone()),
                 },
             )?;
             session::set_integrations(&db, &s.id, &integrations)?;
@@ -308,7 +343,18 @@ pub async fn session_resume(
         let exe = install::resolve(profile.executable.as_deref(), &ctx.home)?;
         let wp = prev.work_profile.as_deref().and_then(workprofile::get);
         let nexus_id = new_id();
-        let integrations = session_integrations(&ctx, &profile, &nexus_id, prev.workspace_id.as_deref(), prev.project_id.as_deref())?;
+        let prepared = prepare_session(
+            &ctx,
+            &profile,
+            &nexus_id,
+            prev.workspace_id.as_deref(),
+            prev.project_id.as_deref(),
+            prev.task_id.as_deref(),
+            &prev.cwd,
+            false,
+        )?;
+        let settings_path = prepared.settings.clone();
+        let integrations = prepared.integrations;
         let spec = launch::build(
             &LaunchRequest {
                 profile: &profile,
@@ -324,8 +370,8 @@ pub async fn session_resume(
                 workspace_id: prev.workspace_id.as_deref(),
                 project_id: prev.project_id.as_deref(),
                 mcp_config: integrations.mcp.config_path(),
-                settings: integrations.hooks.config_path(),
-                rules_prompt: integrations.rules.as_ref().and_then(|r| r.text.as_deref()),
+                settings: settings_path.as_deref(),
+                context_prompt: prepared.prompt.as_deref(),
             },
             &env::current(),
         )?;
@@ -351,6 +397,7 @@ pub async fn session_resume(
                     model: prev.model.clone(),
                     program: exe.display().to_string(),
                     resumed_from: Some(prev.id.clone()),
+                    task_id: prev.task_id.clone(),
                 },
             )?;
             session::set_integrations(&db, &s.id, &integrations)?;

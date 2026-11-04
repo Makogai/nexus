@@ -13,6 +13,10 @@ import type {
   KnowledgeEntry,
   KnowledgeHit,
   KnowledgeOverview,
+  InstructionsPreview,
+  ProjectKnowledge,
+  TaskUpdateInput,
+  TaskView,
   LaunchOptions,
   PathInspection,
   ProfileDetails,
@@ -122,8 +126,12 @@ export const api = {
     call<KnowledgeHit[]>('knowledge_search', { workspaceId, query, kinds }),
   knowledgeCreate: (workspaceId: string, input: KnowledgeCreate) =>
     call<KnowledgeEntry>('knowledge_create', { workspaceId, input }),
-  knowledgeUpdateTask: (workspaceId: string, id: string, status: string | null, log?: string | null, expectedHash?: string | null) =>
-    call<KnowledgeEntry>('knowledge_update_task', { workspaceId, id, status, log, expectedHash }),
+  knowledgeUpdateTask: (workspaceId: string, id: string, u: TaskUpdateInput) =>
+    call<KnowledgeEntry>('knowledge_update_task', { workspaceId, id, ...u }),
+  knowledgeTask: (workspaceId: string, id: string) => call<TaskView>('knowledge_task', { workspaceId, id }),
+  projectKnowledge: (projectId: string) => call<ProjectKnowledge>('project_knowledge', { projectId }),
+  instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
+    call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
 }
 

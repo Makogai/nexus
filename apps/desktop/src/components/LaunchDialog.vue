@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FolderOpen, Sparkles, TriangleAlert } from '@lucide/vue'
+import { FolderOpen, ListTodo, Sparkles, TriangleAlert } from '@lucide/vue'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
@@ -27,6 +27,8 @@ const model = ref('')
 const title = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
+const startTask = ref(true)
+const task = computed(() => app.launchDialog.task ?? null)
 
 const isOpen = computed(() => app.launchDialog.open)
 const availableProjects = computed(() => projects.list.filter((p) => p.available))
@@ -41,6 +43,7 @@ watch(isOpen, (open) => {
   title.value = ''
   model.value = ''
   customDir.value = null
+  startTask.value = true
   projectId.value = app.launchDialog.projectId ?? availableProjects.value[0]?.id ?? ''
   const sel = initialLaunchSelection(
     profiles.list,
@@ -84,6 +87,8 @@ async function launch() {
       effort: effort.value || null,
       model: model.value.trim() || null,
       title: title.value.trim() || null,
+      taskId: task.value?.id ?? null,
+      startTask: task.value ? startTask.value : undefined,
     })
     app.prefs.lastLaunch = { profileId: profileId.value, workProfile: workProfile.value, effort: effort.value || null }
     close()
@@ -110,15 +115,26 @@ function goToProfiles() {
       </div>
     </div>
     <template v-else>
+      <div v-if="task" class="notice notice-accent task-notice" data-launch-task>
+        <ListTodo />
+        <div>
+          <div>Task: <strong>{{ task.title }}</strong></div>
+          <label class="checkbox">
+            <input v-model="startTask" type="checkbox" />
+            <span>Move it to <em>In progress</em> if it is in Backlog or Ready</span>
+          </label>
+          <div class="hint">Claude gets a short brief of the task (not its history) and records progress with the NEXUS task tools.</div>
+        </div>
+      </div>
       <div class="field">
         <label for="launch-project">Project</label>
         <div class="input-row">
-          <select id="launch-project" v-model="projectId" class="select" @change="customDir = null">
+          <select id="launch-project" v-model="projectId" class="select" :disabled="!!task?.projectId" @change="customDir = null">
             <option v-if="customDir" value="">{{ shortPath(customDir, app.info?.homeDir) }}</option>
             <option v-else-if="availableProjects.length === 0" value="" disabled>No projects on this machine</option>
             <option v-for="p in availableProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
-          <button class="btn" title="Use another directory" @click="pickDir"><FolderOpen /></button>
+          <button class="btn" title="Use another directory" :disabled="!!task" @click="pickDir"><FolderOpen /></button>
         </div>
       </div>
 
@@ -168,7 +184,7 @@ function goToProfiles() {
 
       <div class="field">
         <label for="launch-title">Session name <span class="faint">(optional)</span></label>
-        <input id="launch-title" v-model="title" class="input" placeholder="e.g. Fix login redirect" @keydown.enter="launch" />
+        <input id="launch-title" v-model="title" class="input" :placeholder="task?.title ?? 'e.g. Fix login redirect'" @keydown.enter="launch" />
       </div>
 
       <div v-if="error" class="notice notice-error selectable"><TriangleAlert /> {{ error }}</div>
@@ -210,6 +226,13 @@ function goToProfiles() {
   background: var(--accent-soft);
   color: var(--accent-strong);
   box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+.task-notice {
+  margin-bottom: 14px;
+  align-items: flex-start;
+}
+.task-notice .checkbox {
+  margin-top: 6px;
 }
 .two {
   display: grid;

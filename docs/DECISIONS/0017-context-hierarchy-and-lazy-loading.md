@@ -81,5 +81,6 @@ NEXUS write, when the desktop Knowledge view is shown or the window regains focu
 * Session start cost is one bounded prompt block plus one line; everything else costs context only when used.
 * Approvals are per machine: after cloning a workspace on a new machine its always-on rules must be reviewed once.
 * Skills stay native Claude skills; NEXUS only lists them so Claude (and the user) can see what exists.
-* Still open: branch-aware notes (M17), CLAUDE.md layers in the effective-instructions inspector (M20), launching
-  Claude from a task (M19), manifest `sync`/`classification` keys and the pre-push secret scan (ADR-0013, Phase 6).
+* Done since: launching Claude for a task and branch-aware notes (ADR-0018); CLAUDE.md layers in the
+  effective-instructions inspector and duplicate suppression for always-on rules (ADR-0019).
+* Still open: manifest `sync`/`classification` keys and the pre-push secret scan (ADR-0013, Phase 6).

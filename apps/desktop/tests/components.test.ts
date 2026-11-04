@@ -69,6 +69,7 @@ function profile(id: string, over: Partial<ClaudeProfile> = {}): ClaudeProfile {
     extraArgs: [],
     managedByNexus: false,
     inheritProviderEnv: false,
+    isolateInstructions: false,
     defaultWorkProfile: null,
     defaultEffort: null,
     defaultModel: null,
@@ -128,6 +129,7 @@ function session(over: Partial<SessionView> = {}): SessionView {
     attention: null,
     endReason: null,
     transcriptPath: null,
+    taskId: null,
     conversationRecorded: true,
     resumable: true,
     ...over,
@@ -200,6 +202,23 @@ describe('LaunchDialog', () => {
     expect(useSessionStore().tabs).toContain('new')
   })
 
+  it('launches for a task: its project is fixed, the task id and start choice are sent', async () => {
+    seed()
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-1', title: 'Ship login', projectId: 'p1' })
+    await flushPromises()
+    expect(w.find('[data-launch-task]').text()).toContain('Ship login')
+    expect(w.find('#launch-project').attributes('disabled')).toBeDefined()
+    expect((w.find('#launch-project').element as HTMLSelectElement).value).toBe('p1')
+    expect(w.find('#launch-title').attributes('placeholder')).toBe('Ship login')
+    await w.find('[data-launch-task] input[type=checkbox]').setValue(false)
+    api.sessionStartClaude.mockResolvedValue(session({ id: 'new', running: true, state: 'running' }))
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ projectId: 'p1', taskId: 'task-1', startTask: false, title: null })
+  })
+
   it('switching profile applies that profile’s defaults', async () => {
     seed()
     const w = mountWith(LaunchDialog)
@@ -255,6 +274,26 @@ describe('ProfileDialog', () => {
       }),
     )
     expect(w.emitted('close')).toBeTruthy()
+  })
+
+  it('instruction isolation is opt-in, sent when chosen and unavailable for the default location', async () => {
+    useProfileStore().launchOptions = OPTIONS
+    api.profileCreate.mockResolvedValue(profile('w'))
+    const w = mountWith(ProfileDialog, { open: true, mode: 'create' })
+    await flushPromises()
+    const box = w.find('[data-isolation] input')
+    expect((box.element as HTMLInputElement).checked).toBe(false)
+    expect(w.find('[data-isolation]').text()).toContain('Organisation-managed and project instructions still load')
+    await w.find('#pf-name').setValue('Work')
+    await w.find('.input.mono').setValue('/home/u/.claude-work')
+    await box.setValue(true)
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.profileCreate).toHaveBeenCalledWith(expect.objectContaining({ isolateInstructions: true }))
+
+    const d = mountWith(ProfileDialog, { open: true, mode: 'edit', profile: profile('d', { configDir: null }) })
+    await flushPromises()
+    expect(d.find('[data-isolation] input').attributes('disabled')).toBeDefined()
   })
 
   it('registering the detected default location sends no config dir', async () => {
@@ -379,6 +418,6 @@ describe('CommandPalette', () => {
     expect(first.text()).toContain('Launch Claude in Game')
     await w.find('.palette input').trigger('keydown', { key: 'Enter' })
     expect(app.paletteOpen).toBe(false)
-    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined })
+    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null })
   })
 })
