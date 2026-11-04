@@ -2,7 +2,7 @@
 // remote debugging, run the smoke checks, stop the app, exit non-zero on any failure.
 //
 //   cargo build -p fake-claude
-//   npx tauri build --debug --no-bundle      # embeds the production frontend and CSP
+//   npx tauri build --debug --no-bundle --features e2e-webview-debugging   # production frontend + CSP, test-only CDP
 //   node e2e/run-smoke.mjs [path/to/nexus-desktop(.exe)]
 //
 // Windows only for now (WebView2 DevTools protocol). Development/CI tooling — never used by release builds.

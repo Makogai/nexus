@@ -38,6 +38,14 @@
 11. With the resumed session running, close the NEXUS window → confirm *Quit* → start NEXUS again → the session is
     *Interrupted (NEXUS closed)* → **Resume** works again.
 12. Outside NEXUS, your usual `claude-personal` and `claude` commands behave exactly as before.
+13. **Hooks and NEXUS tools** (session 3): in a new session, `/hooks` lists the NEXUS hooks next to your own (yours
+    still run); `/mcp` shows `nexus` connected. *Sessions* shows the turn count rising and *Waiting for you* while
+    Claude asks for a permission.
+14. **Knowledge**: *Knowledge → New* → Rule "Answer in English", delivery *Always*. Launch a new session and ask
+    "Which NEXUS rules apply?" → Claude names the rule. Ask "Create a NEXUS task to add a README" → the task appears
+    on the board with source `claude`. Edit that rule's file in `<workspace>\rules\` with a text editor
+    → the Knowledge view asks for approval again and the next session does not get it until you approve.
+15. Re-run the snapshot from step 1 → still unchanged (hooks and MCP are session-scoped flags, not profile edits).
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

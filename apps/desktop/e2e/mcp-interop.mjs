@@ -39,8 +39,8 @@ await client.connect(new StdioClientTransport({ command: nexus, args: ['--data-d
 check('initialize handshake with the official SDK', client.getServerVersion()?.name === 'nexus', JSON.stringify(client.getServerVersion()))
 
 const { tools } = await client.listTools()
-check('tools/list parsed by the SDK', tools.length === 7, tools.map((t) => t.name).join(', '))
-check('read-only tools are annotated', tools.filter((t) => t.annotations?.readOnlyHint).length === 6)
+check('tools/list parsed by the SDK', tools.length === 15, tools.map((t) => t.name).join(', '))
+check('read-only tools are annotated', tools.filter((t) => t.annotations?.readOnlyHint).length === 11)
 
 const cp = await client.callTool({ name: 'checkpoint', arguments: { kind: 'progress', summary: 'Player movement works' } })
 check('checkpoint tool call', cp.isError === false)
@@ -49,6 +49,11 @@ const ctx = await client.callTool({ name: 'get_session_context', arguments: {} }
 const sc = ctx.structuredContent
 check('structured session context', sc?.session?.title === 'Interop session' && sc?.project?.stacks?.includes('phaser'), JSON.stringify(sc?.project?.stacks))
 check('checkpoint visible in context', sc?.recentCheckpoints?.[0]?.summary === 'Player movement works')
+
+const task = await client.callTool({ name: 'create_task', arguments: { title: 'Add enemy waves', priority: 'high' } })
+check('knowledge write through the SDK', task.isError === false && task.structuredContent?.created?.status === 'backlog')
+const index = await client.callTool({ name: 'get_context_index', arguments: {} })
+check('lazy context index lists the task', index.structuredContent?.openTasks?.[0]?.title === 'Add enemy waves')
 
 const bad = await client.callTool({ name: 'get_project', arguments: { project: 'not-in-this-workspace' } })
 check('unknown project is a tool error, not a crash', bad.isError === true)

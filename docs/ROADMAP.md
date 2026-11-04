@@ -44,8 +44,8 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | --- | --- | --- |
 | M10 | `nexus` CLI: `doctor`, `workspaces`, `projects`, `profiles`, `sessions`, `launch` (reuses core; `launch` is a session host) | 5 end-to-end tests of the real binary incl. killed-host reconciliation ✅ |
 | M11 | Session hosts + leases ✅ (ADR-0014); still open: reconciliation with `claude agents --json`, durable-session experiment (`--bg` + `attach`) | ADR update with measured behaviour |
-| M12 | MCP server v1 (7 workspace-scoped tools incl. `checkpoint`) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
-| M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): SessionStart/End, PreCompact, Stop | verify merge semantics on 2.1.x; hook handler tests |
+| M12 | MCP server v1 (workspace-scoped tools incl. `checkpoint`; 15 tools after M16/M19) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
+| M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): start/end, compaction recovery, activity counters, files, command categories, attention; policy-aware | merge semantics verified on 2.1.311; unit + CLI + desktop E2E + real-Claude hook test ✅ |
 | M14 | Profile diagnostics, allowlist clone, `ANTHROPIC_*` opt-in, settings validation | diagnostics fixture tests |
 | M15 | WSL shells; login-shell PATH resolution on macOS/Linux | per-platform CI job |
 
@@ -53,17 +53,17 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
-| M16 | Workspace knowledge files + FTS5 index + search UI | index rebuild test; search relevance fixtures |
-| M17 | Branch-aware notes and session checkpoints (MCP + hooks) | checkpoint round trip |
+| M16 | Workspace knowledge files (ADR-0013) + context hierarchy and lazy loading (ADR-0017): rules (global/workspace/stack/project, always-on with approval), decisions, notes, specs, workflows, skills catalog; FTS5 index with rebuild and health; MCP `get_context_index`/`search_knowledge`/`get_document`/`record_memory`; `nexus knowledge`; desktop Knowledge view | unit + CLI E2E (round trip, hierarchy, approval, cross-workspace) + SDK interop + desktop E2E ✅ |
+| M17 | Branch-aware notes and session checkpoints (MCP + hooks) — checkpoints ✅ (M12/M13); branch-aware notes ☐ | checkpoint round trip |
 | M18 | "Resume project" view: Git state + last sessions + checkpoints + open tasks + deterministic next step | Scenario H walkthrough |
 
 ## Phase 4 — Engineering productivity
 
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
-| M19 | Tasks as Markdown files + Kanban/list views; launch Claude from a task; MCP `list/get/update_task` | Scenario G walkthrough |
-| M20 | Effective-instructions inspector (managed/user/project CLAUDE.md, rules, append prompt) | fixture tests |
-| M21 | NEXUS Claude plugin (skills) via `--plugin-dir`; static workflows as skills + checkpoints | `claude plugin validate` in CI |
+| M19 | Tasks as Markdown files + Kanban board ✅; MCP `list_tasks`/`create_task`/`update_task` with optimistic concurrency ✅; `nexus tasks` ✅; launch Claude from a task ☐ | 🚧 Scenario G walkthrough |
+| M20 | Effective-instructions inspector (managed/user/project CLAUDE.md, rules, append prompt) — NEXUS rules and their delivery ✅ (`nexus knowledge rules`, `integrations.rules`); CLAUDE.md layers ☐ | fixture tests |
+| M21 | NEXUS Claude plugin (skills) via `--plugin-dir`; static workflows as skills + checkpoints — skills catalog in `get_context_index` ✅ | `claude plugin validate` in CI |
 | M22 | Project creation wizard + stack templates | template snapshot tests |
 
 ## Phase 5 — Advanced integration
@@ -93,6 +93,6 @@ These are deliberately open and must be closed before anything is published:
    installer/registry identity and updater identity, so it cannot change after release without a migration.
 2. **License** — none yet; no LICENSE file is added until the owner decides.
 3. **Code signing** — Windows Authenticode / macOS notarization certificates (Tauri updater key is separate).
-4. **Release builds must not honour WebView2 remote debugging** (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`), which the
-   development E2E tooling uses (threat T18).
+4. ~~Release builds must not honour WebView2 remote debugging~~ — done (ADR-0015, `e2e/t18-check.mjs`); remaining:
+   make sure no distributed build enables the `e2e-webview-debugging` feature (release CI check).
 5. Manual check with a real profile (`docs/MANUAL_CHECKS.md`) passed on the release candidate.

@@ -5,6 +5,7 @@ pub mod error;
 pub mod pty;
 pub mod shells;
 pub mod state;
+pub mod webview_guard;
 
 use std::sync::Arc;
 
@@ -54,6 +55,14 @@ fn spawn_heartbeat(ctx: Ctx) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_tracing();
+    if let Some(r) = webview_guard::report() {
+        if !r.removed.is_empty() {
+            tracing::warn!(removed = ?r.removed, "ignored webview override variables (production build)");
+        }
+        if r.mode != webview_guard::Mode::Production {
+            tracing::info!(mode = ?r.mode, "webview debugging overrides are honoured (not a production build)");
+        }
+    }
     let app = tauri::Builder::default()
         // Must be first: a second launch focuses the existing window instead of opening the same database.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -115,6 +124,12 @@ pub fn run() {
             commands::sessions::session_release,
             commands::sessions::session_rename,
             commands::sessions::session_set_archived,
+            commands::knowledge::knowledge_overview,
+            commands::knowledge::knowledge_read,
+            commands::knowledge::knowledge_search,
+            commands::knowledge::knowledge_create,
+            commands::knowledge::knowledge_update_task,
+            commands::knowledge::knowledge_approve,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the NEXUS application");

@@ -63,6 +63,15 @@ pub struct Session {
     pub host_id: Option<String>,
     /// JSON describing active integrations (MCP enabled/blocked), if recorded.
     pub integrations: Option<serde_json::Value>,
+    /// Activity reported by lifecycle hooks (ADR-0016). Counters only — no prompt text is stored.
+    pub turns: i64,
+    pub prompts: i64,
+    pub subagents: i64,
+    pub last_activity_at: Option<i64>,
+    /// Set while Claude waits for the user (Notification hook); cleared by the next activity.
+    pub attention: Option<String>,
+    pub end_reason: Option<String>,
+    pub transcript_path: Option<PathBuf>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,
     pub profile_id: Option<String>,
@@ -106,7 +115,8 @@ pub struct NewSession {
 
 const SELECT: &str = "SELECT id, kind, workspace_id, project_id, profile_id, claude_session_id, title, cwd, branch,
     work_profile, effort, model, program, pid, state, exit_code, error, resumed_from, started_at, ended_at,
-    archived_at, host, host_id, integrations FROM sessions";
+    archived_at, host, host_id, integrations, turns, prompts, subagents, last_activity_at, attention, end_reason,
+    transcript_path FROM sessions";
 
 fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
     let kind: String = r.get(1)?;
@@ -117,6 +127,13 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
         host: r.get(21)?,
         host_id: r.get(22)?,
         integrations: r.get::<_, Option<String>>(23)?.and_then(|j| serde_json::from_str(&j).ok()),
+        turns: r.get(24)?,
+        prompts: r.get(25)?,
+        subagents: r.get(26)?,
+        last_activity_at: r.get(27)?,
+        attention: r.get(28)?,
+        end_reason: r.get(29)?,
+        transcript_path: r.get::<_, Option<String>>(30)?.map(PathBuf::from),
         workspace_id: r.get(2)?,
         project_id: r.get(3)?,
         profile_id: r.get(4)?,

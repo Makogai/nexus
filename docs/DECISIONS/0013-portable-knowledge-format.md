@@ -1,7 +1,8 @@
 # ADR-0013 — Portable knowledge files: identity, schema, atomic writes, indexing, sync boundaries
 
-Status: Accepted (2026-11-04, owner-approved refinement of ADR-0005). Implementation: Phase 3 (memory,
-decisions) and Phase 4 (tasks).
+Status: Accepted (2026-11-04, owner-approved refinement of ADR-0005). Implemented 2026-11-04 in
+`nexus_core::knowledge` (M16, M19 core); see "Implementation notes" at the end. ADR-0017 adds the kinds `rule`,
+`spec` and `workflow` and the context hierarchy.
 
 ## Context
 ADR-0005 makes workspace files the source of truth for portable knowledge and SQLite a rebuildable index. The
@@ -89,3 +90,23 @@ by Claude defaults to `source: claude` and, for notes, `verification: unverified
 ## Consequences
 * Two-way editing (humans, Claude, Git) is safe by construction; conflicts surface instead of being lost.
 * The index must tolerate half-written external edits (invalid files are reported and retried on the next refresh).
+
+## Implementation notes (2026-11-04)
+* Module `nexus_core::knowledge`: `frontmatter` (strict YAML subset: scalars, flow/block lists of scalars,
+  comments; anchors, aliases, tags, nested maps, multi-line blocks and duplicate keys are rejected with a line
+  number), `store` (create/update/atomic write, frozen `nexus`/`id`/`kind`/`created`), `index` (SQLite + FTS5,
+  migration 0005), `service` (shared by desktop, CLI and MCP), `context` (ADR-0017), `skills`.
+* Kinds and folders: `rules/`, `tasks/`, `knowledge/decisions/`, `knowledge/notes/`, `knowledge/specs/`,
+  `workflows/`; `rule`/`spec`/`workflow` have `status: active | draft | archived` (optional), rules also
+  `applies: always | on-demand` and `stacks: [..]`. Scanning is limited to those folders (depth 6, 10,000 files
+  per root, hidden files and symlinks skipped).
+* The content hash is FNV-1a 64 over the file bytes (change detection and optimistic concurrency, not security);
+  approvals of always-on rules (ADR-0017) compare the same hash.
+* Secret check (`check_portable`): PEM headers and token prefixes (`sk-ant-`, `ghp_`, `github_pat_`, `xoxb-`,
+  `xoxp-`, `AKIA`) followed by a contiguous token, anywhere; absolute machine paths in frontmatter. Writes that
+  match are refused; existing files that match are reported invalid.
+* Writing a `local-only` record first ensures `.nexus-local/` is listed in the workspace `.gitignore`.
+* Recovery: `nexus knowledge reindex --rebuild` / desktop "Rebuild index" drops the workspace's index rows and
+  rebuilds them from the files; tested to recover the same documents.
+* Not yet implemented: manifest keys `sync` and `classification`, the pre-push secret scan (Phase 6, M29), and
+  `depends_on`/`decision` cross-reference validation.

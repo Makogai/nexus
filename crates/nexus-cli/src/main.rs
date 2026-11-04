@@ -1,6 +1,8 @@
 //! `nexus` — the NEXUS command-line interface. Every command is a thin layer over `nexus-core`; nothing here
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
+mod hook;
+mod knowledge;
 mod launch;
 mod mcp;
 mod out;
@@ -47,12 +49,25 @@ enum Command {
     Profiles(ProfileCmd),
     /// Sessions NEXUS started (desktop and `nexus launch`).
     Sessions(SessionsArgs),
+    /// Portable workspace knowledge: rules, decisions, notes, specs, workflows (Markdown files, indexed locally).
+    #[command(subcommand)]
+    Knowledge(knowledge::KnowledgeCmd),
+    /// Tasks of the active workspace (Markdown files under tasks/).
+    #[command(subcommand)]
+    Tasks(knowledge::TasksCmd),
     /// Start Claude Code in this terminal with a profile's own configuration.
     Launch(launch::LaunchArgs),
     /// NEXUS MCP server over stdio, bound to one NEXUS session (started by Claude from the session's --mcp-config).
     Mcp {
         #[arg(long)]
         session: String,
+    },
+    /// Lifecycle hook handler (started by Claude from the session's --settings). Always exits 0.
+    #[command(hide = true)]
+    Hook {
+        #[arg(long)]
+        session: String,
+        event: String,
     },
 }
 
@@ -172,8 +187,11 @@ fn main() -> ExitCode {
         Command::Projects(c) => cmd_projects(&ctx, c).map(|_| 0),
         Command::Profiles(c) => cmd_profiles(&ctx, c).map(|_| 0),
         Command::Sessions(a) => cmd_sessions(&ctx, a).map(|_| 0),
+        Command::Knowledge(c) => knowledge::cmd_knowledge(&ctx, c).map(|_| 0),
+        Command::Tasks(c) => knowledge::cmd_tasks(&ctx, c).map(|_| 0),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
+        Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),
     };
     match result {
         Ok(code) => ExitCode::from(u8::try_from(code.clamp(0, 255)).unwrap_or(1)),

@@ -11,10 +11,11 @@ use crate::error::{CoreError, Result};
 
 pub const SERVER_NAME: &str = "nexus";
 
-/// What happened to the NEXUS MCP integration for one session (stored with the session, shown in the UI).
+/// What happened to one NEXUS integration (MCP server, lifecycle hooks) for one session (stored with the session,
+/// shown in the UI).
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "state", rename_all = "kebab-case")]
-pub enum McpStatus {
+pub enum IntegrationStatus {
     Enabled { config: PathBuf },
     /// Organisation policy does not allow it; NEXUS omits the flag (Claude would otherwise refuse to start).
     Blocked { reason: String },
@@ -25,13 +26,17 @@ pub enum McpStatus {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Integrations {
-    pub mcp: McpStatus,
+    pub mcp: IntegrationStatus,
+    pub hooks: IntegrationStatus,
+    /// Always-on rules included in the system prompt (and those pending approval or over budget).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rules: Option<crate::knowledge::context::LaunchRules>,
 }
 
-impl McpStatus {
+impl IntegrationStatus {
     pub fn config_path(&self) -> Option<&Path> {
         match self {
-            McpStatus::Enabled { config } => Some(config),
+            IntegrationStatus::Enabled { config } => Some(config),
             _ => None,
         }
     }
@@ -68,12 +73,12 @@ pub fn config_json(nexus_exe: &Path, data_dir: &Path, nexus_session_id: &str) ->
 }
 
 /// Decide and, when allowed, write the session's MCP config.
-pub fn prepare(policy: &PolicySummary, nexus_exe: Option<&Path>, data_dir: &Path, nexus_session_id: &str) -> Result<McpStatus> {
+pub fn prepare(policy: &PolicySummary, nexus_exe: Option<&Path>, data_dir: &Path, nexus_session_id: &str) -> Result<IntegrationStatus> {
     if let Some(reason) = blocked_by(policy) {
-        return Ok(McpStatus::Blocked { reason: reason.into() });
+        return Ok(IntegrationStatus::Blocked { reason: reason.into() });
     }
     let Some(exe) = nexus_exe.filter(|e| e.is_file()) else {
-        return Ok(McpStatus::Unavailable {
+        return Ok(IntegrationStatus::Unavailable {
             reason: "the nexus command-line tool was not found next to NEXUS".into(),
         });
     };
@@ -86,7 +91,7 @@ pub fn prepare(policy: &PolicySummary, nexus_exe: Option<&Path>, data_dir: &Path
         source,
     })?;
     crate::workspace::write_atomic(&config, &body)?;
-    Ok(McpStatus::Enabled { config })
+    Ok(IntegrationStatus::Enabled { config })
 }
 
 /// The `nexus` CLI that ships next to the running executable (desktop) or is the running executable (CLI).
@@ -128,15 +133,15 @@ mod tests {
             disable_sideload_flags: true,
             ..Default::default()
         };
-        assert!(matches!(prepare(&policy, None, t.path(), SID).unwrap(), McpStatus::Blocked { reason } if reason.contains("disableSideloadFlags")));
+        assert!(matches!(prepare(&policy, None, t.path(), SID).unwrap(), IntegrationStatus::Blocked { reason } if reason.contains("disableSideloadFlags")));
         let mcp_only = PolicySummary {
             allow_managed_mcp_servers_only: true,
             ..Default::default()
         };
-        assert!(matches!(prepare(&mcp_only, None, t.path(), SID).unwrap(), McpStatus::Blocked { .. }));
+        assert!(matches!(prepare(&mcp_only, None, t.path(), SID).unwrap(), IntegrationStatus::Blocked { .. }));
         assert!(matches!(
             prepare(&PolicySummary::default(), Some(&t.path().join("missing")), t.path(), SID).unwrap(),
-            McpStatus::Unavailable { .. }
+            IntegrationStatus::Unavailable { .. }
         ));
         assert!(!t.path().join("sessions").exists(), "nothing written when not enabled");
     }

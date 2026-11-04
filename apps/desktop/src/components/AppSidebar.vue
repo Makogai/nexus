@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { FolderGit2, House, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
+import { BookOpen, FolderGit2, House, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
 import { useAppStore } from '../stores/app'
 import { useSessionStore } from '../stores/sessions'
 
@@ -12,6 +12,7 @@ const route = useRoute()
 const items = computed(() => [
   { to: '/', label: 'Home', icon: House, match: (p: string) => p === '/' },
   { to: '/projects', label: 'Projects', icon: FolderGit2, match: (p: string) => p.startsWith('/projects') },
+  { to: '/knowledge', label: 'Knowledge', icon: BookOpen, match: (p: string) => p.startsWith('/knowledge') },
   {
     to: '/sessions',
     label: 'Sessions',

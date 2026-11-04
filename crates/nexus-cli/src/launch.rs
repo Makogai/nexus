@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 use clap::Args;
 
 use nexus_core::claude::install;
+use nexus_core::claude::hooks;
+use nexus_core::knowledge::context::{self, LaunchRules as LaunchRulesOut};
 use nexus_core::claude::mcp::{self, Integrations};
 use nexus_core::claude::policy::{self, MachinePolicyLocations};
 use nexus_core::claude::launch::{self, LaunchRequest, Mode};
@@ -76,7 +78,13 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     let me = host::register(&conn, HostKind::Cli)?;
     let nexus_id = new_id();
     let policy = policy::evaluate(&plan.profile.effective_config_dir(&ctx.home), &MachinePolicyLocations::system());
-    let mcp_status = mcp::prepare(&policy, mcp::nexus_next_to_current_exe().as_deref(), &ctx.data_dir, &nexus_id)?;
+    let exe_self = mcp::nexus_next_to_current_exe();
+    let rules = launch_rules(&conn, &ctx.data_dir, plan.workspace_id.as_deref(), plan.project_id.as_deref())?;
+    let integrations = Integrations {
+        mcp: mcp::prepare(&policy, exe_self.as_deref(), &ctx.data_dir, &nexus_id)?,
+        hooks: hooks::prepare(&policy, exe_self.as_deref(), &ctx.data_dir, &nexus_id)?,
+        rules: Some(rules),
+    };
     let spec = launch::build(
         &LaunchRequest {
             profile: &plan.profile,
@@ -91,7 +99,9 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             nexus_session_id: &nexus_id,
             workspace_id: plan.workspace_id.as_deref(),
             project_id: plan.project_id.as_deref(),
-            mcp_config: mcp_status.config_path(),
+            mcp_config: integrations.mcp.config_path(),
+            settings: integrations.hooks.config_path(),
+            rules_prompt: integrations.rules.as_ref().and_then(|r| r.text.as_deref()),
         },
         &env::current(),
     )?;
@@ -116,16 +126,17 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             resumed_from: plan.resumed_from.clone(),
         },
     )?;
-    session::set_integrations(&conn, &session.id, &Integrations { mcp: mcp_status.clone() })?;
+    session::set_integrations(&conn, &session.id, &integrations)?;
     profile::touch_used(&conn, &plan.profile.id)?;
     if let Some(pid) = &plan.project_id {
         project::touch_opened(&conn, pid)?;
     }
     if !a.quiet {
-        let tools = match &mcp_status {
-            mcp::McpStatus::Enabled { .. } => "NEXUS tools on".to_string(),
-            mcp::McpStatus::Blocked { reason } | mcp::McpStatus::Unavailable { reason } => format!("NEXUS tools off ({reason})"),
+        let state = |label: &str, s: &mcp::IntegrationStatus| match s {
+            mcp::IntegrationStatus::Enabled { .. } => format!("{label} on"),
+            mcp::IntegrationStatus::Blocked { reason } | mcp::IntegrationStatus::Unavailable { reason } => format!("{label} off ({reason})"),
         };
+        let tools = format!("{} · {}", state("NEXUS tools", &integrations.mcp), state("hooks", &integrations.hooks));
         eprintln!(
             "nexus: {} Claude · profile {} · {} · {} · {tools} · session {}",
             if plan.mode == Mode::Resume { "resuming" } else { "launching" },
@@ -165,6 +176,16 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     session::mark_exited(&conn, &session.id, code)?;
     host::shutdown(&conn, &me.id)?;
     Ok(code.map(|c| c as i32).unwrap_or(1))
+}
+
+/// Always-on rules for the workspace/project of a launch (ADR-0017); empty without a workspace.
+fn launch_rules(conn: &Connection, data_dir: &Path, workspace_id: Option<&str>, project_id: Option<&str>) -> Result<LaunchRulesOut> {
+    let Some(ws) = workspace_id.and_then(|id| workspace::get(conn, id).ok()).filter(|w| w.available) else {
+        return Ok(LaunchRulesOut::default());
+    };
+    let project = project_id.and_then(|id| project::get(conn, id).ok());
+    let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
+    context::prepare_launch(conn, data_dir, &ws.id, &ws.root_path, project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice())))
 }
 
 /// Lease refresh on its own connection (a `Connection` is not shared across threads).

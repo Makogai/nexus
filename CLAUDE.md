@@ -11,8 +11,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cd apps/desktop && npm test && npm run typecheck && npx vite build
 cargo build -p nexus-cli                    # desktop sessions start `nexus mcp` from next to nexus-desktop.exe
 cd apps/desktop && npm run tauri dev        # use NEXUS_DATA_DIR=<empty dir> for an isolated database
-cd apps/desktop && npx tauri build --debug --no-bundle && node e2e/run-smoke.mjs   # real-app E2E (Windows)
+cd apps/desktop && npx tauri build --debug --no-bundle && node e2e/t18-check.mjs   # production build ignores CDP env
+cd apps/desktop && npx tauri build --debug --no-bundle --features e2e-webview-debugging && node e2e/run-smoke.mjs
 cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `nexus mcp`
+cd apps/desktop && node e2e/hooks-real-claude.mjs # real Claude runs NEXUS hooks (synthetic profile)
 ```
 
 ## Architecture rules
@@ -26,7 +28,11 @@ cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `n
 * Claude integration is session-scoped CLI flags only (ADR-0004). Never write into a Claude config dir NEXUS did
   not create.
 * Every process that owns sessions is a session host (ADR-0014): register, heartbeat, `host::shutdown` on exit.
-* MCP tools stay workspace-scoped, bounded and free of exec/file/network access (ADR-0009).
+* MCP tools stay workspace-scoped, bounded and free of exec/network/arbitrary-file access (ADR-0009); their only file
+  writes are knowledge records (task/note/decision) through `knowledge::service` (ADR-0017).
+* Knowledge files are authoritative; SQLite only indexes them (rebuildable). Writes go through `knowledge::store`
+  (validated, atomic, optimistic). Always-on workspace rules reach Claude only when their current hash is approved.
+* Hooks stay deterministic and cheap: no model calls, no prompt text or raw commands stored, always exit 0 (ADR-0016).
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
   older Tauri crates than the npm packages and `tauri build` fails its version check.
 
@@ -37,6 +43,8 @@ cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `n
 * Paths from the UI or from workspace files go through `paths::validate_user_path` / `paths::resolve_within`.
 * Git read calls go through `git.rs` (fsmonitor disabled, no prompts). Strip credentials from URLs.
 * Never log or display secrets: env values, auth payloads, policy values other than the allowlisted keys.
+* `webview_guard::harden` stays the first call in `main`; the `e2e-webview-debugging` feature is test-only (ADR-0015).
+* `unsafe` is denied workspace-wide; the only exception is the audited env removal in `webview_guard`.
 * Tests use temp dirs and `fake-claude`; never run tests against real Claude profiles or real repositories.
 
 ## Working style

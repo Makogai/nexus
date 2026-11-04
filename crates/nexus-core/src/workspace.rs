@@ -123,7 +123,14 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         new_id()
     ));
-    std::fs::write(&tmp, bytes).map_err(|e| CoreError::io("cannot write", &tmp, e))?;
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp).map_err(|e| CoreError::io("cannot write", &tmp, e))?;
+        // Durable before visible: data reaches the disk before the rename publishes it.
+        f.write_all(bytes)
+            .and_then(|_| f.sync_all())
+            .map_err(|e| CoreError::io("cannot write", &tmp, e))?;
+    }
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         CoreError::io("cannot replace", path, e)

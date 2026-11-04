@@ -33,7 +33,7 @@ flowchart TB
   subgraph CLI["crates/nexus-cli — `nexus` binary"]
     CLIC["CLI commands<br/>doctor · workspaces · projects · profiles · sessions · launch"]
     MCP["`nexus mcp`<br/>stdio MCP server"]
-    HOOK["`nexus hook <event>`<br/>exec-form hook handler (planned)"]
+    HOOK["`nexus hook <event>`<br/>exec-form hook handler"]
   end
 
   CMD --> Core
@@ -89,7 +89,8 @@ flowchart LR
 | Claude settings, plugins, skills, credentials, transcripts | Claude config dir of the profile | Read-only inspection; never edits external profiles (ADR-0004) |
 | Organization policy | Managed settings (machine) / server-managed settings (account) | Detected, displayed, obeyed, never overridden |
 | Workspace identity + portable project registrations | `nexus-workspace.json` in the workspace dir | Read/write (atomic) |
-| Portable knowledge: tasks, decisions, durable memory | Markdown/JSON files in the workspace dir (Phase 3–4) | Authored by NEXUS + humans; SQLite FTS index is rebuildable |
+| Portable knowledge: rules, tasks, decisions, notes, specs, workflows | Markdown files with strict frontmatter in the workspace dir; `.nexus-local/` for local-only; global documents in `<data dir>/global/` (ADR-0013/0017) | Authored by humans, NEXUS and (tasks/notes/decisions) Claude via MCP; SQLite FTS index is rebuildable |
+| Always-on rule approvals (content hash per file) | SQLite | Authoritative, per machine (threat T19) |
 | Machine-local bindings: project → absolute path on *this* machine | SQLite | Authoritative |
 | Claude profile registrations (config dir, executable, defaults) | SQLite | Authoritative (profiles are machine-specific) |
 | Session records, process records, usage samples, app settings | SQLite | Authoritative |
@@ -168,15 +169,21 @@ on this machine; see `docs/RESEARCH.md`).
 <data dir>                          Windows: %LOCALAPPDATA%\NEXUS   macOS: ~/Library/Application Support/NEXUS
 ├── nexus.db (+ -wal, -shm)         Linux: $XDG_DATA_HOME/NEXUS     override: NEXUS_DATA_DIR
 ├── logs/                           (rotating, secrets never logged)
-└── sessions/<nexus-session-id>/    per-session generated artifacts (Phase 2: mcp.json, settings.json)
+├── global/                         global knowledge for every workspace on this machine (constitutions)
+│   └── rules/ workflows/ knowledge/
+└── sessions/<nexus-session-id>/    per-session generated artifacts (mcp.json, settings.json)
 
 <workspace dir>                     chosen by the user, optionally a Git repo
 ├── nexus-workspace.json            schema_version, id, name, projects[] (portable fields only)
 ├── README.md
 ├── .gitignore                      ignores repos/ so project clones are never absorbed
 ├── repos/                          default location for cloned project repos (independent Git repos)
-├── knowledge/                      Phase 3: decisions, project notes, durable memory (Markdown)
-└── tasks/                          Phase 4: one Markdown file per task (front-matter + body)
+├── rules/                          rules: workspace, stack (`stacks:`) and project (`project:`) scoped
+├── workflows/                      workflow documents
+├── knowledge/                      decisions/, notes/ (durable memory), specs/
+├── tasks/                          one Markdown file per task (frontmatter + body); file name = UUIDv7 id
+├── skills/<name>/SKILL.md          workspace skills (native Claude format; catalogued, not executed)
+└── .nexus-local/                   same layout, privacy: local-only, git-ignored, never synced
 ```
 
 ## 7. SQLite schema (v1)
@@ -189,12 +196,17 @@ claude_profiles(id PK, name UNIQUE, description, color, config_dir NULL /*NULL =
 projects(id PK /*same id as manifest*/, workspace_id FK, name, local_path, remote_url, stack_json,
          created_at, last_opened_at)
 session_hosts(id PK, kind CHECK(desktop|cli|service), pid, version, started_at, heartbeat_at, stopped_at)  -- v2
-session_events(id PK, session_id FK, kind, summary, source, created_at)                             -- v3
+session_events(id PK, session_id FK, kind, summary, data JSON, source, created_at)                  -- v3, rebuilt v4
+-- v4 session counters: turns, prompts, subagents, last_activity_at, attention, end_reason, transcript_path
 sessions(id PK, kind CHECK(claude|shell), host, host_id FK, integrations JSON, workspace_id, project_id NULL, profile_id NULL,
          claude_session_id NULL, title, cwd, branch, work_profile, effort, model, program, pid,
          state CHECK(starting|running|exited|interrupted|failed), exit_code, error,
          resumed_from NULL, started_at, ended_at, archived_at)
 app_settings(key PK, value_json)
+knowledge_items(path PK, workspace_id NULL /*NULL = global*/, id, kind, title, status, project_id, priority,
+                stacks, applies, privacy, updated, content_hash, size, mtime_ms, valid, error, conflict)      -- v5
+knowledge_fts(path, title, body)  /* FTS5 */                                                          -- v5
+knowledge_approvals(path PK, content_hash, approved_at)                                               -- v5
 ```
 
 Timestamps are Unix milliseconds (INTEGER). Foreign keys enforced (`PRAGMA foreign_keys=ON`).
@@ -216,6 +228,7 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Work profiles | `work_profile_list` |
 | Sessions | `session_list`, `session_start_claude`, `session_resume`, `session_open_shell`, `session_attach`, `session_write`, `session_resize`, `session_stop`, `session_rename`, `session_archive` |
 | Shell | `shell_list` |
+| Knowledge | `knowledge_overview` (refresh or rebuild + health), `knowledge_read`, `knowledge_search`, `knowledge_create`, `knowledge_update_task` (expected hash), `knowledge_approve` |
 
 Tauri capabilities grant only `core:default`, `dialog:allow-open` (folder picker) and
 `opener:allow-open-path`/`allow-reveal-item-in-dir`. There is **no** generic filesystem or shell plugin:
@@ -228,11 +241,13 @@ every filesystem/process operation goes through a purpose-built, validated comma
 | Profile isolation | `CLAUDE_CONFIG_DIR` in child env | 1 | — |
 | Session identity | NEXUS-assigned `--session-id`, `--resume` | 1 | — |
 | Engineering rigor | `--append-system-prompt` (frozen per conversation by the system-prompt snapshot) | 1 | — |
+| Always-on rules | approved always-on rules appended after the work profile, ≤ 1,500 chars (ADR-0017) | 3 ✅ | — |
+| Lazy knowledge | MCP `get_context_index`, `search_knowledge`, `get_document`, task and memory tools; SessionStart adds a one-line count pointer | 3 ✅ | MCP blocked by policy → only always-on rules reach Claude |
 | Native effort/model | `--effort`, `--model` | 1 | — |
 | Live session list | `claude agents --json` reconciliation | 2 | older CLI |
 | Auth status | `claude auth status --json` (per profile env) | 1 | CLI absent |
 | NEXUS tools | `--mcp-config <generated file>` → `nexus mcp --session <id>` (implemented) | 2 ✅ | `disableSideloadFlags`, `allowManagedMcpServersOnly`, `strictPluginOnlyCustomization` |
-| Lifecycle capture | `--settings <generated file>` exec-form hooks → `nexus hook` | 2 | `allowManagedHooksOnly`, `disableAllHooks` |
+| Lifecycle capture | `--settings <generated file>` exec-form hooks → `nexus hook` (implemented, additive to user hooks — verified) | 2 ✅ | `allowManagedHooksOnly`, `disableAllHooks` |
 | Skills / AI Kits | `--plugin-dir <kit>` per session (no copying into config dirs) | 4–5 | `disableSideloadFlags`, `strictPluginOnlyCustomization` |
 | Usage | OTel (personal profiles only, opt-in), transcript compat layer (labelled) | 5 | org-managed telemetry, format drift |
 
