@@ -81,6 +81,23 @@ Recorded 2026-11-04. Re-verify when Claude Code's minor version changes signific
   * managed `CLAUDE.md` (`C:\Program Files\ClaudeCode\CLAUDE.md`) and managed `claudeMd` were not probed (need
     admin rights); taken from the docs. `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` disables all memory (docs).
 
+* Plugins (verified 2026-11-04 on 2.1.311, synthetic profiles):
+  * `claude -p --verbose --output-format stream-json` emits a `system/init` event *before authentication* with
+    `skills`, `agents`, `slash_commands`, `plugins` (`{name, path, source, version}`; `--plugin-dir` plugins have source
+    `<name>@inline`, built-ins `path: "builtin"`) and `mcp_servers` (`{name, status, source}`);
+  * plugin content is namespaced: skills/agents/commands `plugin:name`, MCP servers `plugin:<plugin>:<server>`; user
+    content is not namespaced;
+  * a folder with only `skills/<name>/SKILL.md` loads as a plugin named after the folder;
+  * two `--plugin-dir` plugins with the same name both load and share one namespace;
+  * `claude plugin validate <dir>` works signed-out: exit 0 when the manifest is valid (prints marketplace submission
+    advice), exit 1 on errors;
+  * `claude plugin marketplace add <dir>` + `claude plugin install p@m` write `settings.json` (`extraKnownMarketplaces`,
+    `enabledPlugins`), `plugins/known_marketplaces.json`, `plugins/installed_plugins.json` (`{"version":2,"plugins":
+    {"p@m":[{scope, installPath, version, …}]}}`) and a copy under `plugins/cache/<m>/<p>/<version>/`;
+  * `claude plugin list --json` includes MCP server **arguments** (not used by NEXUS diagnostics);
+  * `claude mcp add --scope user` writes `.claude.json` → `mcpServers`; `--scope local` writes
+    `.claude.json` → `projects[<path>].mcpServers`; env values and headers are stored there in clear text.
+
 ## Stack versions selected (2026-11-04)
 
 Tauri 2.x (CLI 2.12.4; 3.0 is alpha), Vue 3.5, Vite 8, vitest 5, Pinia 4, vue-router 5, TypeScript 5.9,

@@ -41,6 +41,8 @@ pub struct LaunchRequest<'a> {
     pub settings: Option<&'a Path>,
     /// NEXUS context (approved always-on rules, task brief — `claude::prepare`), appended after the work profile.
     pub context_prompt: Option<&'a str>,
+    /// AI Kit overlays for this profile (`--plugin-dir`, ADR-0024).
+    pub plugin_dirs: &'a [PathBuf],
 }
 
 /// Everything needed to spawn the process. `env` is the *complete* environment (the spawner clears the
@@ -138,6 +140,12 @@ pub fn build(req: &LaunchRequest<'_>, base_env: &[(String, String)]) -> Result<L
         }
         args.extend(["--settings".to_string(), settings.display().to_string()]);
     }
+    for dir in req.plugin_dirs {
+        if !dir.is_absolute() {
+            return Err(CoreError::invalid("plugin folder must be absolute"));
+        }
+        args.extend(["--plugin-dir".to_string(), dir.display().to_string()]);
+    }
 
     let mut extra = vec![
         ("NEXUS_SESSION_ID".to_string(), req.nexus_session_id.to_string(), Reason::NexusScope),
@@ -220,6 +228,7 @@ mod tests {
             mcp_config: None,
             settings: None,
             context_prompt: None,
+            plugin_dirs: &[],
         }
     }
 

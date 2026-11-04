@@ -63,6 +63,8 @@ pub struct Prepared {
     pub prompt: Option<String>,
     /// The session's `--settings` file (hooks and/or isolation excludes), if any.
     pub settings: Option<std::path::PathBuf>,
+    /// AI Kit overlays to pass as `--plugin-dir` (profile-specific, ADR-0024).
+    pub plugin_dirs: Vec<std::path::PathBuf>,
     /// Name to give Claude (`--name`) instead of the host's title: task sessions get a neutral `NEXUS task <id>` so the
     /// (untrusted) task title is never handed to Claude as session metadata (T22).
     pub claude_name: Option<String>,
@@ -171,6 +173,7 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
     let excludes = isolation_excludes(r.home, r.profile, r.cwd);
     let (hooks, settings) = hooks::prepare_session_settings(&pol, r.nexus_exe, r.data_dir, r.nexus_session_id, &excludes)?;
     let isolation = (!excludes.is_empty()).then(|| Isolation { claude_md_excludes: excludes.clone() });
+    let (plugin_dirs, kit_launches) = crate::kits::session_plugin_dirs(r.conn, r.data_dir, &r.profile.id, &pol)?;
     let ws = r.workspace_id.and_then(|id| workspace::get(r.conn, id).ok()).filter(|w| w.available);
     let project = r.project_id.and_then(|id| project::get(r.conn, id).ok());
     let mut parts: Vec<String> = Vec::new();
@@ -214,9 +217,10 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
         None => {}
     }
     Ok(Prepared {
-        integrations: Integrations { mcp, hooks, rules, task, isolation },
+        integrations: Integrations { mcp, hooks, rules, task, isolation, kits: kit_launches },
         prompt: (!parts.is_empty()).then(|| parts.join("\n\n")),
         settings,
+        plugin_dirs,
         claude_name,
         policy: pol,
     })

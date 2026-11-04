@@ -100,6 +100,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
         start_task: plan.mode == Mode::New,
     })?;
     let settings_path = prepared.settings.clone();
+    let plugin_dirs = prepared.plugin_dirs.clone();
     let claude_name = prepared.claude_name.clone().unwrap_or_else(|| plan.title.clone());
     let integrations = prepared.integrations;
     let spec = launch::build(
@@ -119,6 +120,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             mcp_config: integrations.mcp.config_path(),
             settings: settings_path.as_deref(),
             context_prompt: prepared.prompt.as_deref(),
+            plugin_dirs: &plugin_dirs,
         },
         &base_env,
     )?;
@@ -160,6 +162,12 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
         }
         if integrations.isolation.is_some() {
             tools.push_str(" · default-profile instructions excluded");
+        }
+        for k in &integrations.kits {
+            match &k.blocked {
+                None => tools.push_str(&format!(" · kit {} ({} skill(s))", k.name, k.skills.len())),
+                Some(why) => tools.push_str(&format!(" · kit {} off ({why})", k.name)),
+            }
         }
         eprintln!(
             "nexus: {} Claude · profile {} · {} · {} · {tools} · session {}",

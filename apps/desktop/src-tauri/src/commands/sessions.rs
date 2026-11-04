@@ -246,6 +246,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
             _ => title,
         };
         let settings_path = prepared.settings.clone();
+        let plugin_dirs = prepared.plugin_dirs.clone();
         let claude_name = prepared.claude_name.clone();
         let integrations = prepared.integrations;
         let spec = launch::build(
@@ -265,6 +266,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 mcp_config: integrations.mcp.config_path(),
                 settings: settings_path.as_deref(),
                 context_prompt: prepared.prompt.as_deref(),
+                plugin_dirs: &plugin_dirs,
             },
             &env::current(),
         )?;
@@ -354,6 +356,7 @@ pub async fn session_resume(
             false,
         )?;
         let settings_path = prepared.settings.clone();
+        let plugin_dirs = prepared.plugin_dirs.clone();
         let integrations = prepared.integrations;
         let spec = launch::build(
             &LaunchRequest {
@@ -372,6 +375,7 @@ pub async fn session_resume(
                 mcp_config: integrations.mcp.config_path(),
                 settings: settings_path.as_deref(),
                 context_prompt: prepared.prompt.as_deref(),
+                plugin_dirs: &plugin_dirs,
             },
             &env::current(),
         )?;

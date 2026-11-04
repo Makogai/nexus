@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { BookOpen, FolderGit2, House, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
+import { BookOpen, FolderGit2, House, Package, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
 import { useAppStore } from '../stores/app'
 import { useSessionStore } from '../stores/sessions'
 
@@ -21,6 +21,7 @@ const items = computed(() => [
     badge: sessions.running.length || undefined,
   },
   { to: '/profiles', label: 'Claude profiles', icon: UserCog, match: (p: string) => p.startsWith('/profiles') },
+  { to: '/kits', label: 'AI Kits', icon: Package, match: (p: string) => p.startsWith('/kits') },
 ])
 </script>
 

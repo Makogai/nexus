@@ -946,3 +946,135 @@ fn session_end_proposes_memories_and_only_approval_makes_knowledge() {
     assert!(e.json(&["knowledge", "proposals", "list"]).as_array().unwrap().is_empty(), "rejected and approved ones are not proposed again");
     assert_eq!(e.json(&["knowledge", "list", "--kind", "decision"]).as_array().unwrap().len(), 1);
 }
+
+// --- Profile diagnostics (M14, ADR-0023) and AI Kits (M21, ADR-0024) --------------------------------------------
+
+fn snapshot(dir: &Path) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                out.push((p.strip_prefix(dir).unwrap().to_string_lossy().into_owned(), std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0)));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn profile_diagnostics_explain_the_configuration_without_secrets() {
+    let e = Env::new();
+    e.setup();
+    let w = |rel: &str, text: &str| {
+        let p = e.cfg.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    w("settings.json", r#"{"model":"claude-opus-5-5","env":{"ANTHROPIC_AUTH_TOKEN":"SECRET-A"},"apiKeyHelper":"vault read SECRET-B",
+        "hooks":{"Stop":[{"hooks":[{"type":"command","command":"notify --token SECRET-C"}]}]}}"#);
+    w(".claude.json", r#"{"primaryApiKey":"SECRET-D","mcpServers":{"db":{"command":"uvx","args":["--password","SECRET-E"]}}}"#);
+    w(".credentials.json", r#"{"claudeAiOauth":{"accessToken":"SECRET-F"}}"#);
+    w("skills/deploy/SKILL.md", "---\nname: deploy\ndescription: Deploy the app\n---\n");
+    w("agents/reviewer.md", "---\nname: reviewer\ndescription: Reviews diffs\n---\n");
+    let before = snapshot(&e.cfg);
+    let d = e.json(&["profiles", "diagnose", "Fake"]);
+    assert_eq!(d["version"], "9.9.9", "the executable's own version");
+    assert_eq!(d["skills"][0]["name"], "deploy");
+    assert_eq!(d["agents"][0]["name"], "reviewer");
+    assert_eq!(d["mcpServers"][0]["name"], "db");
+    assert_eq!(d["mcpServers"][0]["target"], "uvx");
+    assert_eq!(d["hooks"][0]["programs"][0], "notify");
+    assert_eq!(d["settings"]["sensitiveEnvNames"][0], "ANTHROPIC_AUTH_TOKEN");
+    assert!(!d.to_string().contains("SECRET"), "{d:#}");
+    let human = e.ok(&["profiles", "diagnose", "Fake"]);
+    assert!(human.contains("Skills (1)") && human.contains("Context at every session start") && !human.contains("SECRET"), "{human}");
+    assert_eq!(snapshot(&e.cfg), before, "diagnostics never write into the profile");
+}
+
+fn write_kit(dir: &Path, skills: usize) {
+    let w = |rel: &str, text: &str| {
+        let p = dir.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    w(".claude-plugin/plugin.json", r#"{"name":"probe-kit","version":"1.0.0","description":"Probe kit"}"#);
+    for i in 0..skills {
+        w(&format!("skills/s{i}/SKILL.md"), &format!("---\nname: s{i}\ndescription: Skill number {i} of the probe kit\n---\nBody {i}\n"));
+    }
+    w("hooks/hooks.json", r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"node start.js"}]}]}}"#);
+    w(".mcp.json", r#"{"mcpServers":{"db":{"command":"uvx"}}}"#);
+}
+
+fn plugin_dirs(report: &Value) -> Vec<PathBuf> {
+    let args: Vec<String> = serde_json::from_value(report["args"].clone()).unwrap();
+    args.windows(2).filter(|w| w[0] == "--plugin-dir").map(|w| PathBuf::from(&w[1])).collect()
+}
+
+#[test]
+fn kits_reach_only_the_profiles_they_are_enabled_for() {
+    let e = Env::new();
+    e.setup();
+    let other_cfg = e.data.parent().unwrap().join("cfg-other");
+    e.ok(&["profiles", "add", "--name", "Other", "--create", "--config-dir", other_cfg.to_str().unwrap(), "--executable", fake_claude().to_str().unwrap()]);
+    let kit = e.data.parent().unwrap().join("probe-kit");
+    write_kit(&kit, 12);
+    let cfg_before = (snapshot(&e.cfg), snapshot(&other_cfg));
+
+    let added = e.json(&["kits", "add", kit.to_str().unwrap()]);
+    assert_eq!((added["status"].as_str(), added["inventory"]["skills"].as_array().unwrap().len()), (Some("needs-review"), 12));
+    let enabled = e.json(&["kits", "enable", "probe-kit", "-p", "Fake", "--skills", "s3"]);
+    assert_eq!(enabled["skills"][0], "s3");
+    assert_eq!((enabled["hooks"].as_bool(), enabled["mcp"].as_bool()), (Some(false), Some(false)), "code-running parts are opt-in");
+
+    // Not approved yet → no session gets it.
+    let (report, session) = launch_report(&e, &["--profile", "Fake"], "kit-unapproved.json");
+    assert!(plugin_dirs(&report).is_empty());
+    assert!(session["integrations"]["kits"][0]["blocked"].as_str().unwrap().contains("not been reviewed"));
+
+    e.ok(&["kits", "approve", "probe-kit"]);
+    let (report, session) = launch_report(&e, &["--profile", "Fake"], "kit-fake.json");
+    let dirs = plugin_dirs(&report);
+    assert_eq!(dirs.len(), 1, "{report:#}");
+    let names: Vec<String> = std::fs::read_dir(dirs[0].join("skills")).unwrap().flatten().map(|d| d.file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["s3"], "only the selected skill is loaded");
+    assert!(!dirs[0].join("hooks").exists() && !dirs[0].join(".mcp.json").exists());
+    assert_eq!(session["integrations"]["kits"][0]["skills"][0], "s3");
+    let (report, _) = launch_report(&e, &["--profile", "Other"], "kit-other.json");
+    assert!(plugin_dirs(&report).is_empty(), "the other profile never gets the kit");
+
+    let d = e.json(&["profiles", "diagnose", "Fake"]);
+    assert!(d["skills"].as_array().unwrap().iter().any(|s| s["name"] == "probe-kit:s3" && s["source"] == "kit"));
+
+    // A changed kit is withdrawn until it is reviewed again.
+    std::fs::write(kit.join("skills/s3/SKILL.md"), "---\nname: s3\ndescription: changed\n---\nnew body\n").unwrap();
+    let (report, _) = launch_report(&e, &["--profile", "Fake"], "kit-changed.json");
+    assert!(plugin_dirs(&report).is_empty());
+    assert!(e.ok(&["kits", "list"]).contains("CHANGED"));
+    assert_eq!((snapshot(&e.cfg), snapshot(&other_cfg)), cfg_before, "no profile config dir was touched");
+}
+
+#[test]
+fn git_kits_are_cloned_by_nexus_and_updates_need_a_new_review() {
+    let e = Env::new();
+    e.setup();
+    let repo = e.data.parent().unwrap().join("kit-repo");
+    write_kit(&repo, 2);
+    let git = |args: &[&str]| assert!(Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@example.invalid"]).args(args).current_dir(&repo).status().unwrap().success());
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "v1"]);
+    let url = format!("file:///{}", repo.to_string_lossy().replace('\\', "/").trim_start_matches('/'));
+    let k = e.json(&["kits", "add", "--git", &url]);
+    assert_eq!((k["kit"]["sourceKind"].as_str().or(k["sourceKind"].as_str()), k["inventory"]["skills"].as_array().unwrap().len()), (Some("git"), 2));
+    e.ok(&["kits", "approve", "probe-kit"]);
+    std::fs::write(repo.join("skills/s0/SKILL.md"), "---\nname: s0\ndescription: v2\n---\n").unwrap();
+    git(&["commit", "-q", "-am", "v2"]);
+    let updated = e.json(&["kits", "update", "probe-kit"]);
+    assert_eq!(updated["status"], "changed", "{updated:#}");
+    assert_eq!(e.run(&["kits", "add", "--git", "ext::sh -c id"]).status.code(), Some(1), "command-running transports are refused");
+}

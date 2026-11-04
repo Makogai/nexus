@@ -137,6 +137,15 @@ pub fn run() {
             commands::knowledge::knowledge_proposals,
             commands::knowledge::knowledge_proposal_approve,
             commands::knowledge::knowledge_proposal_reject,
+            commands::kits::profile_diagnostics,
+            commands::kits::kit_list,
+            commands::kits::kit_register,
+            commands::kits::kit_approve,
+            commands::kits::kit_update,
+            commands::kits::kit_remove,
+            commands::kits::kit_enable,
+            commands::kits::kit_disable,
+            commands::kits::kit_validate,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build the NEXUS application");
