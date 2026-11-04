@@ -24,6 +24,7 @@ pub mod resume;
 pub mod session;
 pub mod settings;
 pub mod workprofile;
+pub mod workflow;
 pub mod workspace;
 
 pub use error::{CoreError, Result};

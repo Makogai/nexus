@@ -70,3 +70,23 @@ profile or workspace; no prompt text, tool input or model output stored.
 * Sessions started outside NEXUS produce no notifications (no NEXUS hooks), by design.
 * Permission prompts for tools outside the `PostToolUse` matcher resolve at the next turn end or prompt.
 * Toast clicks need NEXUS running; after a restart old toasts in the Action Center do nothing.
+
+## Amendment — pre-release review (2026-11-04, workflow-engine stage)
+* **Sender identity.** NEXUS builds its toasts itself (WinRT, no wrapper crate) and registers its own sender:
+  `HKCU\Software\Classes\AppUserModelId\dev.nexus.desktop` "NEXUS" (installed builds, at start) or
+  `….dev` "NEXUS (development)" (builds under `target\`, on their first notification). No "Windows PowerShell"
+  attribution any more. Verified on Windows 11 with an opt-in self-test (`toast_selftest`, temporary sender, no
+  popup): Windows accepts the toast and files it under NEXUS's sender; `Setting()` is "Element not found" until the
+  first toast and Enabled after it (so that error is not read as "notifications off"); withdrawal works. The NSIS
+  uninstaller removes NEXUS's keys (`windows/hooks.nsh`).
+* **Clicks.** In-process activation while the toast object lives (kept per notification); installed builds also
+  register `nexus://notification/<id>` so a click from the Action Center works after a restart: Windows starts NEXUS
+  with the URI, the single-instance plugin hands it to the running NEXUS (or the new one takes it at start). The
+  handler accepts only a notification UUID and only focuses NEXUS and opens that notification's target (T36).
+  E2E: a second start with the URI opens the right session.
+* **Withdrawal.** Notifications read, dismissed or resolved in NEXUS are removed from the Action Center; stale ones
+  of an earlier run are cleared at start.
+* **Lock screen.** Desktop text follows a content policy (`lockScreen`): *details, but generic while the workstation
+  is locked* (default; best-effort detection: the lock screen's `LogonUI.exe` is running), *always generic* (never
+  project, session, task, tool or file names), or *always details*. In-app notifications keep the details. E2E: the
+  generic text names nothing while the in-app entry keeps the details. Windows' own lock-screen settings still apply.

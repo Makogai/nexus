@@ -3,7 +3,7 @@
 
 use tauri::State;
 
-use nexus_core::knowledge::constitution::{self, Effective, History, NewConstitution, RuleHit, Structure, Summary, Target, View};
+use nexus_core::knowledge::constitution::{self, Compliance, Effective, History, NewConstitution, RuleHit, Structure, Summary, Target, View};
 use nexus_core::{project, workspace};
 
 use crate::error::{IpcError, IpcResult, blocking};
@@ -72,6 +72,15 @@ pub async fn constitution_save_raw(ctx: State<'_, Ctx>, workspace_id: String, id
     .await
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveView {
+    #[serde(flatten)]
+    pub effective: Effective,
+    /// Per rule: instructed only, or the linked gate's latest result for the project (ADR-0027/0029).
+    pub compliance: Vec<Compliance>,
+}
+
 /// Effective rules for a project (and task); `include_pending` previews unapproved versions.
 #[tauri::command]
 pub async fn constitution_effective(
@@ -80,7 +89,7 @@ pub async fn constitution_effective(
     project_id: Option<String>,
     task_id: Option<String>,
     include_pending: Option<bool>,
-) -> IpcResult<Effective> {
+) -> IpcResult<EffectiveView> {
     let ctx = ctx.inner().clone();
     blocking(move || {
         let ws = available(&ctx, &workspace_id)?;
@@ -91,7 +100,9 @@ pub async fn constitution_effective(
         };
         let stacks = p.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
         let t = Target { project: p.as_ref().map(|p| (p.id.as_str(), stacks.as_slice())), task_id: task_id.as_deref(), include_pending: include_pending.unwrap_or(false) };
-        Ok(constitution::effective(&db, &ctx.data_dir, &ws, &t)?)
+        let effective = constitution::effective(&db, &ctx.data_dir, &ws, &t)?;
+        let compliance = constitution::compliance(&db, p.as_ref().map(|p| p.id.as_str()), &effective)?;
+        Ok(EffectiveView { effective, compliance })
     })
     .await
 }

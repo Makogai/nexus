@@ -65,7 +65,7 @@ pub fn notifications_availability(app: AppHandle, ctx: State<'_, Ctx>) -> Availa
 pub fn notifications_test(app: AppHandle, ctx: State<'_, Ctx>) -> IpcResult<()> {
     let sound = notify::prefs(&ctx.db())?.sound;
     let sample = Notification {
-        id: "test".into(),
+        id: nexus_core::new_id(),
         category: "info".into(),
         priority: "info".into(),
         source: "nexus".into(),
@@ -90,7 +90,13 @@ pub fn notifications_test(app: AppHandle, ctx: State<'_, Ctx>) -> IpcResult<()> 
         desktop_state: "sent".into(),
         desktop_reason: None,
     };
-    ctx.notifier.show(&app, &sample, sound).map_err(|e| IpcError::new("notification", e))
+    ctx.notifier.show(&app, &sample, &sample.title, &sample.body, sound).map_err(|e| IpcError::new("notification", e))
+}
+
+/// A click on a notification that started NEXUS (`nexus://notification/<id>`): the UI asks once after it loaded.
+#[tauri::command]
+pub fn notifications_take_activation(ctx: State<'_, Ctx>) -> Option<String> {
+    ctx.attention.take_activation()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -147,7 +153,13 @@ pub async fn notification_target(ctx: State<'_, Ctx>, id: String) -> IpcResult<T
 /// E2E builds with the recording notifier only: what would have been shown on the desktop.
 #[tauri::command]
 pub fn e2e_notifications_recorded(ctx: State<'_, Ctx>) -> IpcResult<Vec<Notification>> {
-    ctx.notifier.recorded().ok_or_else(|| IpcError::invalid("not available in this build"))
+    ctx.notifier.recorded().map(|r| r.0).ok_or_else(|| IpcError::invalid("not available in this build"))
+}
+
+/// E2E builds with the recording notifier only: notifications withdrawn from the OS notification center.
+#[tauri::command]
+pub fn e2e_notifications_withdrawn(ctx: State<'_, Ctx>) -> IpcResult<Vec<String>> {
+    ctx.notifier.recorded().map(|r| r.1).ok_or_else(|| IpcError::invalid("not available in this build"))
 }
 
 /// E2E builds with the recording notifier only: the focus the delivery decision sees (OS window focus).

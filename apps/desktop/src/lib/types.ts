@@ -266,6 +266,7 @@ export type NotificationCategory =
   | 'session-finished'
   | 'session-interrupted'
   | 'workflow-failed'
+  | 'workflow-completed'
   | 'process-issue'
   | 'review-required'
   | 'info'
@@ -285,7 +286,7 @@ export interface AppNotification {
   sessionId: string | null
   taskId: string | null
   workflowId: string | null
-  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | null
+  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | 'workflow' | null
   targetId: string | null
   dedupeKey: string | null
   occurrences: number
@@ -328,6 +329,8 @@ export interface NotificationPrefs {
   categories: Record<NotificationCategory, CategoryPref>
   mutedWorkspaces: string[]
   mutedProfiles: string[]
+  /** What desktop notifications may say: details except while locked (default), always generic, always details. */
+  lockScreen: 'hide-details' | 'always-generic' | 'show-details'
 }
 
 export interface NotifierAvailability {
@@ -335,6 +338,8 @@ export interface NotifierAvailability {
   available: boolean
   reason: string | null
   clickToOpen: boolean
+  sender: string | null
+  clickAfterRestart: boolean
 }
 
 export interface NotificationTarget {
@@ -556,6 +561,8 @@ export interface CRule {
   enforcement: Enforcement
   enabled: boolean
   overrides: string | null
+  /** Quality gate that verifies compliance; without one the rule is instructed only. */
+  check?: string | null
   text: string
 }
 
@@ -631,6 +638,7 @@ export interface EffectiveRule {
   docTitle: string
   scope: ScopeLevel
   replaces: RuleRef | null
+  check?: string | null
 }
 
 export interface ConstitutionConflict {
@@ -647,7 +655,16 @@ export interface RuleDoc {
   applies: string
 }
 
+export interface RuleCompliance {
+  ruleId: string
+  enforcement: Enforcement
+  status: 'instructed' | 'passed' | 'failed' | 'not-run' | 'not-approved' | 'gate-missing' | 'no-project'
+  check: string | null
+  at: number | null
+}
+
 export interface EffectiveConstitution {
+  compliance?: RuleCompliance[]
   rules: EffectiveRule[]
   overridden: { rule: RuleRef; by: RuleRef; disabled: boolean }[]
   conflicts: ConstitutionConflict[]
@@ -1007,4 +1024,151 @@ export interface ContextReport {
     byTool: [string, number][]
     topDocuments: [string, number][]
   }
+}
+
+// --- Workflows (ADR-0029) ----------------------------------------------------------------------------------------
+
+export type StepKind = 'claude' | 'check' | 'review'
+export type Rigor = 'prototype' | 'balanced' | 'professional' | 'critical'
+
+export interface WorkflowStep {
+  id: string
+  title: string
+  kind: StepKind
+  needs: string[]
+  gates: string[]
+  rigor: Rigor | null
+  text: string
+  criteria: string[]
+}
+
+export interface WorkflowDefinition {
+  preamble: string
+  steps: WorkflowStep[]
+}
+
+export interface WorkflowSummary {
+  id: string
+  title: string
+  category: string
+  rigor: Rigor
+  skills: string[]
+  steps: number
+  gates: string[]
+  approved: boolean
+  errors: number
+  status: string
+  relativePath: string
+  hash: string
+  projectId: string | null
+}
+
+export interface WorkflowView extends WorkflowSummary {
+  definition: WorkflowDefinition
+  problems: { severity: 'error' | 'warning'; message: string; step: string | null }[]
+  body: string
+}
+
+export interface WorkflowTemplate {
+  id: string
+  title: string
+  category: string
+  summary: string
+}
+
+export interface WorkflowRun {
+  id: string
+  workspaceId: string
+  projectId: string | null
+  workflowId: string
+  workflowTitle: string
+  workflowHash: string
+  taskId: string
+  goal: string
+  rigor: Rigor
+  profileId: string | null
+  skills: string[]
+  status: 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'
+  error: string | null
+  createdAt: number
+  updatedAt: number
+  endedAt: number | null
+}
+
+export interface GateResult {
+  id: string
+  projectId: string | null
+  runId: string | null
+  stepId: string | null
+  gateName: string
+  command: string
+  status: 'running' | 'passed' | 'failed' | 'timeout' | 'error' | 'interrupted' | 'cancelled'
+  exitCode: number | null
+  durationMs: number | null
+  outputTail: string
+  startedAt: number
+  endedAt: number | null
+  /** The gate version (approved command) that produced this result. */
+  gateVersion: number | null
+}
+
+export interface RunStep {
+  stepId: string
+  position: number
+  kind: StepKind
+  status: 'pending' | 'ready' | 'blocked' | 'verifying' | 'awaiting-review' | 'passed' | 'failed' | 'skipped' | 'cancelled'
+  verification: 'ai-reported' | 'verified' | 'human' | 'skipped' | null
+  attempts: number
+  maxAttempts: number
+  report: string | null
+  criteriaMet: number[]
+  lastFailure: string | null
+  updatedAt: number
+  /** 'gates' while reported work waits for its gates to be defined or approved. */
+  blockedOn: string | null
+  title: string
+  text: string
+  needs: string[]
+  gates: string[]
+  criteria: string[]
+  results: GateResult[]
+}
+
+export interface RunView extends WorkflowRun {
+  steps: RunStep[]
+  progress: { total: number; done: number; verified: number; aiReported: number; human: number; skipped: number }
+}
+
+export interface Gate {
+  id: string
+  projectId: string
+  name: string
+  title: string
+  program: string
+  args: string[]
+  timeoutSecs: number
+  updatedAt: number
+  /** Increments whenever program or arguments change. */
+  version: number
+  commandHash: string
+  /** The current command (this version) was authorised; only then does the gate run. */
+  approved: boolean
+  approvedAt: number | null
+}
+
+export interface GateInput {
+  name: string
+  title?: string
+  program: string
+  args: string[]
+  timeoutSecs?: number | null
+}
+
+export interface StartRunInput {
+  workflowId: string
+  projectId?: string | null
+  taskId?: string | null
+  goal: string
+  rigor?: Rigor | null
+  profileId?: string | null
 }

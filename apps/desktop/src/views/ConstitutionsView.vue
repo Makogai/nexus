@@ -42,6 +42,39 @@ const effective = ref<EffectiveConstitution | null>(null)
 const tasks = ref<KnowledgeItem[]>([])
 
 const wsId = computed(() => workspaces.active?.id ?? null)
+const verifying = ref(false)
+const complianceOf = (id: string) => effective.value?.compliance?.find((c) => c.ruleId === id) ?? null
+const linkedGates = computed(() => [...new Set((effective.value?.compliance ?? []).map((c) => c.check).filter((c): c is string => !!c))])
+function complianceLabel(id: string): string {
+  const c = complianceOf(id)
+  switch (c?.status ?? 'instructed') {
+    case 'passed':
+      return `Verified: ${c!.check} passed ${c!.at ? relativeTime(c!.at) : ''}`
+    case 'failed':
+      return `Failing: ${c!.check}`
+    case 'not-run':
+      return `Gate ${c!.check} not run yet`
+    case 'gate-missing':
+      return `Gate ${c!.check} not defined`
+    case 'not-approved':
+      return `Gate ${c!.check} not approved`
+    case 'no-project':
+      return `Gate ${c!.check} (choose a project)`
+    default:
+      return 'Instructed only'
+  }
+}
+function complianceTone(id: string) {
+  const s = complianceOf(id)?.status
+  return { 'badge-ok': s === 'passed', 'badge-error': s === 'failed', 'badge-warn': s === 'gate-missing' || s === 'not-run' || s === 'not-approved' }
+}
+async function verifyRules() {
+  if (!effProject.value) return
+  verifying.value = true
+  for (const g of linkedGates.value) await app.attempt(() => api.gateRun(effProject.value, g), `Gate ${g} could not run`)
+  verifying.value = false
+  await loadEffective()
+}
 const grouped = computed(() => SCOPE_ORDER.map((s) => ({ scope: s, docs: list.value.filter((d) => d.scope === s) })).filter((g) => g.docs.length))
 const pendingCount = computed(() => list.value.filter((d) => !d.approved).length)
 const projectName = (id: string | null) => projects.list.find((p) => p.id === id)?.name ?? null
@@ -309,7 +342,11 @@ loadList()
           <option v-for="t in tasks" :key="t.id ?? t.path" :value="t.id">{{ t.title }}</option>
         </select>
         <label class="checkbox"><input v-model="effPending" type="checkbox" /><span>Preview unapproved changes</span></label>
+        <button v-if="effProject && linkedGates.length" class="btn btn-sm" :disabled="verifying" data-verify-rules @click="verifyRules">{{ verifying ? 'Verifying…' : `Verify ${linkedGates.length} linked gate(s) now` }}</button>
       </div>
+      <p class="notice small" data-compliance-note>
+        <Info /> Applying is not guaranteeing: NEXUS gives Claude these rules as instructions; <strong>mandatory</strong> means no narrower scope can override them — not that Claude cannot break them. Only rules with a <em>Verified by gate</em> are checked, by NEXUS running that gate for the project. For hard limits, use Claude's own permission rules (organisation-managed) or the same gate in CI.
+      </p>
       <template v-if="effective">
         <div v-for="c in effective.conflicts" :key="c.message" class="notice notice-warn" data-conflict><TriangleAlert /> {{ c.message }}</div>
         <p v-if="effective.pending.length" class="notice">
@@ -322,6 +359,7 @@ loadList()
               <strong>{{ r.title }}</strong>
               <span class="badge" :class="{ 'badge-error': r.enforcement === 'mandatory', 'badge-live': r.enforcement === 'guideline' }">{{ ENFORCEMENT_LABELS[r.enforcement] }}</span>
               <span class="faint small">{{ SCOPE_LABELS[r.scope] }} · {{ r.docTitle }}<template v-if="r.article"> › {{ r.article }}</template></span>
+              <span class="badge" :class="complianceTone(r.id)" :data-compliance="complianceOf(r.id)?.status ?? 'instructed'">{{ complianceLabel(r.id) }}</span>
             </div>
             <p class="eff-text">{{ r.text }}</p>
             <p v-if="r.replaces" class="faint small">Replaces <span class="mono">{{ r.replaces.id }}</span> “{{ r.replaces.title }}” from {{ r.replaces.docTitle }}</p>

@@ -145,6 +145,8 @@ impl Server {
                 "record_memory" => self.record_memory(b, &args),
                 "request_attention" => self.request_attention(b, &args),
                 "get_constitution" => self.get_constitution(b, &args),
+                "get_workflow_run" => self.get_workflow_run(b),
+                "report_step" => self.report_step(b, &args),
                 _ => unreachable!("checked above"),
             },
         };
@@ -312,7 +314,7 @@ impl Server {
                 json!({
                     "id": r.id, "enforcement": r.enforcement, "title": r.title, "text": r.text.chars().take(1500).collect::<String>(),
                     "article": r.article, "section": r.section, "constitution": r.doc_title, "scope": r.scope,
-                    "replaces": r.replaces.as_ref().map(|x| &x.id),
+                    "replaces": r.replaces.as_ref().map(|x| &x.id), "verifiedBy": r.check,
                 })
             })
             .collect();
@@ -321,8 +323,69 @@ impl Server {
             "rules": rules,
             "conflicts": e.conflicts.len(),
             "pendingApproval": e.pending.iter().map(|d| &d.title).collect::<Vec<_>>(),
-            "note": "Approved rules of this workspace (mandatory policies always apply). Organisation-managed Claude settings and instructions take precedence over them.",
+            "note": "Approved rules of this workspace (mandatory policies always apply). Rules with verifiedBy are checked by NEXUS running that gate; the others are instructions only. Organisation-managed Claude settings and instructions take precedence over them.",
         }))
+    }
+
+    /// The workflow run of this session's task (ADR-0029): steps, states, how each was verified, and the instructions
+    /// of the steps that are ready now. Bound to the session's task — never another run.
+    fn session_run(&self, b: &Binding) -> Result<nexus_core::workflow::run::Run, String> {
+        let task = b.session.task_id.as_deref().ok_or("this session does not work on a task, so it has no workflow run")?;
+        nexus_core::workflow::run::active_for_task(&self.conn, task)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no active workflow run on this session's task".into())
+    }
+
+    fn get_workflow_run(&self, b: &Binding) -> Result<Value, String> {
+        let run = self.session_run(b)?;
+        let v = nexus_core::workflow::run::view(&self.conn, &run.id).map_err(|e| e.to_string())?;
+        let esc = |s: &str, n: usize| tasks::escape_untrusted(s, n);
+        let steps: Vec<Value> = v
+            .steps
+            .iter()
+            .filter(|s| s.state.status != "skipped")
+            .map(|s| {
+                let ready = matches!(s.state.status.as_str(), "ready" | "blocked");
+                json!({
+                    "id": s.state.step_id, "title": esc(&s.title, 160), "kind": s.state.kind, "status": s.state.status,
+                    "verification": s.state.verification, "attempts": s.state.attempts, "maxAttempts": s.state.max_attempts,
+                    "needs": s.needs, "gates": s.gates, "criteria": s.criteria.iter().map(|c| esc(c, 200)).collect::<Vec<_>>(),
+                    "criteriaMet": s.state.criteria_met,
+                    "instructions": if ready { Some(s.text.chars().take(3000).collect::<String>()) } else { None },
+                    "lastFailure": s.state.last_failure.as_deref().map(|f| f.chars().take(1500).collect::<String>()),
+                })
+            })
+            .collect();
+        Ok(json!({
+            "id": v.run.id, "workflow": esc(&v.run.workflow_title, 160), "status": v.run.status, "rigor": v.run.rigor,
+            "goal": esc(&v.run.goal, 600), "progress": v.progress, "steps": steps,
+            "note": "Steps come from the user's approved workflow. Work on steps with status ready (or blocked after you got what you needed), then call report_step. A report is a claim: steps with gates are verified by NEXUS running the project's checks; review steps need the user; skipped steps are not part of this run's rigor.",
+        }))
+    }
+
+    fn report_step(&self, b: &Binding, args: &Value) -> Result<Value, String> {
+        use nexus_core::workflow::run::{self, Reported, StepReport};
+        let run_ = self.session_run(b)?;
+        let step = args.get("step").and_then(Value::as_str).ok_or("`step` is required")?;
+        let status = args.get("status").and_then(Value::as_str).and_then(Reported::parse).ok_or("`status` must be done, blocked or needs-input")?;
+        let summary = args.get("summary").and_then(Value::as_str).ok_or("`summary` is required")?;
+        if summary.trim().is_empty() || summary.chars().count() > 500 {
+            return Err("`summary` must be 1–500 characters".into());
+        }
+        let criteria: Vec<usize> = match args.get("criteria") {
+            None | Some(Value::Null) => vec![],
+            Some(Value::Array(a)) if a.len() <= 30 => a.iter().filter_map(|x| x.as_u64().map(|n| n as usize)).collect(),
+            Some(_) => return Err("`criteria` lists acceptance criteria numbers (1-based)".into()),
+        };
+        let st = run::report(&self.conn, &self.data_dir, &b.workspace, &run_.id, step, &StepReport { status, summary, criteria: &criteria }).map_err(|e| e.to_string())?;
+        let next = match st.status.as_str() {
+            "verifying" => "NEXUS now runs this step's quality gates; check get_workflow_run for the result.",
+            "awaiting-review" => "Waiting for the user's sign-off.",
+            "passed" => "Recorded as done (AI-reported — no gate verifies this step).",
+            "blocked" => "Recorded; the user has been notified.",
+            _ => "Recorded.",
+        };
+        Ok(json!({ "step": st.step_id, "status": st.status, "verification": st.verification, "next": next }))
     }
 
     /// Tell the user (in-app and desktop notification) that this session needs them. Bound to this session only.
@@ -964,6 +1027,23 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": read_only,
         }),
         json!({
+            "name": "get_workflow_run", "title": "Workflow run",
+            "description": "The workflow run of this session's task: steps with status (ready, verifying, awaiting-review, passed …), how each was verified (ai-reported, verified by gates, human), acceptance criteria, the instructions of ready steps and the last gate failure. Call it before working on a step.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+            "annotations": read_only,
+        }),
+        json!({
+            "name": "report_step", "title": "Report a workflow step",
+            "description": "Report a step of this session's workflow run: done (with a short summary and the acceptance criteria met), blocked, or needs-input. A done report is a claim: NEXUS verifies steps with gates by running the project's checks itself, and review steps need the user.",
+            "inputSchema": { "type": "object", "properties": {
+                "step": { "type": "string", "maxLength": 40 },
+                "status": { "type": "string", "enum": ["done", "blocked", "needs-input"] },
+                "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+                "criteria": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 30 }, "maxItems": 30 }
+            }, "required": ["step", "status", "summary"], "additionalProperties": false },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
+        }),
+        json!({
             "name": "request_attention", "title": "Request the user's attention",
             "description": "Notify the user (NEXUS notification center and desktop notification) that this session needs them: a question you cannot continue without, something ready for review, or finished work. Use sparingly — only when the user is likely away; it is rate-limited. NEXUS never answers for the user.",
             "inputSchema": { "type": "object", "properties": {
@@ -1049,8 +1129,8 @@ mod tests {
         assert_eq!(names, [
             "get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint",
             "get_session_activity", "get_context_index", "search_knowledge", "get_document", "list_tasks", "create_task",
-            "get_resume_summary", "get_task", "update_task", "record_memory", "get_constitution", "request_attention",
-            "get_checkpoints",
+            "get_resume_summary", "get_task", "update_task", "record_memory", "get_constitution", "get_workflow_run", "report_step",
+            "request_attention", "get_checkpoints",
         ]);
         assert!(names.iter().all(|n| !n.starts_with("nexus_")), "Claude already prefixes mcp__nexus__");
     }

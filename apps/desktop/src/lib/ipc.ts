@@ -23,6 +23,16 @@ import type {
   KitView,
   MemoryApproval,
   MemoryProposal,
+  Gate,
+  GateInput,
+  GateResult,
+  RunView,
+  StartRunInput,
+  WorkflowDefinition,
+  WorkflowRun,
+  WorkflowSummary,
+  WorkflowTemplate,
+  WorkflowView,
   ContextAnalysis,
   ContextConfig,
   ContextReport,
@@ -88,6 +98,8 @@ export const SESSION_EVENT = 'nexus://session'
 export const NOTIFICATIONS_EVENT = 'nexus://notifications'
 /** A desktop notification was clicked: payload = notification id. */
 export const NOTIFICATION_ACTIVATED_EVENT = 'nexus://notification-activated'
+/** A workflow run changed (gates ran, a review was given …). */
+export const WORKFLOW_EVENT = 'nexus://workflows'
 
 export const api = {
   appInfo: () => call<AppInfo>('app_info'),
@@ -182,6 +194,30 @@ export const api = {
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
 
+  workflowTemplates: () => call<WorkflowTemplate[]>('workflow_templates'),
+  workflowList: (workspaceId: string) => call<WorkflowSummary[]>('workflow_list', { workspaceId }),
+  workflowGet: (workspaceId: string, id: string) => call<WorkflowView>('workflow_get', { workspaceId, id }),
+  workflowCreate: (workspaceId: string, input: { title?: string; category?: string; rigor?: string | null; skills?: string[]; template?: string | null; projectId?: string | null }) =>
+    call<WorkflowView>('workflow_create', { workspaceId, input }),
+  workflowSave: (workspaceId: string, id: string, definition: WorkflowDefinition, rigor: string, skills: string[], expectedHash: string) =>
+    call<WorkflowView>('workflow_save', { workspaceId, id, definition, rigor, skills, expectedHash }),
+  workflowSaveRaw: (workspaceId: string, id: string, body: string, expectedHash: string) =>
+    call<WorkflowView>('workflow_save_raw', { workspaceId, id, body, expectedHash }),
+  workflowStart: (workspaceId: string, input: StartRunInput) => call<RunView>('workflow_start', { workspaceId, input }),
+  workflowRuns: (workspaceId: string, filter?: { projectId?: string | null; activeOnly?: boolean; limit?: number }) =>
+    call<WorkflowRun[]>('workflow_runs', { workspaceId, filter }),
+  workflowRun: (id: string) => call<RunView>('workflow_run', { id }),
+  workflowReview: (id: string, step: string, approve: boolean, note?: string) => call<RunView>('workflow_review', { id, step, approve, note }),
+  workflowCancel: (id: string) => call<RunView>('workflow_cancel', { id }),
+  workflowRetry: (id: string, step: string) => call<RunView>('workflow_retry', { id, step }),
+  gatesList: (projectId: string) => call<[Gate, GateResult | null][]>('gates_list', { projectId }),
+  gateUpsert: (projectId: string, input: GateInput) => call<Gate>('gate_upsert', { projectId, input }),
+  gateApprove: (projectId: string, name: string, expectedHash: string) => call<Gate>('gate_approve', { projectId, name, expectedHash }),
+  gateRevoke: (projectId: string, name: string) => call<void>('gate_revoke', { projectId, name }),
+  gateRemove: (projectId: string, name: string) => call<boolean>('gate_remove', { projectId, name }),
+  gateSuggest: (projectId: string) => call<GateInput[]>('gate_suggest', { projectId }),
+  gateRun: (projectId: string, name: string) => call<GateResult>('gate_run', { projectId, name }),
+
   contextGet: (projectId: string) => call<ContextConfig>('context_get', { projectId }),
   contextSet: (projectId: string, strategy: ContextStrategy, settings?: ContextSettings | null) =>
     call<ContextConfig>('context_set', { projectId, strategy, settings: settings ?? null }),
@@ -215,6 +251,7 @@ export const api = {
   notificationsAvailability: () => call<NotifierAvailability>('notifications_availability'),
   notificationsTest: () => call<void>('notifications_test'),
   notificationTarget: (id: string) => call<NotificationTarget>('notification_target', { id }),
+  notificationsTakeActivation: () => call<string | null>('notifications_take_activation'),
 }
 
 export type Api = typeof api

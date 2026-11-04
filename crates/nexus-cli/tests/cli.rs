@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 19);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 21);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -575,6 +575,101 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     assert_eq!(e.json(&["knowledge", "list"]).as_array().unwrap().len(), before);
 }
 
+/// ADR-0029: a workflow run from the terminal — template → run (its own task) → task launch with the run pointer →
+/// Claude reports steps through `nexus mcp` (AI-reported) → `nexus workflow verify` runs the trusted gates (verified)
+/// → a missing gate blocks with an explanation → retry → completed, notified, task done.
+#[test]
+fn workflow_runs_ai_reported_steps_and_trusted_gates_to_completion() {
+    let e = Env::new();
+    e.setup();
+    let commit = Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "init"]).current_dir(&e.repo).status().unwrap();
+    assert!(commit.success());
+    for g in ["test", "lint"] {
+        let added = e.ok(&["gates", "add", "--project", "repo", g, "--", "git", "--version"]);
+        assert!(added.contains("not approved yet"), "{added}");
+    }
+    // A gate runs only after its command was approved (separately from any workflow approval).
+    let refused = e.run(&["gates", "run", "--project", "repo", "test"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("is not approved"), "{}", String::from_utf8_lossy(&refused.stderr));
+    assert!(e.run(&["gates", "approve", "--project", "repo", "test", "--version", "2"]).status.code() == Some(1), "only the reviewed version");
+    for g in ["test", "lint"] {
+        e.ok(&["gates", "approve", "--project", "repo", g, "--version", "1"]);
+    }
+    let gates = e.json(&["gates", "list", "--project", "repo"]);
+    assert_eq!(gates.as_array().unwrap().len(), 2);
+    assert!(gates.as_array().unwrap().iter().all(|g| g["approved"] == true));
+    let wf = e.json(&["workflow", "new", "--template", "feature"]);
+    let wf_id = wf["id"].as_str().unwrap();
+    assert_eq!((wf["approved"].as_bool(), wf["steps"].as_u64()), (Some(true), Some(6)));
+
+    let run = e.json(&["workflow", "start", wf_id, "--project", "repo", "--goal", "Add checkout", "--rigor", "balanced"]);
+    let run_id = run["id"].as_str().unwrap().to_string();
+    let task_id = run["taskId"].as_str().unwrap().to_string();
+    let statuses = |v: &Value| v["steps"].as_array().unwrap().iter().map(|s| (s["stepId"].as_str().unwrap().to_string(), s["status"].as_str().unwrap().to_string())).collect::<Vec<_>>();
+    assert_eq!(statuses(&run), [
+        ("plan".into(), "ready".into()), ("risks".into(), "skipped".into()), ("implement".into(), "pending".into()),
+        ("checks".into(), "pending".into()), ("docs".into(), "skipped".into()), ("review".into(), "skipped".into()),
+    ], "balanced rigor: risk analysis, docs and review are not part of the run");
+
+    // Launch Claude (fake) for the run's task: the system prompt carries only a NEXUS-authored pointer.
+    let report_path = e.data.parent().unwrap().join("wf.json");
+    let out = e.cmd(&["launch", "--task", &task_id, "-w", "balanced", "-q"]).env("FAKE_CLAUDE_REPORT", &report_path).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let prompt = appended_prompt(&read_report(&report_path));
+    assert!(prompt.contains("NEXUS workflow run") && prompt.contains("get_workflow_run") && !prompt.contains("Restate the goal"), "{prompt}");
+    let session = e.json(&["sessions"])[0].clone();
+    let sid = session["id"].as_str().unwrap().to_string();
+    assert_eq!(session["integrations"]["workflow"]["runId"], run_id.as_str());
+    let csid = session["claudeSessionId"].as_str().unwrap();
+    let ctx = hook_context(&e, &sid, &format!(r#"{{"session_id":"{csid}","source":"startup"}}"#));
+    assert!(ctx.contains("<nexus-workflow-run") && ctx.contains("[plan]"), "{ctx}");
+
+    let r = mcp_calls(&e, &sid, &[
+        ("get_workflow_run", json("{}")),
+        ("report_step", json(r#"{"step":"plan","status":"done","summary":"Plan recorded","criteria":[1]}"#)),
+        ("report_step", json(r#"{"step":"implement","status":"done","summary":"Implemented with tests"}"#)),
+        ("report_step", json(r#"{"step":"checks","status":"done","summary":"I ran lint myself"}"#)),
+    ]);
+    let plan = &r[0]["structuredContent"]["steps"][0];
+    assert!(plan["instructions"].as_str().unwrap().contains("Restate the goal"), "ready steps carry their instructions");
+    assert_eq!(r[1]["structuredContent"]["verification"], "ai-reported");
+    assert_eq!(r[2]["structuredContent"]["status"], "verifying", "a report is a claim; gates decide");
+    assert_eq!(r[3]["isError"], true, "Claude cannot complete a check step");
+
+    // Trusted verification in a host process; `typecheck` is not defined yet → blocked with an explanation.
+    e.ok(&["workflow", "verify"]);
+    let v = e.json(&["workflow", "status", &run_id]);
+    let step = |id: &str| v["steps"].as_array().unwrap().iter().find(|s| s["stepId"] == id).unwrap().clone();
+    assert_eq!((step("implement")["status"].as_str(), step("implement")["verification"].as_str()), (Some("passed"), Some("verified")));
+    assert_eq!(step("implement")["results"][0]["command"], "git --version");
+    assert_eq!(step("checks")["status"], "blocked");
+    assert!(step("checks")["lastFailure"].as_str().unwrap().contains("typecheck"));
+    let inbox = e.json(&["notifications", "list"]);
+    assert!(inbox["notifications"].as_array().unwrap().iter().any(|n| n["category"] == "input-required" && n["workflowId"] == run_id.as_str()));
+
+    e.ok(&["gates", "add", "--project", "repo", "typecheck", "--", "git", "--version"]);
+    e.ok(&["workflow", "retry", &run_id, "checks"]);
+    e.ok(&["workflow", "verify"]);
+    let v = e.json(&["workflow", "status", &run_id]);
+    let checks = v["steps"].as_array().unwrap().iter().find(|s| s["stepId"] == "checks").unwrap().clone();
+    assert!(checks["lastFailure"].as_str().unwrap().contains("typecheck (version 1) are not approved"), "{checks}");
+    // Approving resumes the waiting step on its own — no retry, no new report.
+    let approved = e.ok(&["gates", "approve", "--project", "repo", "typecheck", "--version", "1"]);
+    assert!(approved.contains("resumed 1 waiting step"), "{approved}");
+    e.ok(&["workflow", "verify"]);
+    let v = e.json(&["workflow", "status", &run_id]);
+    assert_eq!(v["status"], "completed");
+    assert_eq!((v["progress"]["verified"].as_u64(), v["progress"]["aiReported"].as_u64(), v["progress"]["skipped"].as_u64()), (Some(2), Some(1), Some(3)));
+    let inbox = e.json(&["notifications", "list", "--all"]);
+    assert!(inbox["notifications"].as_array().unwrap().iter().any(|n| n["category"] == "workflow-completed"));
+    let task = e.json(&["tasks", "show", &task_id]);
+    assert_eq!(task["task"]["status"], "done", "{task}");
+    assert_eq!(task["task"]["checklist"].as_array().unwrap().iter().filter(|c| c["done"] == true).count(), 3, "the run ticks its checklist");
+    let gates = e.ok(&["gates", "list", "--project", "repo"]);
+    assert!(gates.contains("passed"), "{gates}");
+}
+
 /// ADR-0028: the project's context strategy changes what launches and SessionStart get; project docs are searchable
 /// with citations; the inspector compares observed instruction files with its prediction and shows retrievals.
 #[test]
@@ -693,7 +788,8 @@ fn constitutions_reach_launches_by_scope_only_approved_and_through_mcp() {
     let all = r[1]["structuredContent"]["rules"].as_array().unwrap();
     assert!(all.iter().any(|x| x["id"] == "OPS-1") && all.iter().all(|x| x["enforcement"] != "guideline"));
     let effective = e.json(&["constitution", "effective", "--project", "repo"]);
-    assert!(effective["conflicts"].as_array().unwrap().iter().any(|c| c["kind"] == "mandatory-override"));
+    assert!(effective["effective"]["conflicts"].as_array().unwrap().iter().any(|c| c["kind"] == "mandatory-override"));
+    assert!(effective["compliance"].as_array().unwrap().iter().all(|c| c["status"] == "instructed"), "no rule names a gate: instructed only");
 }
 
 #[test]

@@ -123,6 +123,18 @@ pub struct NexusAppend {
     pub isolation_excludes: Vec<String>,
 }
 
+/// The workflow run a session works on, and the skills it got for this session (ADR-0029).
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowLaunch {
+    pub run_id: String,
+    pub workflow: String,
+    pub rigor: String,
+    pub skills: Vec<String>,
+    /// Skills not given, with the reason (e.g. the kit is not enabled for this profile).
+    pub refused: Vec<String>,
+}
+
 /// The context strategy a session was launched with (ADR-0028).
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -184,7 +196,10 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
     let strategy = r.project_id.and_then(|p| crate::context::get(r.conn, p).ok()).map(|c| c.strategy).unwrap_or_default();
     let (hooks, settings) = hooks::prepare_session_settings(&pol, r.nexus_exe, r.data_dir, r.nexus_session_id, &excludes, ctx.observe_instructions)?;
     let isolation = (!excludes.is_empty()).then(|| Isolation { claude_md_excludes: excludes.clone() });
-    let (plugin_dirs, kit_launches) = crate::kits::session_plugin_dirs(r.conn, r.data_dir, &r.profile.id, &pol)?;
+    // A workflow run carried by the task activates its skills for this session only (ADR-0029).
+    let run = r.task_id.and_then(|t| crate::workflow::run::active_for_task(r.conn, t).ok().flatten());
+    let extra = run.as_ref().map(|x| x.skills.clone()).unwrap_or_default();
+    let (plugin_dirs, kit_launches, refused) = crate::kits::session_plugin_dirs_with(r.conn, r.data_dir, &r.profile.id, &pol, &extra)?;
     let ws = r.workspace_id.and_then(|id| workspace::get(r.conn, id).ok()).filter(|w| w.available);
     let project = r.project_id.and_then(|id| project::get(r.conn, id).ok());
     let mut parts: Vec<String> = Vec::new();
@@ -234,6 +249,15 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
                 // Only NEXUS-authored text and the validated id go into the system prompt; the task's own text is
                 // untrusted workspace content and arrives as data (SessionStart context / tool output).
                 parts.push(tasks::pointer(&v.id, delivery));
+                if let Some(run) = &run {
+                    // NEXUS-authored and validated only; the workflow's steps arrive as data through the tools.
+                    parts.push(format!(
+                        "NEXUS workflow run {} ({} rigor): follow its steps with the NEXUS tools get_workflow_run and report_step. \
+                         Reporting a step is a claim — NEXUS verifies steps with the project's quality gates itself, and review steps need the user.",
+                        service::short_id(&run.id),
+                        run.rigor
+                    ));
+                }
                 claude_name = Some(format!("NEXUS task {}", service::short_id(&v.id)));
                 task = Some(TaskLaunch { id: v.id.clone(), title: v.title.clone(), status: v.status.clone(), delivery });
             }
@@ -251,6 +275,7 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
             isolation,
             kits: kit_launches,
             context: Some(ContextLaunch { strategy, observe_instructions: observing }),
+            workflow: run.map(|x| WorkflowLaunch { run_id: x.id, workflow: x.workflow_title, rigor: x.rigor, skills: extra, refused }),
         },
         prompt: (!parts.is_empty()).then(|| parts.join("\n\n")),
         settings,

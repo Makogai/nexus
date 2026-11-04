@@ -37,8 +37,10 @@ pub enum Category {
     SessionFinished,
     /// The Claude process ended with an error, or its host died.
     SessionInterrupted,
-    /// Reserved for the workflow engine (no producer yet).
+    /// A workflow run failed (a step ran out of attempts) — ADR-0029.
     WorkflowFailed,
+    /// A workflow run finished: every step passed or was skipped.
+    WorkflowCompleted,
     /// Claude stopped on an API error (sign-in, usage limit, overload …) or another recoverable problem.
     ProcessIssue,
     /// Something waits for a person's review: memory proposals, rule approvals, changed kits.
@@ -46,7 +48,7 @@ pub enum Category {
     Info,
 }
 
-pub const ALL_CATEGORIES: [Category; 11] = [
+pub const ALL_CATEGORIES: [Category; 12] = [
     Category::InputRequired,
     Category::PermissionRequested,
     Category::AgentFinished,
@@ -55,6 +57,7 @@ pub const ALL_CATEGORIES: [Category; 11] = [
     Category::SessionFinished,
     Category::SessionInterrupted,
     Category::WorkflowFailed,
+    Category::WorkflowCompleted,
     Category::ProcessIssue,
     Category::ReviewRequired,
     Category::Info,
@@ -71,6 +74,7 @@ impl Category {
             Category::SessionFinished => "session-finished",
             Category::SessionInterrupted => "session-interrupted",
             Category::WorkflowFailed => "workflow-failed",
+            Category::WorkflowCompleted => "workflow-completed",
             Category::ProcessIssue => "process-issue",
             Category::ReviewRequired => "review-required",
             Category::Info => "info",
@@ -82,7 +86,7 @@ impl Category {
     pub fn default_priority(self) -> Priority {
         match self {
             Category::InputRequired | Category::PermissionRequested => Priority::Action,
-            Category::AgentFinished | Category::TaskCompleted | Category::SessionFinished => Priority::Success,
+            Category::AgentFinished | Category::TaskCompleted | Category::SessionFinished | Category::WorkflowCompleted => Priority::Success,
             Category::TaskBlocked | Category::SessionInterrupted | Category::ProcessIssue => Priority::Warning,
             Category::WorkflowFailed => Priority::Critical,
             Category::ReviewRequired | Category::Info => Priority::Info,
@@ -98,7 +102,9 @@ impl Category {
                 | Category::TaskBlocked
                 | Category::SessionInterrupted
                 | Category::WorkflowFailed
+                | Category::WorkflowCompleted
                 | Category::ProcessIssue
+                | Category::ReviewRequired
         )
     }
 }
@@ -139,7 +145,9 @@ pub struct NewEvent {
     pub profile_id: Option<String>,
     pub session_id: Option<String>,
     pub task_id: Option<String>,
-    /// What "Open" navigates to: (`session`|`task`|`proposals`|`rules`|`kit`|`project`, id).
+    /// The workflow run this is about (ADR-0029).
+    pub workflow_id: Option<String>,
+    /// What "Open" navigates to: (`session`|`task`|`proposals`|`rules`|`kit`|`project`|`profile`|`workflow`, id).
     pub target: Option<(&'static str, String)>,
     /// Repeats with the same key inside [`DEDUPE_WINDOW_MS`] merge (counted, not re-notified).
     pub dedupe_key: Option<String>,
@@ -158,6 +166,7 @@ impl NewEvent {
             profile_id: None,
             session_id: None,
             task_id: None,
+            workflow_id: None,
             target: None,
             dedupe_key: None,
         }
@@ -311,8 +320,8 @@ pub fn publish(conn: &Connection, e: NewEvent) -> Result<Published> {
     let priority = e.priority.unwrap_or_else(|| e.category.default_priority());
     conn.execute(
         "INSERT INTO notifications(id, category, priority, source, title, body, workspace_id, project_id, profile_id, session_id, task_id,
-            target_kind, target_id, dedupe_key, occurrences, created_at, updated_at, desktop_state)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1, ?15, ?15, 'pending')",
+            target_kind, target_id, dedupe_key, occurrences, created_at, updated_at, desktop_state, workflow_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1, ?15, ?15, 'pending', ?16)",
         params![
             id,
             e.category.as_str(),
@@ -328,7 +337,8 @@ pub fn publish(conn: &Connection, e: NewEvent) -> Result<Published> {
             e.target.as_ref().map(|t| t.0),
             e.target.as_ref().map(|t| t.1.clone()),
             e.dedupe_key,
-            now
+            now,
+            e.workflow_id
         ],
     )?;
     Ok(Published::Created(Box::new(get(conn, &id)?)))
@@ -341,6 +351,20 @@ pub fn resolve_session(conn: &Connection, session_id: &str, categories: &[Catego
         &format!("UPDATE notifications SET resolved_at = ?2 WHERE session_id = ?1 AND resolved_at IS NULL AND category IN ({list})"),
         params![session_id, now_ms()],
     )?)
+}
+
+/// Everything a workflow run waits for ended (completed, cancelled): its open action notifications are handled.
+pub fn resolve_workflow(conn: &Connection, run_id: &str) -> Result<usize> {
+    Ok(conn.execute(
+        "UPDATE notifications SET resolved_at = ?2 WHERE workflow_id = ?1 AND resolved_at IS NULL
+           AND category IN ('input-required', 'review-required', 'task-blocked', 'process-issue', 'info')",
+        params![run_id, now_ms()],
+    )?)
+}
+
+/// The situation behind one deduplicated notification ended (e.g. a review was given).
+pub fn resolve_dedupe(conn: &Connection, key: &str) -> Result<usize> {
+    Ok(conn.execute("UPDATE notifications SET resolved_at = ?2 WHERE dedupe_key = ?1 AND resolved_at IS NULL", params![key, now_ms()])?)
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -463,6 +487,49 @@ pub struct Prefs {
     pub categories: std::collections::BTreeMap<String, CategoryPref>,
     pub muted_workspaces: Vec<String>,
     pub muted_profiles: Vec<String>,
+    /// What desktop notifications may say (lock screen, screen sharing): ADR-0025 pre-release review.
+    pub lock_screen: LockScreen,
+}
+
+/// Desktop notification content policy. In-app notifications always show the details.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum LockScreen {
+    /// Details normally; generic text while the workstation is locked (best-effort detection).
+    #[default]
+    HideDetails,
+    /// Always generic ("A NEXUS session needs your input") — nothing about projects, sessions or tools.
+    AlwaysGeneric,
+    /// Always the details.
+    ShowDetails,
+}
+
+/// Title and body of a desktop notification under the content policy. Generic text names no workspace, project,
+/// session, task, tool or file.
+pub fn desktop_text(p: &Prefs, n: &Notification, locked: bool) -> (String, String) {
+    let generic = match p.lock_screen {
+        LockScreen::AlwaysGeneric => true,
+        LockScreen::HideDetails => locked,
+        LockScreen::ShowDetails => false,
+    };
+    if !generic {
+        return (n.title.clone(), n.body.clone());
+    }
+    let body = match Category::parse(&n.category) {
+        Some(Category::InputRequired) => "A Claude session needs your input.",
+        Some(Category::PermissionRequested) => "A Claude session asks for a permission.",
+        Some(Category::AgentFinished) => "Claude finished responding.",
+        Some(Category::TaskCompleted) => "A task was completed.",
+        Some(Category::TaskBlocked) => "A task is blocked.",
+        Some(Category::SessionFinished) => "A session finished.",
+        Some(Category::SessionInterrupted) => "A session ended unexpectedly.",
+        Some(Category::WorkflowFailed) => "A workflow run failed.",
+        Some(Category::WorkflowCompleted) => "A workflow run finished.",
+        Some(Category::ProcessIssue) => "A session needs attention.",
+        Some(Category::ReviewRequired) => "Something waits for your review.",
+        _ => "Open NEXUS for details.",
+    };
+    ("NEXUS".to_string(), body.to_string())
 }
 
 impl Default for CategoryPref {
@@ -484,6 +551,7 @@ impl Default for Prefs {
                 .collect(),
             muted_workspaces: Vec::new(),
             muted_profiles: Vec::new(),
+            lock_screen: LockScreen::default(),
         }
     }
 }
@@ -696,6 +764,16 @@ mod tests {
         assert!(desktop_decision(&muted, &n, &away).is_err());
         let Published::Created(info) = publish(&conn, NewEvent::new(Category::Info, "nexus", "Indexed")).unwrap() else { panic!() };
         assert!(desktop_decision(&p, &info, &away).is_err(), "informational events stay in-app by default");
-        assert!(set_prefs(&conn, &Prefs { quiet_hours: Some(("25:00".into(), "x".into())), ..p }).is_err());
+        assert!(set_prefs(&conn, &Prefs { quiet_hours: Some(("25:00".into(), "x".into())), ..p.clone() }).is_err());
+
+        // Lock-screen content policy: generic text names nothing about the work.
+        let Published::Created(perm) = publish(&conn, NewEvent::for_session(Category::PermissionRequested, "hook", &s, "Permission requested: Bash").body("Session “ACME checkout” waits")).unwrap() else { panic!() };
+        assert_eq!(desktop_text(&p, &perm, false).0, "Permission requested: Bash", "details when unlocked (default)");
+        let (t, b) = desktop_text(&p, &perm, true);
+        assert_eq!((t.as_str(), b.as_str()), ("NEXUS", "A Claude session asks for a permission."));
+        let always = Prefs { lock_screen: LockScreen::AlwaysGeneric, ..p.clone() };
+        assert!(!desktop_text(&always, &perm, false).1.contains("ACME"));
+        let show = Prefs { lock_screen: LockScreen::ShowDetails, ..p };
+        assert!(desktop_text(&show, &perm, true).1.contains("ACME"));
     }
 }

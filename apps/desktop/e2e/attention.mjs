@@ -161,11 +161,24 @@ try {
   const tab1 = await cdp.waitFor(`document.querySelector('[data-tab-session="${s1.id}"]')?.classList.contains('active')`, 10000).catch(() => false)
   check('clicking in the center opens the session in its workspace', !!tab1 && (await inv('workspace_active'))?.id === ws1.id)
 
+  // 4b. A click from the OS notification center after a restart arrives as a second start with
+  //     `nexus://notification/<id>` (installed builds register the protocol): the running NEXUS routes it.
+  const n2 = (await notifications()).find((n) => n.sessionId === s2.id && n.category === 'agent-finished')
+  await new Promise((resolve) => {
+    const second = spawn(app, [`nexus://notification/${n2.id}`], { env: { ...process.env, NEXUS_DATA_DIR: dataDir, NEXUS_E2E_NOTIFIER: 'record' }, stdio: 'ignore' })
+    second.on('exit', resolve)
+    setTimeout(resolve, 15000)
+  })
+  const tab2 = await cdp.waitFor(`document.querySelector('[data-tab-session="${s2.id}"]')?.classList.contains('active')`, 10000).catch(() => false)
+  check('a nexus:// activation from a second start opens that session', !!tab2)
+
   // 5. Focus suppression: the visible session in a focused window gets no toast.
   await inv('notifications_set_view', { visibleSession: s1.id, utcOffsetMinutes: new Date().getTimezoneOffset() })
   await hook(s1.id, 'post-tool-use', { session_id: cs(s1), tool_name: 'Bash', tool_input: { command: 'ls' } })
   const resolved = (await notifications()).find((n) => n.id === perm.id)
   check('Claude continuing resolves the permission notification', !!resolved?.resolvedAt)
+  const withdrawn = await until(async () => ((await inv('e2e_notifications_withdrawn')).includes(perm.id) ? true : null))
+  check('…and its desktop notification is withdrawn from the notification center', !!withdrawn)
   // The OS decides whether the window has focus (a background test run usually has none): check the rule for
   // the state the backend actually sees.
   const { windowFocused: focused, visibleSession } = await inv('e2e_focus_state')
@@ -191,6 +204,16 @@ try {
   await hook(s3.id, 'stop-failure', { session_id: cs(s3), error: 'rate_limit' })
   const quiet = await until(async () => (await notifications()).find((n) => n.sessionId === s3.id && n.category === 'process-issue' && n.desktopState !== 'pending'))
   check('quiet hours hold desktop notifications back', quiet?.desktopState === 'suppressed' && quiet?.desktopReason === 'quiet hours', quiet?.desktopReason)
+  await inv('notifications_set_prefs', { prefs })
+
+  // 6b. Lock-screen policy "always generic": the desktop text names no project, session or tool.
+  await inv('notifications_set_view', { visibleSession: null, utcOffsetMinutes: new Date().getTimezoneOffset() })
+  await inv('notifications_set_prefs', { prefs: { ...prefs, lockScreen: 'always-generic' } })
+  await hook(s1.id, 'permission-request', { session_id: cs(s1), tool_name: 'WebFetch' })
+  const generic = await until(async () => (await recorded()).find((n) => n.sessionId === s1.id && n.category === 'permission-requested' && n.title === 'NEXUS'))
+  check('generic desktop text names nothing about the work', !!generic && !/WebFetch|Checkout|Shop/.test(`${generic.title} ${generic.body}`), generic ? `${generic.title}: ${generic.body}` : '')
+  const inApp = (await notifications()).find((n) => n.id === generic?.id)
+  check('…while the in-app notification keeps the details', inApp?.title === 'Permission requested: WebFetch')
   await inv('notifications_set_prefs', { prefs })
 
   // 7. A notification whose session no longer exists.

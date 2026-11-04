@@ -218,6 +218,14 @@ impl Doc {
                 return Err("`prefix` must be a short rule id prefix (letters and digits)".into());
             }
         }
+        if kind == Kind::Workflow && one_of(fm, "format", &[crate::workflow::FORMAT], false)?.is_some() {
+            // Structured workflows (ADR-0029): settings are names only — never commands.
+            one_of(fm, "category", crate::workflow::CATEGORIES, false)?;
+            one_of(fm, "rigor", crate::workflow::RIGOR, false)?;
+            if fm.list("skills").iter().any(|s| s.split_once(':').is_none_or(|(k, n)| k.is_empty() || n.is_empty() || s.contains(char::is_whitespace))) {
+                return Err("`skills` are written as kit:skill".into());
+            }
+        }
         if let Some(v) = fm.get("branch").filter(|v| **v != Value::Null) {
             match v.as_str() {
                 Some(b) if valid_branch_name(b) => {}

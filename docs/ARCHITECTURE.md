@@ -115,7 +115,11 @@ machine it is a row in SQLite; if another tool owns it NEXUS only reads it** (AD
   routing on Windows; Tauri's notification plugin elsewhere; a recording adapter in E2E builds) and emits
   `nexus://notifications` when the set changed. A toast click emits `nexus://notification-activated`; the UI
   resolves the target (`notification_target`) and switches workspace / opens the terminal.
-* NEXUS exposes **no TCP/HTTP listener**. There is nothing to authenticate against on localhost.
+* **Workflow runner** (ADR-0029) — a desktop thread (1.2 s) claims steps waiting for verification, runs their gates
+  outside the database lock as this host, records results and moves runs on; `nexus workflow verify` does the same in
+  a terminal. Claude (through MCP) only reports; it never runs gates.
+* NEXUS exposes **no TCP/HTTP listener**. There is nothing to authenticate against on localhost. Installed builds
+  register the `nexus://notification/<id>` protocol for notification clicks (focus + open only, T36).
 
 ## 4. Claude session launch pipeline
 
@@ -245,6 +249,7 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Proposals | `knowledge_proposals` (extract + list pending), `knowledge_proposal_approve` (with edits/scope), `knowledge_proposal_reject` (ADR-0022) |
 | Diagnostics | `profile_diagnostics` (ADR-0023) |
 | Kits | `kit_list`, `kit_register` (local/Git), `kit_approve`, `kit_update`, `kit_remove`, `kit_enable` (selection), `kit_disable`, `kit_validate` (ADR-0024) |
+| Workflows | `workflow_templates`, `workflow_list`, `workflow_get`, `workflow_create`, `workflow_save`, `workflow_save_raw`, `workflow_start`, `workflow_runs`, `workflow_run`, `workflow_review`, `workflow_cancel`, `workflow_retry`, `gates_list`, `gate_upsert`, `gate_remove`, `gate_suggest`, `gate_run` (ADR-0029) |
 | Context | `context_get`, `context_set` (strategy, custom settings), `context_presets`, `context_analyze`, `context_docs`, `context_inspect` (project, profile for the prediction) (ADR-0028) |
 | Constitutions | `constitution_list`, `constitution_get`, `constitution_create`, `constitution_save` (structure, expected hash), `constitution_save_raw`, `constitution_effective` (project, task, what-if), `constitution_search`, `constitution_history`, `constitution_version` (ADR-0027); approval via `knowledge_approve` |
 | Notifications | `notifications_list` (filters), `notifications_counts`, `notifications_mark_read`, `notifications_dismiss`, `notifications_snooze`, `notifications_prefs`, `notifications_set_prefs`, `notifications_set_view` (visible terminal, time zone), `notifications_availability`, `notifications_test`, `notification_target`; E2E builds only: `e2e_notifications_recorded`, `e2e_notification_activate`, `e2e_focus_state` (ADR-0025) |

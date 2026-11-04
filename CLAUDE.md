@@ -24,6 +24,9 @@ cd apps/desktop && node e2e/attention.mjs   # notifications + multi-session atte
 cd apps/desktop && node e2e/constitutions.mjs # Constitution Manager through the UI (E2E build)
 cd apps/desktop && node e2e/context.mjs     # Context Manager: wizard, strategy, inspector (E2E build)
 cd apps/desktop && node e2e/context-real-claude.mjs # inspector prediction vs. real InstructionsLoaded via NEXUS hook
+cd apps/desktop && node e2e/workflows.mjs   # Workflow Engine: runs, gates, reviews, crash recovery (E2E build)
+cd apps/desktop && node e2e/workflow-real-claude.mjs # workflow skills only in the run's session (real Claude)
+cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Windows notification sender
 ```
 
 ## Architecture rules
@@ -52,6 +55,10 @@ cd apps/desktop && node e2e/context-real-claude.mjs # inspector prediction vs. r
 * Constitutions, Context, Memory, Skills and Workflows stay separate subsystems on shared infrastructure (ADR-0026).
   Constitutions are rule documents (`format: constitution`, ADR-0027): stable rule ids, mandatory policies are never
   overridable by narrower scopes, synced versions need approval, delivery is compact and budgeted.
+* Workflows (ADR-0029) run on tasks and normal sessions; Claude only *reports* steps (MCP), gates *verify* them in a
+  NEXUS host (desktop runner / `nexus workflow verify`), never in the MCP server. Gate commands are machine-local,
+  defined by the person, argv without a shell — workflow files name gates, never commands. Each gate command
+  version needs its own approval (checked in `gates::begin`), separate from approving a workflow.
 * Context strategies (ADR-0028) decide what `claude::prepare` and SessionStart add; balanced = the earlier behaviour.
   Project docs are read only when indexed (allowlisted Markdown); retrieval records counts and ids, never queries.
 * Workspace-controlled text (task titles/descriptions, synced files) never goes into the system prompt or `--name`;

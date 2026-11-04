@@ -33,6 +33,7 @@ pub const RETRIEVAL_TOOLS: &[&str] = &[
     "get_session_activity",
     "get_project",
     "get_git_status",
+    "get_workflow_run",
 ];
 
 fn events(conn: &Connection, session_id: &str, kind: &str) -> Result<i64> {

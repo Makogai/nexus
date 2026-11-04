@@ -117,6 +117,7 @@ describe('ConstitutionsView', () => {
       conflicts: [{ kind: 'mandatory-override', message: '“Repo rules” tries to disable the mandatory policy `TC-1`', ruleId: 'TC-1', docs: ['c1', 'c2'] }],
       pending: [],
       documents: [],
+      compliance: [{ ruleId: 'TC-1', enforcement: 'mandatory', status: 'passed', check: 'lint', at: Date.now() }],
     })
     const w = mount(ConstitutionsView, { attachTo: document.body })
     await flushPromises()
@@ -130,5 +131,7 @@ describe('ConstitutionsView', () => {
     expect(api.constitutionEffective).toHaveBeenCalledWith('w1', null, null, false)
     expect(w.find('[data-effective-rule="TC-1"]').text()).toContain('Mandatory policy')
     expect(w.find('[data-conflict]').text()).toContain('mandatory policy `TC-1`')
+    expect(w.find('[data-effective-rule="TC-1"] [data-compliance]').text()).toContain('Verified: lint passed')
+    expect(w.find('[data-compliance-note]').text()).toContain('Applying is not guaranteeing')
   })
 })

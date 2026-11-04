@@ -54,3 +54,12 @@ launch delivery, review notification opens the document).
 ## Consequences
 * Plain always-on rules keep working unchanged; constitution documents are skipped by the plain path.
 * Rule ids are a contract: renaming one is a new rule (and an `unknown-override` where it was referenced).
+
+## Amendment — applying vs. guaranteeing (2026-11-04, workflow-engine stage)
+Delivering a rule to Claude is an *instruction*; it does not guarantee compliance, and **mandatory** means "no
+narrower scope can override it", not "Claude cannot break it". A rule may name a quality gate (`check=<gate>`,
+ADR-0029). The effective view, `nexus constitution effective` and `get_constitution` then show per rule *instructed
+only* or the linked gate's latest real result for the project (passed / failing / not run / gate missing); `nexus
+constitution verify --project` and a workflow step with `gates=constitution` run the linked gates. Hard limits remain
+the job of Claude's own permission rules (organisation-managed) or the same gate in CI — NEXUS does not block tool
+calls (its hooks stay observe-only, ADR-0016/0025).

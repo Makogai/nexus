@@ -160,10 +160,19 @@ const attentionBoard = computed(() => store.attention)
         <div class="card-title">Desktop notifications</div>
         <p v-if="store.availability && !store.availability.available" class="notice notice-warn"><Info /> {{ store.availability.reason }}</p>
         <p v-else-if="store.availability" class="hint">
-          Shown by {{ store.availability.backend === 'windows' ? 'Windows' : store.availability.backend }}{{ store.availability.clickToOpen ? '; clicking one opens the session in NEXUS' : '' }}.
+          Shown by {{ store.availability.backend === 'windows' ? 'Windows' : store.availability.backend }} as “{{ store.availability.sender ?? 'NEXUS' }}”{{ store.availability.clickToOpen ? '; clicking one opens the session in NEXUS' : '' }}{{ store.availability.clickAfterRestart ? ', also from the notification center after a restart' : '' }}.
           Focus Assist / Do Not Disturb can still hide them.
         </p>
         <label class="checkbox"><input v-model="draft.desktopEnabled" type="checkbox" data-pref="desktop" /><span>Show desktop notifications</span></label>
+        <label class="field-inline lock">
+          <span>Content on the desktop</span>
+          <select v-model="draft.lockScreen" class="select" data-pref="lock-screen">
+            <option value="hide-details">Details, but nothing about projects or sessions while the screen is locked</option>
+            <option value="always-generic">Always generic — never project, session, tool or file names</option>
+            <option value="show-details">Always details</option>
+          </select>
+        </label>
+        <p class="hint">In-app notifications always show the details. Lock detection is best effort; Windows' own lock-screen notification settings also apply.</p>
         <label class="checkbox"><input v-model="draft.sound" type="checkbox" /><span>Play a sound</span></label>
         <label class="checkbox"><input v-model="draft.notifyFocusedSession" type="checkbox" /><span>Also for the session I am looking at</span></label>
         <div class="quiet">
@@ -313,6 +322,14 @@ const attentionBoard = computed(() => store.attention)
 }
 .time {
   width: 110px;
+}
+.lock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lock .select {
+  flex: 1;
 }
 .cats {
   width: 100%;
