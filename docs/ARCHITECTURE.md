@@ -33,7 +33,7 @@ flowchart TB
   subgraph CLI["crates/nexus-cli — `nexus` binary"]
     CLIC["CLI commands<br/>doctor · workspaces · projects · profiles · sessions · launch"]
     MCP["`nexus mcp`<br/>stdio MCP server"]
-    HOOK["`nexus hook <event>`<br/>exec-form hook handler (planned)"]
+    HOOK["`nexus hook <event>`<br/>exec-form hook handler"]
   end
 
   CMD --> Core
@@ -189,7 +189,8 @@ claude_profiles(id PK, name UNIQUE, description, color, config_dir NULL /*NULL =
 projects(id PK /*same id as manifest*/, workspace_id FK, name, local_path, remote_url, stack_json,
          created_at, last_opened_at)
 session_hosts(id PK, kind CHECK(desktop|cli|service), pid, version, started_at, heartbeat_at, stopped_at)  -- v2
-session_events(id PK, session_id FK, kind, summary, source, created_at)                             -- v3
+session_events(id PK, session_id FK, kind, summary, data JSON, source, created_at)                  -- v3, rebuilt v4
+-- v4 session counters: turns, prompts, subagents, last_activity_at, attention, end_reason, transcript_path
 sessions(id PK, kind CHECK(claude|shell), host, host_id FK, integrations JSON, workspace_id, project_id NULL, profile_id NULL,
          claude_session_id NULL, title, cwd, branch, work_profile, effort, model, program, pid,
          state CHECK(starting|running|exited|interrupted|failed), exit_code, error,
@@ -232,7 +233,7 @@ every filesystem/process operation goes through a purpose-built, validated comma
 | Live session list | `claude agents --json` reconciliation | 2 | older CLI |
 | Auth status | `claude auth status --json` (per profile env) | 1 | CLI absent |
 | NEXUS tools | `--mcp-config <generated file>` → `nexus mcp --session <id>` (implemented) | 2 ✅ | `disableSideloadFlags`, `allowManagedMcpServersOnly`, `strictPluginOnlyCustomization` |
-| Lifecycle capture | `--settings <generated file>` exec-form hooks → `nexus hook` | 2 | `allowManagedHooksOnly`, `disableAllHooks` |
+| Lifecycle capture | `--settings <generated file>` exec-form hooks → `nexus hook` (implemented, additive to user hooks — verified) | 2 ✅ | `allowManagedHooksOnly`, `disableAllHooks` |
 | Skills / AI Kits | `--plugin-dir <kit>` per session (no copying into config dirs) | 4–5 | `disableSideloadFlags`, `strictPluginOnlyCustomization` |
 | Usage | OTel (personal profiles only, opt-in), transcript compat layer (labelled) | 5 | org-managed telemetry, format drift |
 

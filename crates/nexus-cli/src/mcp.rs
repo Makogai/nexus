@@ -10,6 +10,7 @@ use std::io::{BufRead, Write};
 
 use serde_json::{Value, json};
 
+use nexus_core::activity;
 use nexus_core::checkpoint::{self, CheckpointKind, Source};
 use nexus_core::claude::profile;
 use nexus_core::db::Connection;
@@ -115,6 +116,7 @@ impl Server {
                 "list_recent_sessions" => self.recent_sessions(b, &args),
                 "checkpoint" => self.checkpoint(b, &args),
                 "get_checkpoints" => self.get_checkpoints(b, &args),
+                "get_session_activity" => self.session_activity(b, &args),
                 _ => unreachable!("checked above"),
             },
         };
@@ -258,6 +260,47 @@ impl Server {
     }
 }
 
+impl Server {
+    /// Structured activity (files, command categories, turns, compactions) of this session and, optionally, the
+    /// previous sessions of its project — raw material for consolidating durable memory on request.
+    fn session_activity(&self, b: &Binding, args: &Value) -> Result<Value, String> {
+        let previous = limit_arg_named(args, "previous", 0, 5)?;
+        let mut ids = vec![b.session.id.clone()];
+        if previous > 0
+            && let Some(pid) = &b.session.project_id
+        {
+            let earlier = session::list(
+                &self.conn,
+                &Filter {
+                    workspace_id: Some(b.workspace_id.clone()),
+                    project_id: Some(pid.clone()),
+                    limit: Some(previous + 1),
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| e.to_string())?;
+            ids.extend(earlier.into_iter().map(|s| s.id).filter(|id| id != &b.session.id).take(previous as usize));
+        }
+        let sessions: Vec<Value> = ids
+            .iter()
+            .filter_map(|id| activity::activity(&self.conn, id).ok())
+            .map(|a| json!(a))
+            .collect();
+        Ok(json!({ "sessions": sessions }))
+    }
+}
+
+fn limit_arg_named(args: &Value, key: &str, default: u32, max: u32) -> Result<u32, String> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => v
+            .as_u64()
+            .filter(|n| *n <= u64::from(max))
+            .map(|n| n as u32)
+            .ok_or_else(|| format!("`{key}` must be an integer from 0 to {max}")),
+    }
+}
+
 fn bind(conn: &Connection, session_id: &str) -> Result<Binding, String> {
     let unbound = |why: &str| format!("This NEXUS MCP server is not bound to a usable NEXUS session ({why}).");
     let session = session::get(conn, session_id).map_err(|_| unbound("unknown session"))?;
@@ -355,6 +398,14 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
         }),
         json!({
+            "name": "get_session_activity", "title": "Session activity",
+            "description": "Files changed, notable command categories (tests, builds, commits), turns and compactions of this session — optionally also of up to 5 previous sessions of the project. Use it to summarise or consolidate work.",
+            "inputSchema": { "type": "object", "properties": {
+                "previous": { "type": "integer", "minimum": 0, "maximum": 5 }
+            }, "additionalProperties": false },
+            "annotations": read_only,
+        }),
+        json!({
             "name": "get_checkpoints", "title": "Checkpoints",
             "description": "Recent checkpoints of a project in this workspace (across its sessions), newest first.",
             "inputSchema": { "type": "object", "properties": {
@@ -428,7 +479,7 @@ mod tests {
         assert!(f.server.handle(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).is_none());
         let tools = f.server.handle(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" })).unwrap();
         let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint", "get_checkpoints"]);
+        assert_eq!(names, ["get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint", "get_session_activity", "get_checkpoints"]);
         assert!(names.iter().all(|n| !n.starts_with("nexus_")), "Claude already prefixes mcp__nexus__");
     }
 

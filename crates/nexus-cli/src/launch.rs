@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use clap::Args;
 
 use nexus_core::claude::install;
+use nexus_core::claude::hooks;
 use nexus_core::claude::mcp::{self, Integrations};
 use nexus_core::claude::policy::{self, MachinePolicyLocations};
 use nexus_core::claude::launch::{self, LaunchRequest, Mode};
@@ -76,7 +77,11 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     let me = host::register(&conn, HostKind::Cli)?;
     let nexus_id = new_id();
     let policy = policy::evaluate(&plan.profile.effective_config_dir(&ctx.home), &MachinePolicyLocations::system());
-    let mcp_status = mcp::prepare(&policy, mcp::nexus_next_to_current_exe().as_deref(), &ctx.data_dir, &nexus_id)?;
+    let exe_self = mcp::nexus_next_to_current_exe();
+    let integrations = Integrations {
+        mcp: mcp::prepare(&policy, exe_self.as_deref(), &ctx.data_dir, &nexus_id)?,
+        hooks: hooks::prepare(&policy, exe_self.as_deref(), &ctx.data_dir, &nexus_id)?,
+    };
     let spec = launch::build(
         &LaunchRequest {
             profile: &plan.profile,
@@ -91,7 +96,8 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             nexus_session_id: &nexus_id,
             workspace_id: plan.workspace_id.as_deref(),
             project_id: plan.project_id.as_deref(),
-            mcp_config: mcp_status.config_path(),
+            mcp_config: integrations.mcp.config_path(),
+            settings: integrations.hooks.config_path(),
         },
         &env::current(),
     )?;
@@ -116,16 +122,17 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             resumed_from: plan.resumed_from.clone(),
         },
     )?;
-    session::set_integrations(&conn, &session.id, &Integrations { mcp: mcp_status.clone() })?;
+    session::set_integrations(&conn, &session.id, &integrations)?;
     profile::touch_used(&conn, &plan.profile.id)?;
     if let Some(pid) = &plan.project_id {
         project::touch_opened(&conn, pid)?;
     }
     if !a.quiet {
-        let tools = match &mcp_status {
-            mcp::McpStatus::Enabled { .. } => "NEXUS tools on".to_string(),
-            mcp::McpStatus::Blocked { reason } | mcp::McpStatus::Unavailable { reason } => format!("NEXUS tools off ({reason})"),
+        let state = |label: &str, s: &mcp::IntegrationStatus| match s {
+            mcp::IntegrationStatus::Enabled { .. } => format!("{label} on"),
+            mcp::IntegrationStatus::Blocked { reason } | mcp::IntegrationStatus::Unavailable { reason } => format!("{label} off ({reason})"),
         };
+        let tools = format!("{} · {}", state("NEXUS tools", &integrations.mcp), state("hooks", &integrations.hooks));
         eprintln!(
             "nexus: {} Claude · profile {} · {} · {} · {tools} · session {}",
             if plan.mode == Mode::Resume { "resuming" } else { "launching" },

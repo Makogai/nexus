@@ -65,7 +65,10 @@ Tauri 2.x (CLI 2.12.4; 3.0 is alpha), Vue 3.5, Vite 8, vitest 5, Pinia 4, vue-ro
 
 ## Open verification items
 
-1. `--settings` hooks merge with user hooks (Phase 2, M13).
-2. Whether `allowManagedHooksOnly` blocks hooks of a `--plugin-dir` plugin (M13/M21).
+1. ~~`--settings` hooks merge with user hooks~~ — **verified 2026-11-04**: user, `--settings` and `--plugin-dir` hooks all
+   fire (additive); exec-form hooks work on Windows; payload `session_id` = `--session-id`; hooks inherit NEXUS's env;
+   SessionStart/SessionEnd fire even in a signed-out `-p` session (ADR-0016).
+2. Whether `allowManagedHooksOnly` blocks hooks of a `--plugin-dir` plugin (M21) — NEXUS omits its hooks under that
+   policy regardless.
 3. Transcript creation timing with `--session-id` when the user exits before the first message (M8 manual).
 4. `claude agents --json` scope across config dirs (M11).

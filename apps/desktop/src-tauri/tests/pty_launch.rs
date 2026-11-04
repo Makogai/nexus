@@ -96,6 +96,7 @@ fn launch(
             workspace_id: Some("ws-1"),
             project_id: Some("pr-1"),
             mcp_config: None,
+            settings: None,
         },
         base,
     )

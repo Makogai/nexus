@@ -40,6 +40,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0003_session_events.sql"),
         disable_foreign_keys: false,
     },
+    Migration {
+        name: "0004_session_activity",
+        sql: include_str!("migrations/0004_session_activity.sql"),
+        disable_foreign_keys: true,
+    },
 ];
 
 /// Schema version this build understands.
@@ -111,6 +116,21 @@ fn quarantine(path: &Path) -> Result<PathBuf> {
         }
     }
     Ok(target)
+}
+
+/// Open an existing, current-schema database for a short-lived helper (lifecycle hooks): no integrity check, no
+/// migrations, no backups. Returns `None` when the database is missing or on another schema version — the helper
+/// then does nothing instead of upgrading or failing a Claude hook.
+pub fn open_existing(path: &Path) -> Result<Option<Connection>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let conn = Connection::open(path)?;
+    configure(&conn)?;
+    if schema_version(&conn)? != SCHEMA_VERSION {
+        return Ok(None);
+    }
+    Ok(Some(conn))
 }
 
 /// In-memory database with the full schema (tests).
@@ -365,6 +385,38 @@ mod tests {
         conn.execute("UPDATE sessions SET host = 'service' WHERE id = 'a'", []).unwrap();
         let violations: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
         assert_eq!(violations, 0);
+    }
+
+    #[test]
+    fn open_existing_never_creates_or_migrates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        assert!(open_existing(&path).unwrap().is_none());
+        assert!(!path.exists(), "a hook must not create the database");
+        drop(open_with(&path, &MIGRATIONS[..1]).unwrap());
+        assert!(open_existing(&path).unwrap().is_none(), "older schema: do nothing");
+        drop(open(&path).unwrap());
+        assert!(open_existing(&path).unwrap().is_some());
+    }
+
+    #[test]
+    fn checkpoints_survive_the_v4_events_rebuild() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        {
+            let conn = open_with(&path, &MIGRATIONS[..3]).unwrap();
+            conn.execute_batch(
+                "INSERT INTO sessions(id, kind, title, cwd, program, state, started_at) VALUES ('s', 'claude', 't', '/x', 'c', 'exited', 1);
+                 INSERT INTO session_events(id, session_id, kind, summary, source, created_at) VALUES ('e', 's', 'decision', 'kept', 'claude', 2);",
+            )
+            .unwrap();
+        }
+        let conn = open(&path).unwrap();
+        let (summary, turns): (String, i64) = conn
+            .query_row("SELECT e.summary, s.turns FROM session_events e JOIN sessions s ON s.id = e.session_id", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!((summary.as_str(), turns), ("kept", 0));
+        conn.execute("INSERT INTO session_events(id, session_id, kind, source, created_at) VALUES ('h', 's', 'file', 'hook', 3)", []).unwrap();
     }
 
     #[test]

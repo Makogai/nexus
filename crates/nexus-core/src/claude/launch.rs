@@ -37,6 +37,8 @@ pub struct LaunchRequest<'a> {
     pub project_id: Option<&'a str>,
     /// Session-scoped NEXUS MCP config (`--mcp-config`), when policy allows it (see `claude::mcp`).
     pub mcp_config: Option<&'a Path>,
+    /// Session-scoped lifecycle-hook settings (`--settings`), when policy allows it (see `claude::hooks`).
+    pub settings: Option<&'a Path>,
 }
 
 /// Everything needed to spawn the process. `env` is the *complete* environment (the spawner clears the
@@ -119,6 +121,12 @@ pub fn build(req: &LaunchRequest<'_>, base_env: &[(String, String)]) -> Result<L
         }
         args.extend(["--mcp-config".to_string(), cfg.display().to_string()]);
     }
+    if let Some(settings) = req.settings {
+        if !settings.is_absolute() {
+            return Err(CoreError::invalid("settings path must be absolute"));
+        }
+        args.extend(["--settings".to_string(), settings.display().to_string()]);
+    }
 
     let mut extra = vec![
         ("NEXUS_SESSION_ID".to_string(), req.nexus_session_id.to_string(), Reason::NexusScope),
@@ -198,6 +206,7 @@ mod tests {
             workspace_id: Some("ws-1"),
             project_id: Some("pr-1"),
             mcp_config: None,
+            settings: None,
         }
     }
 
@@ -249,12 +258,15 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let p = profile(Some("/cfg"));
         let mcp = t.path().join("mcp.json");
+        let hooks = t.path().join("settings.json");
         let mut r = request(&p, t.path(), Mode::New);
         r.model = Some("opus");
         r.mcp_config = Some(&mcp);
+        r.settings = Some(&hooks);
         let spec = build(&r, &base_env()).unwrap();
         let prompt = workprofile::get("prototype").unwrap().prompt;
         let mcp_arg = mcp.display().to_string();
+        let hooks_arg = hooks.display().to_string();
         assert_eq!(
             spec.args,
             [
@@ -265,6 +277,7 @@ mod tests {
                 "--model", "opus",
                 "--append-system-prompt", prompt,
                 "--mcp-config", mcp_arg.as_str(),
+                "--settings", hooks_arg.as_str(),
             ]
         );
         assert_eq!(spec.program, Path::new("claude"));

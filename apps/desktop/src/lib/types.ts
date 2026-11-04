@@ -209,7 +209,18 @@ export interface SessionView {
   attached: boolean
   running: boolean
   liveElsewhere: boolean
-  integrations: { mcp: { state: 'enabled' | 'blocked' | 'unavailable'; reason?: string; config?: string } } | null
+  integrations: {
+    mcp: IntegrationStatus
+    hooks?: IntegrationStatus
+  } | null
+  turns: number
+  prompts: number
+  subagents: number
+  lastActivityAt: number | null
+  /** Set while Claude waits for the user (Notification hook). */
+  attention: string | null
+  endReason: string | null
+  transcriptPath: string | null
   conversationRecorded: boolean | null
   resumable: boolean
 }
@@ -261,4 +272,10 @@ export interface Checkpoint {
   summary: string
   source: 'claude' | 'human' | 'nexus'
   createdAt: number
+}
+
+export interface IntegrationStatus {
+  state: 'enabled' | 'blocked' | 'unavailable'
+  reason?: string
+  config?: string
 }

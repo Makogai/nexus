@@ -45,7 +45,7 @@ Out of MVP scope: MCP, hooks, tasks, memory, kits, process manager, usage, sync,
 | M10 | `nexus` CLI: `doctor`, `workspaces`, `projects`, `profiles`, `sessions`, `launch` (reuses core; `launch` is a session host) | 5 end-to-end tests of the real binary incl. killed-host reconciliation ✅ |
 | M11 | Session hosts + leases ✅ (ADR-0014); still open: reconciliation with `claude agents --json`, durable-session experiment (`--bg` + `attach`) | ADR update with measured behaviour |
 | M12 | MCP server v1 (7 workspace-scoped tools incl. `checkpoint`) via per-session `--mcp-config`; policy-aware omission; checkpoints live in the desktop | unit + stdio E2E + official-SDK interop + desktop E2E ✅ |
-| M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): SessionStart/End, PreCompact, Stop | verify merge semantics on 2.1.x; hook handler tests |
+| M13 | Lifecycle hooks via `--settings` (exec form → `nexus hook`): start/end, compaction recovery, activity counters, files, command categories, attention; policy-aware | merge semantics verified on 2.1.311; unit + CLI + desktop E2E + real-Claude hook test ✅ |
 | M14 | Profile diagnostics, allowlist clone, `ANTHROPIC_*` opt-in, settings validation | diagnostics fixture tests |
 | M15 | WSL shells; login-shell PATH resolution on macOS/Linux | per-platform CI job |
 

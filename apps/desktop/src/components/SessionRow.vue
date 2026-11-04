@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Archive, GitBranch, Pencil, RotateCcw, Sparkles, Square, SquareTerminal, SquareArrowOutUpRight } from '@lucide/vue'
-import type { SessionView } from '../lib/types'
+import type { IntegrationStatus, SessionView } from '../lib/types'
 import { duration, relativeTime, sessionStatus, sessionTone } from '../lib/format'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
@@ -26,6 +26,16 @@ const s = computed(() => props.session)
 const profile = computed(() => (s.value.profileId ? profiles.byId[s.value.profileId] : null))
 const project = computed(() => (s.value.projectId ? projects.byId[s.value.projectId] : null))
 const tone = computed(() => sessionTone(s.value))
+const live = computed(() => s.value.running || s.value.liveElsewhere)
+const offIntegrations = computed(() => {
+  const i = s.value.integrations
+  if (!i) return []
+  const all: [string, IntegrationStatus | undefined][] = [
+    ['NEXUS tools', i.mcp],
+    ['hooks', i.hooks],
+  ]
+  return all.filter((e): e is [string, IntegrationStatus] => !!e[1] && e[1].state !== 'enabled')
+})
 const workName = computed(
   () => profiles.launchOptions?.workProfiles.find((w) => w.id === s.value.workProfile)?.name ?? null,
 )
@@ -84,6 +94,7 @@ async function archive() {
           <span class="pdot" :style="{ background: profile.color }" />{{ profile.name }}
         </span>
         <span v-if="workName" class="badge">{{ workName }}</span>
+        <span v-if="live && s.attention" class="badge badge-warn attention" :title="s.attention">Waiting for you</span>
       </div>
       <div class="meta">
         <span :class="{ live: tone === 'live' }">{{ sessionStatus(s) }}</span>
@@ -105,9 +116,13 @@ async function archive() {
           <span>·</span>
           <span class="row branch"><GitBranch />{{ s.branch }}</span>
         </template>
-        <template v-if="s.kind === 'claude' && s.integrations?.mcp && s.integrations.mcp.state !== 'enabled'">
+        <template v-if="s.kind === 'claude' && s.turns > 0">
           <span>·</span>
-          <span class="faint" :title="s.integrations.mcp.reason">NEXUS tools off</span>
+          <span>{{ s.turns }} {{ s.turns === 1 ? 'turn' : 'turns' }}</span>
+        </template>
+        <template v-for="[label, st] in offIntegrations" :key="label">
+          <span>·</span>
+          <span class="faint" :title="st.reason">{{ label }} off</span>
         </template>
         <template v-if="s.kind === 'claude' && !s.running && s.conversationRecorded === false">
           <span>·</span>

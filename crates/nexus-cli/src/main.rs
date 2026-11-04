@@ -1,6 +1,7 @@
 //! `nexus` — the NEXUS command-line interface. Every command is a thin layer over `nexus-core`; nothing here
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
+mod hook;
 mod launch;
 mod mcp;
 mod out;
@@ -53,6 +54,13 @@ enum Command {
     Mcp {
         #[arg(long)]
         session: String,
+    },
+    /// Lifecycle hook handler (started by Claude from the session's --settings). Always exits 0.
+    #[command(hide = true)]
+    Hook {
+        #[arg(long)]
+        session: String,
+        event: String,
     },
 }
 
@@ -174,6 +182,7 @@ fn main() -> ExitCode {
         Command::Sessions(a) => cmd_sessions(&ctx, a).map(|_| 0),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
+        Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),
     };
     match result {
         Ok(code) => ExitCode::from(u8::try_from(code.clamp(0, 255)).unwrap_or(1)),

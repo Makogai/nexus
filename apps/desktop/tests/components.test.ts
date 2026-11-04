@@ -121,6 +121,13 @@ function session(over: Partial<SessionView> = {}): SessionView {
     running: false,
     liveElsewhere: false,
     integrations: null,
+    turns: 0,
+    prompts: 0,
+    subagents: 0,
+    lastActivityAt: null,
+    attention: null,
+    endReason: null,
+    transcriptPath: null,
     conversationRecorded: true,
     resumable: true,
     ...over,
@@ -326,6 +333,27 @@ describe('SessionRow', () => {
     const w = mountWith(SessionRow, { session: session({ integrations: { mcp: { state: 'blocked', reason } } }) })
     const note = w.findAll('span').find((x) => x.text() === 'NEXUS tools off')
     expect(note?.attributes('title')).toBe(reason)
+  })
+
+  it('shows turns, a live waiting-for-you badge and blocked hooks', () => {
+    seed()
+    const running = session({
+      running: true,
+      state: 'running',
+      endedAt: null,
+      resumable: false,
+      turns: 4,
+      attention: 'Claude needs your permission to use Bash',
+      integrations: { mcp: { state: 'enabled' }, hooks: { state: 'blocked', reason: 'allowManagedHooksOnly' } },
+    })
+    const w = mountWith(SessionRow, { session: running })
+    expect(w.text()).toContain('4 turns')
+    expect(w.find('.attention').attributes('title')).toBe('Claude needs your permission to use Bash')
+    expect(w.findAll('span').find((x) => x.text() === 'hooks off')?.attributes('title')).toBe('allowManagedHooksOnly')
+    expect(w.findAll('span').some((x) => x.text() === 'NEXUS tools off')).toBe(false)
+    // An ended session never shows a stale attention badge.
+    const ended = mountWith(SessionRow, { session: session({ attention: 'stale', state: 'exited' }) })
+    expect(ended.find('.attention').exists()).toBe(false)
   })
 
   it('a session owned by another host is shown as running without terminal controls', () => {

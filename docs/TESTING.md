@@ -13,6 +13,7 @@ company repositories or the user's real NEXUS database in automated tests; every
 | Desktop E2E | `apps/desktop/e2e/smoke.mjs` over the WebView2 DevTools protocol (Windows, today); `tauri-driver` WebDriver for CI later | workspace → project → profile → UI launch → env isolation → exit → resume, against the real app | empty `NEXUS_DATA_DIR`, `fake-claude` profile, temp fixtures |
 | Security | part of unit/integration suites | hostile paths, injection strings in names, scrub list in every letter case, helper spawns (`auth status`, `--version`) under a hostile parent env (`tests/isolation.rs`), golden argv, malicious `core.fsmonitor`, policy-parser allowlist, newer-DB refusal | fixtures only |
 | CLI end-to-end | `cargo test -p nexus-cli` | the real `nexus` binary: setup, launch isolation under a hostile parent env, exit-code propagation, `--resume last`, killed-host reconciliation, MCP binding, policy-blocked MCP, JSON-RPC over stdio | temp data dirs, fake-claude |
+| Real-Claude hooks | `node e2e/hooks-real-claude.mjs` (local; skips without `claude`) | the real Claude CLI runs the NEXUS-generated exec-form hooks in a synthetic signed-out profile; SessionStart/SessionEnd reach NEXUS | synthetic config dir |
 | MCP interoperability | `node e2e/mcp-interop.mjs` | the official MCP TypeScript SDK client against `nexus mcp`: handshake, tools/list, annotations, calls, errors | temp data dir |
 | Storage reliability | `cargo test -p nexus-core db:: --test db_crash` | incremental migration with data, failed migration rolls back, FK-checked table rebuilds, backup + rotation, real-process crash (abort mid-transaction), garbage and page-damaged files quarantined | temp dirs |
 | Manual smoke | checklist below | things automation cannot see (TUI rendering, real auth) | user's real profiles, read-only, by the developer |
@@ -47,7 +48,8 @@ Ad hoc: `node e2e/cdp.mjs eval|wait|shot|send|console …`.
 
 Native folder pickers cannot be automated; the smoke test calls the same IPC commands they feed and drives
 everything else through the UI. It also checks cross-process behaviour: a checkpoint written by `nexus mcp` and a
-`nexus launch` session appear live in the running desktop. Last run: 2026-11-04, 18/18 passed (3 consecutive runs).
+`nexus launch` session and a Notification hook ("waiting for you") appear live in the running desktop. Last run:
+2026-11-04, 20/20 passed.
 
 ## Commands
 

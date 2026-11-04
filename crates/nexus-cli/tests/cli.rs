@@ -296,7 +296,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 7);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 8);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -318,4 +318,86 @@ fn organisation_policy_blocking_sideload_flags_omits_mcp_and_says_why() {
     assert!(!args.contains(&"--mcp-config".to_string()), "Claude would refuse to start with a sideload flag");
     assert_eq!(session["integrations"]["mcp"]["state"], "blocked");
     assert!(session["integrations"]["mcp"]["reason"].as_str().unwrap().contains("disableSideloadFlags"));
+}
+
+fn hook(e: &Env, session: &str, event: &str, payload: &str) -> Output {
+    let mut child = Command::new(NEXUS)
+        .args(["--data-dir", e.data.to_str().unwrap(), "hook", "--session", session, event])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn launch_passes_session_scoped_hook_settings() {
+    let e = Env::new();
+    e.setup();
+    let (report, session) = launch_report(&e, &[], "hooks.json");
+    let args: Vec<String> = serde_json::from_value(report["args"].clone()).unwrap();
+    let path = args.windows(2).find(|w| w[0] == "--settings").map(|w| PathBuf::from(&w[1])).expect("--settings passed");
+    let settings: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let start = &settings["hooks"]["SessionStart"][0]["hooks"][0];
+    assert!(nexus_core::paths::same_path(Path::new(start["command"].as_str().unwrap()), Path::new(NEXUS)));
+    let hook_args: Vec<&str> = start["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+    assert_eq!(hook_args[2..], ["hook", "--session", session["id"].as_str().unwrap(), "session-start"]);
+    assert_eq!(session["integrations"]["hooks"]["state"], "enabled");
+}
+
+#[test]
+fn hook_handler_records_activity_and_never_fails_claude() {
+    let e = Env::new();
+    e.setup();
+    let (_, session) = launch_report(&e, &[], "for-hooks.json");
+    let sid = session["id"].as_str().unwrap();
+    let csid = session["claudeSessionId"].as_str().unwrap();
+    let repo = e.repo.display().to_string().replace('\\', "\\\\");
+
+    let out = hook(&e, sid, "session-start", &format!(r#"{{"session_id":"{csid}","source":"startup","cwd":"{repo}"}}"#));
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty(), "nothing to recover on a first start: no injection");
+    for _ in 0..2 {
+        assert!(hook(&e, sid, "stop", "{}").status.success());
+    }
+    let edit = format!(r#"{{"tool_name":"Edit","tool_input":{{"file_path":"{repo}\\src\\main.rs"}}}}"#);
+    assert!(hook(&e, sid, "post-tool-use", &edit).status.success());
+    let prompt = hook(&e, sid, "user-prompt", r#"{"prompt":"do not store me"}"#);
+    assert!(prompt.status.success() && prompt.stdout.is_empty(), "UserPromptSubmit stdout would be injected: stay silent");
+
+    // A checkpoint (through MCP in real use), then a compaction: SessionStart(compact) brings it back, bounded.
+    let conn = nexus_core::db::open(&e.data.join(nexus_core::db::DB_FILE)).unwrap();
+    nexus_core::checkpoint::add(&conn, sid, nexus_core::checkpoint::CheckpointKind::Blocker, "Waiting for the API key from ops", nexus_core::checkpoint::Source::Claude).unwrap();
+    assert!(hook(&e, sid, "pre-compact", r#"{"trigger":"auto"}"#).status.success());
+    let out = hook(&e, sid, "session-start", &format!(r#"{{"session_id":"{csid}","source":"compact"}}"#));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["hookSpecificOutput"]["hookEventName"], "SessionStart");
+    let ctx = v["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+    assert!(ctx.contains("[blocker] Waiting for the API key from ops") && ctx.contains("src/main.rs"), "{ctx}");
+
+    let s = e.json(&["sessions"])[0].clone();
+    assert_eq!(s["turns"], 2);
+    assert_eq!(s["prompts"], 1);
+
+    // Robustness: garbage, unknown events, unknown sessions — always exit 0, never block Claude.
+    for (session, event, payload) in [(sid, "stop", "not json"), (sid, "no-such-event", "{}"), ("unknown-session", "session-start", "{}")] {
+        let out = hook(&e, session, event, payload);
+        assert_eq!(out.status.code(), Some(0), "{event} {payload}");
+        assert!(out.stdout.is_empty());
+    }
+}
+
+#[test]
+fn managed_hooks_only_policy_keeps_mcp_but_omits_hooks() {
+    let e = Env::new();
+    e.setup();
+    std::fs::write(e.cfg.join("remote-settings.json"), r#"{"allowManagedHooksOnly": true}"#).unwrap();
+    let (report, session) = launch_report(&e, &[], "managed-hooks.json");
+    let args: Vec<String> = serde_json::from_value(report["args"].clone()).unwrap();
+    assert!(!args.contains(&"--settings".to_string()));
+    assert!(args.contains(&"--mcp-config".to_string()));
+    assert_eq!(session["integrations"]["hooks"]["state"], "blocked");
+    assert!(session["integrations"]["hooks"]["reason"].as_str().unwrap().contains("allowManagedHooksOnly"));
 }

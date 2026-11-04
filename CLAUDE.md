@@ -14,6 +14,7 @@ cd apps/desktop && npm run tauri dev        # use NEXUS_DATA_DIR=<empty dir> for
 cd apps/desktop && npx tauri build --debug --no-bundle && node e2e/t18-check.mjs   # production build ignores CDP env
 cd apps/desktop && npx tauri build --debug --no-bundle --features e2e-webview-debugging && node e2e/run-smoke.mjs
 cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `nexus mcp`
+cd apps/desktop && node e2e/hooks-real-claude.mjs # real Claude runs NEXUS hooks (synthetic profile)
 ```
 
 ## Architecture rules
@@ -28,6 +29,7 @@ cd apps/desktop && node e2e/mcp-interop.mjs # official MCP SDK client against `n
   not create.
 * Every process that owns sessions is a session host (ADR-0014): register, heartbeat, `host::shutdown` on exit.
 * MCP tools stay workspace-scoped, bounded and free of exec/file/network access (ADR-0009).
+* Hooks stay deterministic and cheap: no model calls, no prompt text or raw commands stored, always exit 0 (ADR-0016).
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
   older Tauri crates than the npm packages and `tauri build` fails its version check.
 

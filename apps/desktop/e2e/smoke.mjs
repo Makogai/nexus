@@ -77,6 +77,7 @@ try {
   check('NEXUS assigns the Claude session id', report.args[0] === '--session-id' && /^[0-9a-f-]{36}$/.test(report.args[1]))
   check('work profile prompt appended', report.args.some((a) => a.startsWith('NEXUS work profile: PROTOTYPE')))
   check('session-scoped NEXUS MCP config passed', report.args.includes('--mcp-config'))
+  check('session-scoped lifecycle hook settings passed', report.args.includes('--settings'))
 
   // Exit is recorded; a conversation without a transcript is not offered for resume.
   const session = await cdp.waitFor(`(async () => {
@@ -128,6 +129,19 @@ try {
     diag = `${rowsNow} || cli alive=${cliRun.exitCode === null} stderr=${cliErr.trim()} || db: ${titles.join(', ')}`
   }
   check('terminal session visible live in the desktop', !!live, diag)
+  // Cross-process: a Notification hook (as Claude would run it) marks the terminal session as waiting for the user.
+  const cliSession = JSON.parse(execFileSync(nexusCli, ['--data-dir', dataDir, '--json', 'sessions'], { encoding: 'utf8' })).find(
+    (x) => x.title === 'From a terminal',
+  )
+  if (cliSession) {
+    const hookRun = spawn(nexusCli, ['--data-dir', dataDir, 'hook', '--session', cliSession.id, 'notification'], { stdio: ['pipe', 'ignore', 'ignore'] })
+    hookRun.stdin.end(js({ hook_event_name: 'Notification', message: 'Claude needs your permission to use Bash' }))
+    await new Promise((r) => hookRun.on('exit', r))
+  }
+  const waiting = await cdp
+    .waitFor(`[...document.querySelectorAll('.page .session')].some((r) => r.innerText.includes('From a terminal') && r.innerText.includes('Waiting for you'))`, 15000)
+    .catch(() => false)
+  check('Notification hook shows “waiting for you” live in the desktop', !!waiting)
   cliRun.stdin.end('bye\n') // fake-claude reads one line and exits
   await new Promise((r) => cliRun.on('exit', r))
 } finally {

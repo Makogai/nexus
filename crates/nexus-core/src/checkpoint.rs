@@ -102,8 +102,11 @@ pub fn add(conn: &Connection, session_id: &str, kind: CheckpointKind, summary: &
 const SELECT: &str = "SELECT e.id, e.session_id, s.title, e.kind, e.summary, e.source, e.created_at
     FROM session_events e JOIN sessions s ON s.id = e.session_id";
 
+/// Checkpoint kinds; `session_events` also holds lifecycle events recorded by hooks.
+const CHECKPOINT_KINDS: &str = "('progress', 'decision', 'blocker', 'done', 'note')";
+
 fn list_where(conn: &Connection, cond: &str, arg: &str, limit: u32) -> Result<Vec<Checkpoint>> {
-    let mut stmt = conn.prepare(&format!("{SELECT} WHERE {cond} ORDER BY e.created_at DESC, e.rowid DESC LIMIT {}", limit.min(200)))?;
+    let mut stmt = conn.prepare(&format!("{SELECT} WHERE {cond} AND e.kind IN {CHECKPOINT_KINDS} ORDER BY e.created_at DESC, e.rowid DESC LIMIT {}", limit.min(200)))?;
     let rows = stmt
         .query_map([arg], |r| {
             Ok(Checkpoint {

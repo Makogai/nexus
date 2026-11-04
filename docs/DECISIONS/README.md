@@ -20,3 +20,4 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0013](0013-portable-knowledge-format.md) | Portable knowledge files: identity, schema, atomic writes, indexing, sync boundaries | Accepted (Phase 3–4) |
 | [0014](0014-session-hosts-and-lifecycle.md) | Session hosts and lifecycle (prepares background-service mode) | Accepted |
 | [0015](0015-production-webview-hardening.md) | Production webview hardening (threat T18) | Accepted, implemented |
+| [0016](0016-lifecycle-hooks.md) | Claude lifecycle hooks: deterministic activity capture and checkpoint recovery | Accepted, implemented |

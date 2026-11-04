@@ -3,6 +3,7 @@
 //! Everything the desktop app, the CLI, the MCP server and the hook handler share lives here.
 //! This crate has no dependency on Tauri, PTYs or any UI (see `docs/ARCHITECTURE.md`).
 
+pub mod activity;
 pub mod checkpoint;
 pub mod claude;
 pub mod db;

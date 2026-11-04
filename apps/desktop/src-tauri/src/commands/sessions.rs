@@ -8,7 +8,8 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
 
 use nexus_core::claude::install;
-use nexus_core::claude::mcp::{self, Integrations, McpStatus};
+use nexus_core::claude::hooks;
+use nexus_core::claude::mcp::{self, Integrations, IntegrationStatus};
 use nexus_core::claude::policy;
 use nexus_core::claude::launch::{self, LaunchRequest, Mode};
 use nexus_core::claude::profile::{self, ClaudeProfile};
@@ -145,14 +146,21 @@ fn resolve_target(ctx: &Ctx, project_id: Option<&str>, cwd: Option<&str>) -> Ipc
     })
 }
 
-/// Session-scoped NEXUS MCP server, when the profile's organisation policy allows it (ADR-0004, ADR-0009).
-fn session_mcp(ctx: &Ctx, profile: &ClaudeProfile, nexus_id: &str) -> IpcResult<McpStatus> {
+/// Session-scoped NEXUS integrations — MCP server and lifecycle hooks — when the profile's organisation policy
+/// allows them (ADR-0004, ADR-0009, ADR-0016).
+fn session_integrations(ctx: &Ctx, profile: &ClaudeProfile, nexus_id: &str) -> IpcResult<Integrations> {
     let pol = policy::evaluate(&profile.effective_config_dir(&ctx.home), &ctx.machine_policy);
-    let status = mcp::prepare(&pol, mcp::nexus_next_to_current_exe().as_deref(), &ctx.data_dir, nexus_id)?;
-    if let McpStatus::Blocked { reason } | McpStatus::Unavailable { reason } = &status {
-        tracing::info!(profile = %profile.name, %reason, "NEXUS MCP tools not enabled for this session");
+    let exe = mcp::nexus_next_to_current_exe();
+    let integrations = Integrations {
+        mcp: mcp::prepare(&pol, exe.as_deref(), &ctx.data_dir, nexus_id)?,
+        hooks: hooks::prepare(&pol, exe.as_deref(), &ctx.data_dir, nexus_id)?,
+    };
+    for (name, status) in [("MCP tools", &integrations.mcp), ("lifecycle hooks", &integrations.hooks)] {
+        if let IntegrationStatus::Blocked { reason } | IntegrationStatus::Unavailable { reason } = status {
+            tracing::info!(profile = %profile.name, integration = name, %reason, "NEXUS integration not enabled for this session");
+        }
     }
-    Ok(status)
+    Ok(integrations)
 }
 
 fn pty_size(cols: Option<u16>, rows: Option<u16>) -> (u16, u16) {
@@ -186,7 +194,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
 
         let nexus_id = new_id();
         let claude_session_id = uuid::Uuid::new_v4().to_string();
-        let mcp_status = session_mcp(&ctx, &profile, &nexus_id)?;
+        let integrations = session_integrations(&ctx, &profile, &nexus_id)?;
         let spec = launch::build(
             &LaunchRequest {
                 profile: &profile,
@@ -201,7 +209,8 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 nexus_session_id: &nexus_id,
                 workspace_id: target.workspace_id.as_deref(),
                 project_id: target.project_id.as_deref(),
-                mcp_config: mcp_status.config_path(),
+                mcp_config: integrations.mcp.config_path(),
+                settings: integrations.hooks.config_path(),
             },
             &env::current(),
         )?;
@@ -230,7 +239,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                     resumed_from: None,
                 },
             )?;
-            session::set_integrations(&db, &s.id, &Integrations { mcp: mcp_status.clone() })?;
+            session::set_integrations(&db, &s.id, &integrations)?;
             profile::touch_used(&db, &profile.id)?;
             if let Some(pid) = &target.project_id {
                 project::touch_opened(&db, pid)?;
@@ -279,7 +288,7 @@ pub async fn session_resume(
         let exe = install::resolve(profile.executable.as_deref(), &ctx.home)?;
         let wp = prev.work_profile.as_deref().and_then(workprofile::get);
         let nexus_id = new_id();
-        let mcp_status = session_mcp(&ctx, &profile, &nexus_id)?;
+        let integrations = session_integrations(&ctx, &profile, &nexus_id)?;
         let spec = launch::build(
             &LaunchRequest {
                 profile: &profile,
@@ -294,7 +303,8 @@ pub async fn session_resume(
                 nexus_session_id: &nexus_id,
                 workspace_id: prev.workspace_id.as_deref(),
                 project_id: prev.project_id.as_deref(),
-                mcp_config: mcp_status.config_path(),
+                mcp_config: integrations.mcp.config_path(),
+                settings: integrations.hooks.config_path(),
             },
             &env::current(),
         )?;
@@ -322,7 +332,7 @@ pub async fn session_resume(
                     resumed_from: Some(prev.id.clone()),
                 },
             )?;
-            session::set_integrations(&db, &s.id, &Integrations { mcp: mcp_status.clone() })?;
+            session::set_integrations(&db, &s.id, &integrations)?;
             profile::touch_used(&db, &profile.id)?;
             s
         };
