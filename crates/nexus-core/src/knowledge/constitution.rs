@@ -935,8 +935,10 @@ pub struct Delivery {
 }
 
 /// Compact system-prompt block: mandatory policies first, then rules, from `applies: always` documents within
-/// `budget` characters; guidelines and anything over budget are listed by id for `get_constitution`.
-pub fn delivery(e: &Effective, budget: usize, tools: bool) -> Delivery {
+/// `budget` characters; guidelines and anything over budget are listed by id for `get_constitution`. `level` is the
+/// project's context strategy choice (ADR-0028): rules, mandatory policies only, or nothing at start.
+pub fn delivery(e: &Effective, budget: usize, tools: bool, level: crate::context::ConstitutionDelivery) -> Delivery {
+    use crate::context::ConstitutionDelivery as Level;
     let mut d = Delivery { pending_approval: e.pending.iter().map(|p| p.title.clone()).collect(), conflicts: e.conflicts.len(), ..Default::default() };
     if e.rules.is_empty() {
         return d;
@@ -951,7 +953,12 @@ pub fn delivery(e: &Effective, budget: usize, tools: bool) -> Delivery {
         Enforcement::Guideline => 2,
     });
     for r in ordered {
-        if r.enforcement == Enforcement::Guideline || !always.contains(r.doc_id.as_str()) {
+        let wanted = match level {
+            Level::Rules => r.enforcement != Enforcement::Guideline,
+            Level::Mandatory => r.enforcement == Enforcement::Mandatory,
+            Level::OnDemand => false,
+        };
+        if !wanted || !always.contains(r.doc_id.as_str()) {
             d.on_demand.push(r.id.clone());
             continue;
         }
@@ -1168,16 +1175,16 @@ Keep them short.
         assert_eq!(e.pending.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pending"]);
         assert!(!e.rules.iter().any(|r| r.id == "X-1"), "unapproved versions are not used");
 
-        let d = delivery(&e, 1500, true);
+        let d = delivery(&e, 1500, true, crate::context::ConstitutionDelivery::Rules);
         let text = d.text.unwrap();
         assert!(text.contains("[SEC-1 · mandatory] No secrets: Never."), "{text}");
         assert!(text.find("SEC-1").unwrap() < text.find("WS-1").unwrap(), "mandatory first");
-        let tight = delivery(&e, 90, true);
+        let tight = delivery(&e, 90, true, crate::context::ConstitutionDelivery::Rules);
         assert!(tight.on_demand.contains(&"P-1".to_string()) && tight.text.as_deref().unwrap_or("").contains("get_constitution"), "{tight:?}");
 
         // A long mandatory policy that does not fit is still named before less binding rules get the space.
         let long = loaded("long", ScopeLevel::Global, true, &format!("## L\n#### No secrets\n<!-- rule: id=SEC-1 enforcement=mandatory -->\n{}\n#### Short\n<!-- rule: id=S-1 -->\nok\n", "x".repeat(500)));
-        let d = delivery(&effective_of(vec![long], &Target::default()).unwrap(), 200, true);
+        let d = delivery(&effective_of(vec![long], &Target::default()).unwrap(), 200, true, crate::context::ConstitutionDelivery::Rules);
         let text = d.text.unwrap();
         assert!(text.contains("[SEC-1 · mandatory] No secrets (full text: get_constitution)") && d.included == ["SEC-1", "S-1"], "{text}");
     }
@@ -1271,7 +1278,7 @@ Keep them short.
         assert!(save_raw(&conn, &data, &ws, &tc.summary.id, "## X\n#### Y\n<!-- rule: id=9 -->\n", None).is_err(), "invalid raw text refused");
 
         // Launch delivery: mandatory first, plus the task rule; an outside edit withdraws the document until approved.
-        let lr = super::super::context::launch_rules_with(&conn, &ws.id, Some((&p.id, &stacks)), None, Some(&tid)).unwrap();
+        let lr = super::super::context::launch_rules_with(&conn, &ws.id, Some((&p.id, &stacks)), None, Some(&tid), &Default::default()).unwrap();
         let text = lr.text.unwrap();
         assert!(text.starts_with("NEXUS constitution") && text.contains(&format!("[{mandatory} · mandatory]")) && text.contains("BOSS-1"), "{text}");
         assert!(!text.contains("<!-- rule"), "never the raw markup");
@@ -1279,7 +1286,7 @@ Keep them short.
         let edited = std::fs::read_to_string(&path).unwrap().replace("Every behaviour change", "Most behaviour changes");
         std::fs::write(&path, edited).unwrap();
         super::super::service::refresh(&conn, &data, &ws).unwrap();
-        let lr = super::super::context::launch_rules_with(&conn, &ws.id, Some((&p.id, &stacks)), None, Some(&tid)).unwrap();
+        let lr = super::super::context::launch_rules_with(&conn, &ws.id, Some((&p.id, &stacks)), None, Some(&tid), &Default::default()).unwrap();
         assert_eq!(lr.pending_approval, ["Team Charter"]);
         assert!(!lr.text.unwrap_or_default().contains(&mandatory), "unapproved synced change is not used");
         let preview = effective(&conn, &data, &ws, &Target { include_pending: true, ..target.clone() }).unwrap();

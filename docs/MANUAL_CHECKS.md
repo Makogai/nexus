@@ -78,6 +78,10 @@
     Personal session in the test project → ask Claude "which NEXUS constitution rules apply here?" → it names the
     rule ids from the *Effective rules* tab (mandatory policies first) and can read a guideline with
     `get_constitution`.
+25. **Context** (optional): project page → *Context* → the analysis lists your README/docs and recommends a strategy;
+    choose one → start a Personal session → *Inspector* with profile Personal: every file under *Observed* is marked
+    predicted, nothing is missing (compare with `/memory` in Claude). Ask Claude to "search the project docs for X"
+    → *Retrieval metrics* shows the call (no query text).
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

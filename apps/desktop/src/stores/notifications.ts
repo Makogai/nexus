@@ -117,6 +117,9 @@ export const useNotificationStore = defineStore('notifications', () => {
       case 'rules':
         await router.push({ name: 'constitutions', query: { pending: '1' } })
         break
+      case 'profile':
+        await router.push({ name: 'profiles' })
+        break
       case 'project':
         if (t.id) await router.push({ name: 'project', params: { id: t.id } })
         break

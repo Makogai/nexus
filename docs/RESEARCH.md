@@ -112,3 +112,9 @@ Tauri 2.x (CLI 2.12.4; 3.0 is alpha), Vue 3.5, Vite 8, vitest 5, Pinia 4, vue-ro
    policy regardless.
 3. Transcript creation timing with `--session-id` when the user exits before the first message (M8 manual).
 4. `claude agents --json` scope across config dirs (M11).
+5. ~~Attention and context hook events in a signed-out `-p` session~~ — **verified 2026-11-04 (2.1.311)**: settings
+   registering PermissionRequest, Notification, PreToolUse(AskUserQuestion), Elicitation, StopFailure and
+   InstructionsLoaded are accepted; SessionStart, InstructionsLoaded (absolute `file_path`, `memory_type`,
+   `load_reason: session_start`), UserPromptSubmit, StopFailure (`error: authentication_failed`) and SessionEnd fire.
+   Permission, idle, question and elicitation events need a signed-in model turn (not verifiable with synthetic
+   profiles; documented payloads used in tests, MANUAL_CHECKS 23).

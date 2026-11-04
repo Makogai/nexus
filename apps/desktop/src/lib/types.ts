@@ -285,7 +285,7 @@ export interface AppNotification {
   sessionId: string | null
   taskId: string | null
   workflowId: string | null
-  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | null
+  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | null
   targetId: string | null
   dedupeKey: string | null
   occurrences: number
@@ -930,3 +930,81 @@ export interface KitValidation {
   output: string
 }
 
+
+// --- Context Manager (ADR-0028) ----------------------------------------------------------------------------------
+
+export type ContextStrategy = 'minimal' | 'balanced' | 'deep' | 'custom'
+
+export interface ContextSettings {
+  alwaysRules: boolean
+  constitution: 'mandatory' | 'rules' | 'on-demand'
+  rulesBudget: number
+  startupSummary: boolean
+  startupIndex: boolean
+  checkpointsAtStart: boolean
+  startupChars: number
+  projectDocs: boolean
+  observeInstructions: boolean
+  retrievalLimit: number
+  retrievalChars: number
+}
+
+export interface ContextConfig {
+  projectId: string
+  strategy: ContextStrategy
+  settings: ContextSettings
+  configured: boolean
+  updatedAt: number | null
+}
+
+export interface ContextEstimate {
+  strategy: ContextStrategy
+  rulesChars: number
+  startupCharsMax: number
+  rulesInPrompt: number
+  onDemand: number
+}
+
+export interface ContextAnalysis {
+  projectId: string
+  project: string
+  docs: { files: number; bytes: number; sample: string[]; skipped: string[] }
+  instructions: { claudeMd: boolean; agentsMd: boolean; claudeDir: boolean }
+  knowledge: { rules: number; alwaysRules: number; openTasks: number; decisions: number; notes: number; specs: number; workflows: number; invalid: number; conflicts: number }
+  constitutionRules: number
+  constitutionMandatory: number
+  estimates: ContextEstimate[]
+  recommendation: ContextStrategy
+  reasons: string[]
+  configured: ContextStrategy | null
+}
+
+export interface ProjectDocEntry {
+  path: string
+  title: string
+  size: number
+  modifiedMs: number
+}
+
+export interface ContextReport {
+  configured: ContextConfig
+  predicted: InstructionsPreview | null
+  observed: {
+    session: { id: string; title: string; startedAt: number; profileId: string | null } | null
+    instructionsObserved: boolean
+    instructions: { path: string; memoryType: string; loadReason: string; predicted: boolean }[]
+    missing: string[]
+    nexus: { rules?: LaunchRules | null; task?: unknown; kits?: unknown; context?: { strategy: ContextStrategy; observeInstructions: boolean } | null } | null
+  }
+  onDemand: { knowledge: ContextAnalysis['knowledge']; projectDocs: number; constitutionRules: string[]; tools: string[] }
+  retrieved: { tool: string; results: number; chars: number; ids: string[]; at: number }[]
+  metrics: {
+    sessions: number
+    sessionsWithRetrieval: number
+    retrievals: number
+    chars: number
+    empty: number
+    byTool: [string, number][]
+    topDocuments: [string, number][]
+  }
+}

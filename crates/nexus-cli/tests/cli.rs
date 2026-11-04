@@ -575,6 +575,72 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     assert_eq!(e.json(&["knowledge", "list"]).as_array().unwrap().len(), before);
 }
 
+/// ADR-0028: the project's context strategy changes what launches and SessionStart get; project docs are searchable
+/// with citations; the inspector compares observed instruction files with its prediction and shows retrievals.
+#[test]
+fn context_strategies_docs_retrieval_and_the_inspector() {
+    let e = Env::new();
+    e.setup();
+    std::fs::write(e.repo.join("README.md"), "# Demo\n\nIntro.\n\n## Payments\n\nCheckout uses the hosted payment page.\n").unwrap();
+    std::fs::write(e.repo.join("CLAUDE.md"), "Project instructions for Claude.\n").unwrap();
+    let rule = write_rule(&ws_dir(&e).join("rules"), "Commit style", "", "Write commit messages in the imperative mood.");
+    e.ok(&["knowledge", "approve", &rule]);
+
+    let a = e.json(&["context", "analyze", "--project", "repo"]);
+    assert_eq!(a["docs"]["files"], 1);
+    let est = a["estimates"].as_array().unwrap();
+    let chars = |s: &str| est.iter().find(|x| x["strategy"] == s).unwrap()["rulesChars"].as_u64().unwrap();
+    assert!(chars("minimal") < chars("balanced"), "minimal appends less: {est:?}");
+    assert_eq!(a["configured"], Value::Null);
+
+    // Balanced (default): the rule text is in the prompt and instruction loading is observed.
+    let (report, session) = launch_report(&e, &[], "ctx-balanced.json");
+    assert!(appended_prompt(&report).contains("imperative mood"));
+    assert_eq!(session["integrations"]["context"]["strategy"], "balanced");
+    let settings_path = |r: &Value| {
+        let args: Vec<String> = serde_json::from_value(r["args"].clone()).unwrap();
+        PathBuf::from(&args[args.iter().position(|a| a == "--settings").unwrap() + 1])
+    };
+    let s: Value = serde_json::from_slice(&std::fs::read(settings_path(&report)).unwrap()).unwrap();
+    assert!(s["hooks"]["InstructionsLoaded"].is_array());
+
+    // Minimal: the rule is only named; no instruction observation hook.
+    e.ok(&["context", "set", "--project", "repo", "--strategy", "minimal"]);
+    let (report, _) = launch_report(&e, &[], "ctx-minimal.json");
+    let prompt = appended_prompt(&report);
+    assert!(!prompt.contains("imperative mood") && prompt.contains("Commit style"), "{prompt}");
+    let s: Value = serde_json::from_slice(&std::fs::read(settings_path(&report)).unwrap()).unwrap();
+    assert!(s["hooks"]["InstructionsLoaded"].is_null());
+
+    // Deep: observe what Claude loads (as the real InstructionsLoaded hook reports it) and retrieve through MCP.
+    e.ok(&["context", "set", "--project", "repo", "--strategy", "deep"]);
+    let (_, session) = launch_report(&e, &[], "ctx-deep.json");
+    let sid = session["id"].as_str().unwrap();
+    let md = e.repo.join("CLAUDE.md").display().to_string().replace('\\', "\\\\");
+    let out = hook(&e, sid, "instructions-loaded", &format!(r#"{{"file_path":"{md}","memory_type":"Project","load_reason":"session_start"}}"#));
+    assert!(out.status.success() && out.stdout.is_empty());
+    let r = mcp_calls(&e, sid, &[
+        ("search_knowledge", json(r#"{"query":"hosted payment"}"#)),
+        ("get_document", json(r#"{"path":"README.md","fromLine":5}"#)),
+        ("get_document", json(r#"{"path":"../secrets.txt"}"#)),
+    ]);
+    let hits = r[0]["structuredContent"]["hits"].as_array().unwrap();
+    let doc = hits.iter().find(|h| h["source"] == "project-doc").unwrap();
+    assert_eq!(doc["citation"], "README.md:7 § Payments");
+    assert!(r[1]["structuredContent"]["body"].as_str().unwrap().starts_with("## Payments"));
+    assert_eq!(r[2]["isError"], true, "only indexed project docs can be read");
+
+    let i = e.json(&["context", "inspect", "--project", "repo", "--profile", "fake"]);
+    assert_eq!(i["configured"]["strategy"], "deep");
+    let observed = i["observed"]["instructions"].as_array().unwrap();
+    assert_eq!(observed.len(), 1);
+    assert_eq!(observed[0]["predicted"], true, "the inspector predicted the CLAUDE.md Claude reported: {i}");
+    let tools: Vec<&str> = i["retrieved"].as_array().unwrap().iter().map(|x| x["tool"].as_str().unwrap()).collect();
+    assert_eq!(tools, ["search_knowledge", "get_document"], "failed calls are not retrievals");
+    assert!(i["metrics"]["retrievals"].as_u64().unwrap() >= 2);
+    assert!(!i.to_string().contains("hosted payment\""), "queries are not stored");
+}
+
 /// ADR-0027: constitutions reach launches as effective rules (mandatory first, compact, never raw markup), synced
 /// documents only once approved, narrower scopes cannot override mandatory policies, Claude reads the rest by id.
 #[test]

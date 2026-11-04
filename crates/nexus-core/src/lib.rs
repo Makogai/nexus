@@ -7,6 +7,7 @@ pub mod activity;
 pub mod attention;
 pub mod checkpoint;
 pub mod claude;
+pub mod context;
 pub mod db;
 pub mod doctor;
 pub mod env;

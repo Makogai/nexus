@@ -9,6 +9,7 @@ export const router = createRouter({
     { path: '/projects/:id/resume', name: 'resume', component: () => import('./views/ResumeProjectView.vue'), props: true },
     { path: '/knowledge', name: 'knowledge', component: () => import('./views/KnowledgeView.vue') },
     { path: '/constitutions', name: 'constitutions', component: () => import('./views/ConstitutionsView.vue') },
+    { path: '/context', name: 'context', component: () => import('./views/ContextView.vue') },
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
     { path: '/profiles', name: 'profiles', component: () => import('./views/ProfilesView.vue') },
     { path: '/profiles/:id', name: 'profile-diagnostics', component: () => import('./views/ProfileDiagnosticsView.vue'), props: true },

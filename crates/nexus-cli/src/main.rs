@@ -2,6 +2,7 @@
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
 mod constitution;
+mod context;
 mod diagnose;
 mod hook;
 mod instructions;
@@ -63,6 +64,9 @@ enum Command {
     /// AI Kits: Claude Code plugins or skill folders, enabled per profile for NEXUS sessions.
     #[command(subcommand)]
     Kits(kits::KitCmd),
+    /// Context Manager: a project's context strategy, onboarding analysis and the Context Inspector.
+    #[command(subcommand)]
+    Context(context::ContextCmd),
     /// Constitutions: structured rules (articles, sections, rules with ids and enforcement) by scope.
     #[command(subcommand)]
     Constitution(constitution::ConstitutionCmd),
@@ -229,6 +233,7 @@ fn main() -> ExitCode {
         Command::Instructions(a) => instructions::run(&ctx, a).map(|_| 0),
         Command::Notifications(c) => notifications::run(&ctx, c).map(|_| 0),
         Command::Constitution(c) => constitution::run(&ctx, c),
+        Command::Context(c) => context::run(&ctx, c).map(|_| 0),
         Command::Launch(a) => launch::run(&ctx, a),
         Command::Mcp { session } => mcp::run(&ctx, &session),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),

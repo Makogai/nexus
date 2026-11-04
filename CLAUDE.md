@@ -22,6 +22,8 @@ cd apps/desktop && node e2e/profiles-kits.mjs # diagnostics + kits through the d
 cd apps/desktop && node e2e/kits-real-claude.mjs # diagnostics + per-profile kits vs. real Claude
 cd apps/desktop && node e2e/attention.mjs   # notifications + multi-session attention (E2E build, recording notifier)
 cd apps/desktop && node e2e/constitutions.mjs # Constitution Manager through the UI (E2E build)
+cd apps/desktop && node e2e/context.mjs     # Context Manager: wizard, strategy, inspector (E2E build)
+cd apps/desktop && node e2e/context-real-claude.mjs # inspector prediction vs. real InstructionsLoaded via NEXUS hook
 ```
 
 ## Architecture rules
@@ -50,6 +52,8 @@ cd apps/desktop && node e2e/constitutions.mjs # Constitution Manager through the
 * Constitutions, Context, Memory, Skills and Workflows stay separate subsystems on shared infrastructure (ADR-0026).
   Constitutions are rule documents (`format: constitution`, ADR-0027): stable rule ids, mandatory policies are never
   overridable by narrower scopes, synced versions need approval, delivery is compact and budgeted.
+* Context strategies (ADR-0028) decide what `claude::prepare` and SessionStart add; balanced = the earlier behaviour.
+  Project docs are read only when indexed (allowlisted Markdown); retrieval records counts and ids, never queries.
 * Workspace-controlled text (task titles/descriptions, synced files) never goes into the system prompt or `--name`;
   it reaches Claude only as escaped, labelled data (SessionStart context, tool output) — ADR-0020, threat T22.
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks

@@ -23,6 +23,12 @@ import type {
   KitView,
   MemoryApproval,
   MemoryProposal,
+  ContextAnalysis,
+  ContextConfig,
+  ContextReport,
+  ContextSettings,
+  ContextStrategy,
+  ProjectDocEntry,
   ConstitutionHistory,
   ConstitutionStructure,
   ConstitutionSummary,
@@ -175,6 +181,14 @@ export const api = {
   instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
+
+  contextGet: (projectId: string) => call<ContextConfig>('context_get', { projectId }),
+  contextSet: (projectId: string, strategy: ContextStrategy, settings?: ContextSettings | null) =>
+    call<ContextConfig>('context_set', { projectId, strategy, settings: settings ?? null }),
+  contextPresets: () => call<[ContextStrategy, ContextSettings][]>('context_presets'),
+  contextAnalyze: (projectId: string) => call<ContextAnalysis>('context_analyze', { projectId }),
+  contextDocs: (projectId: string) => call<ProjectDocEntry[]>('context_docs', { projectId }),
+  contextInspect: (projectId: string, profileId: string | null) => call<ContextReport>('context_inspect', { projectId, profileId }),
 
   constitutionList: (workspaceId: string) => call<ConstitutionSummary[]>('constitution_list', { workspaceId }),
   constitutionGet: (workspaceId: string, id: string) => call<ConstitutionView>('constitution_get', { workspaceId, id }),

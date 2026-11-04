@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use std::path::PathBuf;
 
+use nexus_core::context::docs as context_docs;
 use nexus_core::{activity, attention, notify};
 use nexus_core::knowledge::service::{self as knowledge, Author, CreateInput};
 use nexus_core::knowledge::branches::{self, GitRef, Relevance};
@@ -147,6 +148,10 @@ impl Server {
                 _ => unreachable!("checked above"),
             },
         };
+        if let (Ok(v), Ok(b)) = (&outcome, &self.binding) {
+            let (n, ids) = retrieval_summary(name, v);
+            let _ = nexus_core::context::inspector::record_retrieval(&self.conn, &b.session.id, name, n, v.to_string().chars().count(), &ids);
+        }
         Ok(match outcome {
             Ok(structured) => json!({
                 "content": [{ "type": "text", "text": structured.to_string() }],
@@ -507,26 +512,76 @@ impl Server {
         }))
     }
 
+    /// The session project's context settings (ADR-0028) and its folder, if the project docs are a source.
+    fn context(&self, b: &Binding) -> (nexus_core::context::Settings, Option<(String, PathBuf)>) {
+        let settings = nexus_core::context::settings_for(&self.conn, b.session.project_id.as_deref());
+        let docs = self
+            .session_project(b)
+            .filter(|_| settings.project_docs)
+            .and_then(|p| p.local_path.clone().filter(|d| d.is_dir()).map(|d| (p.id.clone(), d)));
+        (settings, docs)
+    }
+
+    /// Knowledge (and, when the project's context strategy includes them, the project's own docs) — ranked, deduplicated
+    /// by content, each hit with a citation and its last change.
     fn search_knowledge(&self, b: &Binding, args: &Value) -> Result<Value, String> {
         let query = args.get("query").and_then(Value::as_str).filter(|q| !q.trim().is_empty()).ok_or("`query` is required")?;
         if query.chars().count() > 300 {
             return Err("query is too long".into());
         }
         let kinds = kinds_arg(args)?;
-        let limit = limit_arg(args, 10, 20)?;
+        let (settings, docs) = self.context(b);
+        let limit = limit_arg(args, 10, 20)?.min(settings.retrieval_limit as u32);
         self.refresh_knowledge(b)?;
         let hits = kindex::search(&self.conn, &b.workspace_id, query, &kinds, limit).map_err(|e| e.to_string())?;
-        let hits: Vec<Value> = hits
+        let mut seen = std::collections::HashSet::new();
+        let mut out: Vec<Value> = hits
             .iter()
-            .map(|h| json!({ "id": h.item.id, "kind": h.item.kind, "title": h.item.title, "status": h.item.status, "branch": h.item.branch, "snippet": h.snippet }))
+            .filter(|h| seen.insert(h.item.hash.clone()))
+            .map(|h| {
+                // Citation: the file relative to the workspace (global documents by name only).
+                let rel = h.item.path.strip_prefix(&b.workspace.root_path).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| {
+                    format!("global/{}", h.item.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+                });
+                json!({
+                    "source": "knowledge", "id": h.item.id, "kind": h.item.kind, "title": h.item.title, "status": h.item.status,
+                    "branch": h.item.branch, "snippet": h.snippet, "citation": rel, "updated": h.item.updated,
+                })
+            })
             .collect();
-        Ok(json!({ "hits": hits }))
+        let mut docs_note = None;
+        if kinds.is_empty() && let Some((pid, root)) = docs {
+            let _ = context_docs::refresh(&self.conn, &pid, &root);
+            for d in context_docs::search(&self.conn, &pid, query, limit as usize).map_err(|e| e.to_string())? {
+                if out.len() >= limit as usize * 2 || !seen.insert(d.hash.clone()) {
+                    continue;
+                }
+                out.push(json!({
+                    "source": "project-doc", "path": d.path, "title": d.title, "snippet": d.snippet, "citation": d.citation(),
+                    "line": d.line, "updated": nexus_core::knowledge::timestamp(d.modified_ms),
+                }));
+            }
+            docs_note = Some("project-doc hits come from the checked-out working tree; read one with get_document { path, fromLine }");
+        }
+        Ok(json!({ "hits": out, "note": docs_note }))
     }
 
     fn get_document(&self, b: &Binding, args: &Value) -> Result<Value, String> {
-        let id = args.get("id").and_then(Value::as_str).ok_or("`id` is required")?;
+        let (settings, docs) = self.context(b);
+        if let Some(path) = args.get("path").and_then(Value::as_str) {
+            let (pid, root) = docs.ok_or("project documents are not a context source for this session's project")?;
+            let from = args.get("fromLine").and_then(Value::as_u64).unwrap_or(1).clamp(1, 1_000_000) as usize;
+            let _ = context_docs::refresh(&self.conn, &pid, &root);
+            let s = context_docs::read(&self.conn, &pid, &root, path, from, settings.retrieval_chars).map_err(|e| e.to_string())?;
+            return Ok(json!({
+                "source": "project-doc", "path": s.path, "title": s.title, "fromLine": s.from_line, "toLine": s.to_line,
+                "totalLines": s.total_lines, "body": s.text, "truncated": s.truncated, "hash": s.hash,
+                "citation": format!("{}:{}-{}", s.path, s.from_line, s.to_line),
+            }));
+        }
+        let id = args.get("id").and_then(Value::as_str).ok_or("`id` (knowledge document) or `path` (project document) is required")?;
         self.refresh_knowledge(b)?;
-        let view = knowledge::read(&self.conn, &b.workspace, id, 20_000).map_err(|e| e.to_string())?;
+        let view = knowledge::read(&self.conn, &b.workspace, id, settings.retrieval_chars).map_err(|e| e.to_string())?;
         Ok(json!({
             "id": view.item.id, "kind": view.item.kind, "title": view.item.title, "fields": view.fields,
             "body": view.body, "truncated": view.truncated, "path": view.relative_path, "hash": view.item.hash,
@@ -737,6 +792,24 @@ fn project_summary(p: &Project) -> Value {
     })
 }
 
+/// Result count and document ids/paths of a retrieval tool's output (for the Context Inspector; no query text).
+fn retrieval_summary(tool: &str, v: &Value) -> (usize, Vec<String>) {
+    let ids_of = |arr: &Value, keys: &[&str]| -> Vec<String> {
+        arr.as_array()
+            .map(|a| a.iter().filter_map(|x| keys.iter().find_map(|k| x[*k].as_str().map(str::to_string))).collect())
+            .unwrap_or_default()
+    };
+    match tool {
+        "search_knowledge" => (v["hits"].as_array().map_or(0, Vec::len), ids_of(&v["hits"], &["id", "path"])),
+        "get_document" => (1, [v["id"].as_str(), v["path"].as_str()].into_iter().flatten().take(1).map(str::to_string).collect()),
+        "get_constitution" => (v["rules"].as_array().map_or(0, Vec::len), ids_of(&v["rules"], &["id"])),
+        "list_tasks" => (v["tasks"].as_array().map_or(0, Vec::len), ids_of(&v["tasks"], &["id"])),
+        "get_task" => (1, v["id"].as_str().map(|s| vec![s.to_string()]).unwrap_or_default()),
+        "get_checkpoints" => (v["checkpoints"].as_array().map_or(0, Vec::len), vec![]),
+        _ => (1, vec![]),
+    }
+}
+
 fn checkpoint_json(c: &checkpoint::Checkpoint) -> Value {
     json!({ "kind": c.kind, "summary": c.summary, "session": c.session_title, "createdAt": c.created_at })
 }
@@ -803,7 +876,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "search_knowledge", "title": "Search knowledge",
-            "description": "Full-text search over this workspace's rules, tasks, decisions, notes, specs and workflows.",
+            "description": "Full-text search over this workspace's rules, tasks, decisions, notes, specs and workflows — and the project's README/docs when its context strategy includes them. Hits carry a citation (file, or path:line § heading) and when they last changed.",
             "inputSchema": { "type": "object", "properties": {
                 "query": { "type": "string", "minLength": 1, "maxLength": 300 },
                 "kinds": { "type": "array", "items": { "type": "string", "enum": ["rule", "task", "decision", "note", "spec", "workflow"] } },
@@ -813,8 +886,12 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "get_document", "title": "Read document",
-            "description": "Full text and fields of one knowledge document by id (from get_context_index or search_knowledge).",
-            "inputSchema": { "type": "object", "properties": { "id": { "type": "string", "maxLength": 64 } }, "required": ["id"], "additionalProperties": false },
+            "description": "One knowledge document by id (from get_context_index or search_knowledge), or a slice of a project document by path (from search_knowledge) starting at fromLine. Bounded by the project's context strategy.",
+            "inputSchema": { "type": "object", "properties": {
+                "id": { "type": "string", "maxLength": 64 },
+                "path": { "type": "string", "maxLength": 400 },
+                "fromLine": { "type": "integer", "minimum": 1 }
+            }, "additionalProperties": false },
             "annotations": read_only,
         }),
         json!({
