@@ -49,6 +49,9 @@ struct Cli {
 enum Command {
     /// Check NEXUS, Git, Claude installations, profiles and the active workspace.
     Doctor,
+    /// Claude Code setup: is it installed and startable, which version, and the official ways to install it here.
+    /// NEXUS never installs it for you.
+    Setup,
     /// Workspaces (portable folders with a nexus-workspace.json manifest).
     #[command(subcommand)]
     Workspaces(WorkspaceCmd),
@@ -180,8 +183,15 @@ enum ProjectCmd {
         to: Option<String>,
     },
     /// Create or refresh a project's portable context (project-context/<project>/): the overview and architecture
-    /// you wrote are kept; project.json and current-state.md are regenerated.
+    /// you wrote are kept; project.json, environment.json and current-state.md are regenerated.
     Context { project: String },
+    /// A project's environment requirements (runtimes, package managers, containers, environment variable names) from
+    /// its files; --check compares them with this computer (tools are only asked for their version).
+    Env {
+        project: String,
+        #[arg(long)]
+        check: bool,
+    },
     /// Unregister a project (its folder and repository are not touched).
     Remove { project: String },
     /// Where a project stands: verified Git state, saved history (tasks, notes, checkpoints, sessions) and the next
@@ -281,6 +291,7 @@ fn main() -> ExitCode {
     };
     let result = match cli.command {
         Command::Doctor => cmd_doctor(&ctx),
+        Command::Setup => cmd_setup(&ctx),
         Command::Workspaces(c) => cmd_workspaces(&ctx, c).map(|_| 0),
         Command::Projects(c) => cmd_projects(&ctx, c).map(|_| 0),
         Command::Profiles(c) => cmd_profiles(&ctx, c).map(|_| 0),
@@ -324,6 +335,32 @@ fn context(cli: &Cli) -> nexus_core::Result<Ctx> {
 fn fail(e: &CoreError) -> ExitCode {
     eprintln!("error: {e}");
     ExitCode::from(1)
+}
+
+fn cmd_setup(ctx: &Ctx) -> nexus_core::Result<i32> {
+    let conn = ctx.db()?;
+    let s = nexus_core::claude::setup::status(&conn, &ctx.home, true)?;
+    if ctx.json {
+        out::json(&s);
+        return Ok(if s.ready { 0 } else { 1 });
+    }
+    match (&s.version, s.ready) {
+        (Some(v), true) => println!("Claude Code {v} is installed and NEXUS can start it."),
+        (_, true) => println!("Claude Code is installed and NEXUS can start it."),
+        _ => println!("Claude Code is not installed (or cannot be started)."),
+    }
+    println!("{} Claude profile(s) registered.", s.profiles);
+    if !s.ready {
+        println!("Official installation methods (verified {}, {}):", s.verified, s.docs_url);
+        for m in &s.methods {
+            println!("  {}{} [{}]: {}", m.title, if m.recommended { " (recommended)" } else { "" }, m.shell, m.command);
+            println!("      {}", m.notes);
+        }
+    }
+    for n in &s.next {
+        println!("→ {n}");
+    }
+    Ok(if s.ready { 0 } else { 1 })
 }
 
 pub(crate) fn active_workspace(conn: &Connection) -> nexus_core::Result<workspace::Workspace> {
@@ -662,6 +699,46 @@ fn cmd_projects(ctx: &Ctx, cmd: ProjectCmd) -> nexus_core::Result<()> {
                 out::json(&p);
             } else {
                 println!("cloned {} into {}", p.name, p.local_path.as_ref().map(|x| x.display().to_string()).unwrap_or_default());
+            }
+        }
+        ProjectCmd::Env { project: q, check } => {
+            let p = find(&q)?;
+            let Some(r) = project::environment::report(&ws, &p, check) else {
+                println!("{}: not on this computer and no environment record in the workspace yet", p.name);
+                return Ok(());
+            };
+            if ctx.json {
+                out::json(&r);
+                return Ok(());
+            }
+            println!("{} — environment (from the {})", p.name, r.from);
+            if r.checks.is_empty() {
+                for q in &r.environment.requirements {
+                    println!("  {} {}  ({})", q.tool, if q.constraint.is_empty() { "any version" } else { &q.constraint }, q.source);
+                }
+            } else {
+                for c in &r.checks {
+                    let have = c.installed.clone().unwrap_or_else(|| "–".into());
+                    println!("  {:<9} {} {} — installed {have}  ({})", c.status, c.name, if c.constraint.is_empty() { "(any)" } else { &c.constraint }, c.source);
+                    if let Some(cmd) = &c.install_command {
+                        println!("            install: {}  (or {})", cmd.join(" "), c.install_url.clone().unwrap_or_default());
+                    } else if c.status == "missing" {
+                        println!("            install: {}", c.install_url.clone().unwrap_or_default());
+                    }
+                }
+            }
+            let cont = &r.environment.containers;
+            if !cont.compose_services.is_empty() {
+                println!("  local services ({}): {}", cont.compose_file.clone().unwrap_or_default(), cont.compose_services.join(", "));
+            }
+            if let Some(d) = &cont.devcontainer {
+                println!("  dev container: {d}{}", cont.devcontainer_image.as_deref().map(|i| format!(" ({i})")).unwrap_or_default());
+            }
+            if !r.environment.env_vars.is_empty() {
+                println!("  environment variables (names only): {}", r.environment.env_vars.iter().map(|v| v.name.as_str()).collect::<Vec<_>>().join(", "));
+            }
+            if let Some(s) = &r.environment.setup_section {
+                println!("  setup instructions: README.md — “{s}”");
             }
         }
         ProjectCmd::Context { project: q } => {

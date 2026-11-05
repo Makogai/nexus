@@ -292,6 +292,20 @@ pub fn run(conn: &Connection, data_dir: &Path, ws: &Workspace, opts: &Options<'_
         if crate::git::version().is_none() {
             out.push(f("git", "tools", Status::Error, "Git was not found").recommend("Install Git (https://git-scm.com/downloads); sync and projects need it."));
         }
+        // Each available project's requirements against this computer (tools only asked for their version).
+        let mut lacking = Vec::new();
+        for p in projects.iter().filter(|p| p.available) {
+            if let Some(r) = project::environment::report(ws, p, true) {
+                for c in r.checks.iter().filter(|c| c.status == "missing" || c.status == "mismatch") {
+                    let have = c.installed.as_deref().map(|v| format!("found {v}")).unwrap_or_else(|| "not installed".into());
+                    let want = if c.constraint.is_empty() { String::new() } else { format!(" {}", c.constraint) };
+                    lacking.push(format!("{}: {}{want} — {have} ({})", p.name, c.name, c.source));
+                }
+            }
+        }
+        if !lacking.is_empty() {
+            out.push(f("toolchains", "tools", Status::Warn, format!("{} project requirement(s) are not met on this computer", lacking.len())).detail(lacking).recommend("Open the project's Environment card for official install commands; NEXUS never installs anything itself.").go("projects"));
+        }
     }
 
     // ---- sync ----

@@ -8,6 +8,9 @@
 //   P4 — registering a project (local bare remote) creates its portable context; its task lands there; the clone
 //        goes missing → Projects offers to clone it from the remote → cloned under projects/ with the same id; a new
 //        repository in projects/ is registered only after the confirmation.
+//   P5 — environment requirements from the project's files (names of environment variables only, never `.env`) are
+//        recorded in the workspace; checking this computer reports a mismatch; an install command is only typed into a
+//        terminal; the Claude Code setup view reports the installation.
 //
 //   cargo build -p fake-claude -p nexus-cli
 //   npx tauri build --debug --no-bundle --features e2e-webview-debugging
@@ -193,6 +196,35 @@ try {
   await click('[data-confirm-ok]')
   const after = await cdp.waitFor(`(async () => (await window.__TAURI_INTERNALS__.invoke('project_list', { workspaceId: ${js(proWs.id)} })).length)()`, 20000).then(async () => (await inv('project_list', { workspaceId: proWs.id })).length)
   check('…and registered after it', after === before + 1, `${before} → ${after}`)
+
+  // ---- P5: environment and Claude Code setup ----
+  const envApp = join(root, 'envapp')
+  mkdirSync(envApp, { recursive: true })
+  writeFileSync(join(envApp, 'package.json'), js({ name: 'envapp', engines: { node: '>=999' }, packageManager: 'bun@1.1.0', dependencies: { vue: '^3' } }))
+  writeFileSync(join(envApp, '.env.example'), 'API_TOKEN=replace-me\n')
+  writeFileSync(join(envApp, '.env'), 'LOCAL_ONLY_SECRET=never-read\n')
+  writeFileSync(join(envApp, 'compose.yaml'), 'services:\n  db:\n    image: postgres:16\n')
+  const envProject = await inv('project_register', { workspaceId: proWs.id, path: envApp, name: null })
+  const envFile = join(root, 'pro-ws', 'project-context', 'envapp', 'environment.json')
+  const recorded = existsSync(envFile) ? readFileSync(envFile, 'utf8') : ''
+  check('the environment is recorded in the workspace from the project\u2019s files', recorded.includes('">=999"') && recorded.includes('package.json engines.node') && recorded.includes('"db"'), recorded.slice(0, 120))
+  check('…environment variables by name only, never values and never .env', recorded.includes('API_TOKEN') && !recorded.includes('replace-me') && !recorded.includes('LOCAL_ONLY_SECRET'))
+  await cdp.evaluate(`location.hash = '#/projects/${envProject.id}'; location.reload(); true`)
+  await cdp.waitFor(`document.querySelector('[data-env-check]')`, 20000)
+  await click('[data-env-check]')
+  const nodeRow = await cdp.waitFor(`document.querySelector('[data-env-row="node"]')?.innerText`, 60000).catch(() => '')
+  check('checking this computer reports the unmet Node.js requirement', /mismatch|missing/.test(nodeRow) && nodeRow.includes('>=999'), nodeRow)
+  const bunRow = await text('[data-env-row="bun"]')
+  if (bunRow.includes('missing') && (await cdp.evaluate(`!!document.querySelector('[data-env-install="bun"]')`))) {
+    await click('[data-env-install="bun"]')
+    const typedText = await cdp.waitFor(`(() => { const t = [...document.querySelectorAll('.xterm-rows')].map((e) => e.innerText).join('\\n'); return t.includes('Oven-sh.Bun') ? t : '' })()`, 20000).catch(() => '')
+    check('an install command is typed into a terminal, not run', typedText.includes('winget install --id Oven-sh.Bun') && !/Found Bun|Successfully installed/i.test(typedText), typedText.slice(-160))
+  } else {
+    console.log(`      (bun is installed here or has no package-manager command — typing check skipped: ${bunRow.replace(/\s+/g, ' ')})`)
+  }
+  await cdp.evaluate(`location.hash = '#/setup'; true`)
+  const setup = await cdp.waitFor(`document.querySelector('[data-setup-status]')?.innerText`, 30000).catch(() => '')
+  check('the Claude Code setup view reports the installation and the next steps', setup.includes('Claude Code'), setup.slice(0, 120))
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

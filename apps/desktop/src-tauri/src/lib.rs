@@ -141,6 +141,8 @@ pub fn run() {
             commands::projects::project_scan,
             commands::projects::project_clone,
             commands::projects::project_context_init,
+            commands::projects::project_environment,
+            commands::claude::claude_setup_status,
             commands::workspaces::workspace_doctor,
             commands::workspaces::workspace_repair_plan,
             commands::workspaces::workspace_repair,

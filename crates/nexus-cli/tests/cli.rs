@@ -1024,6 +1024,27 @@ fn projects_get_a_portable_context_and_scanning_registers_nothing() {
     assert!(!e.run(&["projects", "clone", "repo"]).status.success(), "an available project is not cloned again");
 }
 
+/// Portable Workspace P5: environment requirements come from the project's files and are recorded in the workspace;
+/// `--check` compares them with this computer; `nexus setup` reports Claude Code and the official methods.
+#[test]
+fn environment_requirements_and_claude_code_setup() {
+    let e = Env::new();
+    std::fs::write(e.repo.join("Cargo.toml"), "[package]\nname = \"demo\"\nrust-version = \"1.70\"\n").unwrap();
+    std::fs::write(e.repo.join(".env.example"), "DATABASE_URL=postgres://localhost/db\n").unwrap();
+    e.setup();
+    let recorded = std::fs::read_to_string(ws_dir(&e).join("project-context").join("repo").join("environment.json")).unwrap();
+    assert!(recorded.contains("Cargo.toml rust-version") && recorded.contains("DATABASE_URL") && !recorded.contains("postgres://"), "{recorded}");
+    let r = e.json(&["projects", "env", "repo", "--check"]);
+    assert_eq!(r["from"], "repository");
+    let rustc = r["checks"].as_array().unwrap().iter().find(|c| c["tool"] == "rustc").cloned().unwrap();
+    assert_eq!((rustc["constraint"].as_str(), rustc["status"].as_str()), (Some(">=1.70"), Some("ok")), "the Rust that runs this test meets 1.70: {rustc}");
+    let s = e.cmd(&["--json", "setup"]).output().unwrap();
+    let v: Value = serde_json::from_slice(&s.stdout).unwrap();
+    assert_eq!(s.status.code(), Some(if v["ready"] == true { 0 } else { 1 }));
+    assert!(v["methods"].as_array().unwrap().iter().any(|m| m["recommended"] == true));
+    assert_eq!(v["docsUrl"], "https://code.claude.com/docs/en/setup");
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {

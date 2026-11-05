@@ -22,7 +22,7 @@ const repairPlan = ref<RepairPlan | null>(null)
 const templatePlan = ref<TemplatePlan | null>(null)
 
 const ICON = { ok: CircleCheck, info: Info, warn: TriangleAlert, error: CircleAlert } as const
-const VIEWS: Record<string, string> = { constitutions: 'constitutions', workflows: 'workflows', kits: 'kits', projects: 'projects', sync: 'sync', knowledge: 'knowledge', workspace: 'workspace', 'claude-setup': 'profiles' }
+const VIEWS: Record<string, string> = { constitutions: 'constitutions', workflows: 'workflows', kits: 'kits', projects: 'projects', sync: 'sync', knowledge: 'knowledge', workspace: 'workspace', 'claude-setup': 'claude-setup' }
 const problems = computed(() => (report.value?.findings ?? []).filter((f) => f.status === 'warn' || f.status === 'error'))
 const notes = computed(() => (report.value?.findings ?? []).filter((f) => f.status === 'info'))
 const healthy = computed(() => (report.value?.findings ?? []).filter((f) => f.status === 'ok'))

@@ -8,7 +8,7 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
   Nothing pushed.
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
-  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) and P4 (projects: context, discovery, restoration) done and committed; P5 (environment and Claude Code setup) next. Not merged, not pushed, no release.
+  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects: context, discovery, restoration) and P5 (environment, Claude Code setup) done and committed; P6 (development records, checkpoints, history) next. Not merged, not pushed, no release.
 
 ## Portable Workspace — progress (session 10)
 
@@ -71,6 +71,23 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   implemented (scan on view load + Rescan). Verified: core 205, CLI 36 (4 tests updated for the new folders), vitest
   84, desktop E2E `portable.mjs` 33/33, `run-smoke` 27, `task-flow` 29 (decision path updated), `context` 9,
   `attention` 27, `constitutions` 13, `workflows` 24, `usage` 18, `sync` 18, `profiles-kits` 9, `mcp-interop` 9.
+* **P5 — environment and Claude Code setup** (`project::environment`, `toolchain`, `claude::setup`): requirements are
+  read from the project's files — `.nvmrc`, `.node-version`, `engines`, `volta`, `packageManager`, lock files,
+  `.tool-versions`, `.python-version`, `requires-python`, `uv.lock`/`poetry.lock`, `rust-toolchain(.toml)`,
+  `rust-version`, `composer.json require.php`, `pubspec.yaml environment.sdk`, `go.mod`, Dockerfile, Compose services,
+  Dev Container image — each with its source; environment variables by name from `.env.example`-style files only;
+  the README's setup section by heading. Recorded in `project-context/<slug>/environment.json` on every context refresh
+  (the project files stay authoritative; the record serves computers where the project is not cloned yet). `check`
+  probes only tools from the fixed `toolchain::TOOLS` table with their version command and matches ecosystem
+  constraints (`20`, `>=18 <21`, `^8.2`, `~=3.11`, `||`); channels (`stable`, `lts/*`) are `unknown`, never guessed.
+  Missing tools get the official page and, where published, a WinGet/Homebrew command — typed into a new terminal
+  (`lib/terminal.ts`), never run. `claude::setup`: installations, startability, version, profiles, Git for Windows,
+  and the official methods (code.claude.com, verified 2026-11-05: native PowerShell/CMD/sh installer, WinGet,
+  Homebrew, npm with Node 22+), with next steps; sign-in stays Claude Code's browser flow. `nexus projects env
+  [--check]`, `nexus setup` (exit 1 when not ready), IPC `project_environment`, `claude_setup_status`; desktop
+  *Claude Code setup* view (from Claude profiles and the Doctor) and the project page *Environment* card; Doctor
+  `toolchains` finding. Threat model T44. Verified: core 211, CLI 37 + 6, vitest 86, desktop E2E `portable.mjs` 38/38
+  (the install command typed into PowerShell, not executed), clippy clean.
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 

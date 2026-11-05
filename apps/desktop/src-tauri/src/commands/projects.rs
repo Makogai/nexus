@@ -63,6 +63,20 @@ pub async fn project_clone(ctx: State<'_, Ctx>, workspace_id: String, id: String
     .await
 }
 
+/// The project's environment requirements (from its files, or the workspace record when it is not here) and, with
+/// `check`, how this computer compares (tools probed by their own version command; nothing installed).
+#[tauri::command]
+pub async fn project_environment(ctx: State<'_, Ctx>, workspace_id: String, id: String, check: bool) -> IpcResult<Option<project::environment::Report>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = nexus_core::workspace::get(&c, &workspace_id)?;
+        let p = project::get(&c, &id)?;
+        Ok(project::environment::report(&ws, &p, check))
+    })
+    .await
+}
+
 /// Create or refresh a project's portable context folder.
 #[tauri::command]
 pub async fn project_context_init(ctx: State<'_, Ctx>, workspace_id: String, id: String) -> IpcResult<project::context::Initialized> {

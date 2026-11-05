@@ -84,7 +84,7 @@ pub struct ProjectRecord {
     pub default_branch: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandRef {
     pub kind: String,
@@ -103,7 +103,7 @@ pub struct Initialized {
     pub kept: Vec<String>,
 }
 
-fn source_of(kind: &str, stacks: &[String]) -> String {
+pub(crate) fn source_of(kind: &str, stacks: &[String]) -> String {
     if stacks.iter().any(|s| s == "rust") && kind != "dev" && kind != "start" {
         "Cargo.toml".into()
     } else {
@@ -370,6 +370,22 @@ pub fn init(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str
             Err(_) => {
                 write_doc(&path, &doc(Kind::Spec, &title, &p.id, topic, status, "_Created by NEXUS. The repository's own text could not be copied safely; describe the project here._\n".into()))?;
                 out.created.push(format!("{rel}/{file}"));
+            }
+        }
+    }
+    // environment.json — regenerated from the project's files when it is on this computer (they stay authoritative).
+    if let Some(d) = local {
+        let env = serde_json::to_string_pretty(&super::environment::detect(d)).map_err(|source| CoreError::Json { what: "environment.json".into(), source })? + "\n";
+        let env_path = dir.join(super::environment::ENVIRONMENT_FILE);
+        match std::fs::read_to_string(&env_path) {
+            Ok(old) if old == env => out.kept.push(format!("{rel}/environment.json")),
+            Ok(_) => {
+                workspace::write_atomic(&env_path, env.as_bytes())?;
+                out.updated.push(format!("{rel}/environment.json"));
+            }
+            Err(_) => {
+                workspace::write_atomic(&env_path, env.as_bytes())?;
+                out.created.push(format!("{rel}/environment.json"));
             }
         }
     }

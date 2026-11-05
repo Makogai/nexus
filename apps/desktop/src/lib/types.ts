@@ -113,6 +113,57 @@ export interface ContextInitialized {
   kept: string[]
 }
 
+export interface EnvRequirement {
+  tool: string
+  constraint: string
+  source: string
+}
+
+export interface EnvCheckItem extends EnvRequirement {
+  name: string
+  installed: string | null
+  foundAt: string | null
+  status: 'ok' | 'missing' | 'mismatch' | 'unknown'
+  installUrl: string | null
+  installCommand: string[] | null
+}
+
+export interface EnvironmentReport {
+  environment: {
+    nexus: number
+    requirements: EnvRequirement[]
+    containers: { dockerfile: string | null; composeFile: string | null; composeServices: string[]; devcontainer: string | null; devcontainerImage: string | null }
+    envVars: { name: string; source: string }[]
+    setupSection: string | null
+    commands: { kind: string; command: string; source: string }[]
+  }
+  from: 'repository' | 'workspace record'
+  checks: EnvCheckItem[]
+}
+
+export interface ClaudeSetupMethod {
+  id: string
+  title: string
+  command: string
+  shell: 'powershell' | 'cmd' | 'bash' | 'any'
+  recommended: boolean
+  autoUpdates: boolean
+  notes: string
+}
+
+export interface ClaudeSetupStatus {
+  installations: Installation[]
+  ready: boolean
+  version: string | null
+  profiles: number
+  gitForWindows: boolean | null
+  node: string | null
+  methods: ClaudeSetupMethod[]
+  docsUrl: string
+  verified: string
+  next: string[]
+}
+
 export type DoctorStatus = 'ok' | 'info' | 'warn' | 'error'
 
 export interface DoctorFinding {
