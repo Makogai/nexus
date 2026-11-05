@@ -287,7 +287,7 @@ pub fn publish(conn: &Connection, e: NewEvent) -> Result<Published> {
         let existing: Option<String> = conn
             .query_row(
                 "SELECT id FROM notifications WHERE dedupe_key = ?1 AND dismissed_at IS NULL AND resolved_at IS NULL AND updated_at >= ?2
-                 ORDER BY updated_at DESC LIMIT 1",
+                 ORDER BY updated_at DESC, rowid DESC LIMIT 1",
                 params![key, now - DEDUPE_WINDOW_MS],
                 |r| r.get(0),
             )
@@ -393,7 +393,7 @@ pub fn list(conn: &Connection, f: &Filter) -> Result<Vec<Notification>> {
     }
     sql.push_str(
         " AND (?1 IS NULL OR workspace_id = ?1) AND (?2 IS NULL OR project_id = ?2) AND (?3 IS NULL OR profile_id = ?3)
-          AND (?4 IS NULL OR session_id = ?4) AND (?5 IS NULL OR priority = ?5) ORDER BY updated_at DESC LIMIT ?6",
+          AND (?4 IS NULL OR session_id = ?4) AND (?5 IS NULL OR priority = ?5) ORDER BY updated_at DESC, rowid DESC LIMIT ?6",
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
@@ -624,7 +624,7 @@ pub fn desktop_decision(p: &Prefs, n: &Notification, focus: &Focus) -> std::resu
 /// Not yet decided for the desktop (snoozed ones wait until they come back).
 pub fn pending_desktop(conn: &Connection, limit: u32) -> Result<Vec<Notification>> {
     let mut stmt = conn.prepare(&format!(
-        "{SELECT} WHERE desktop_state = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= ?2) ORDER BY created_at LIMIT ?1"
+        "{SELECT} WHERE desktop_state = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= ?2) ORDER BY created_at, rowid LIMIT ?1"
     ))?;
     let rows = stmt.query_map(params![limit.min(50), now_ms()], from_row)?.collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)

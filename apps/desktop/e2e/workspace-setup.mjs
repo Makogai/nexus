@@ -12,7 +12,7 @@
 //
 // Windows only (WebView2 DevTools protocol).
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -174,7 +174,8 @@ try {
   await click('[data-add-project-mode="git"]')
   await setValue('[data-add-project-url]', fileUrl(project))
   const cloneTarget = await textOf('[data-add-project-target]')
-  check('the clone target is shown before cloning (the workspace projects/ folder)', cloneTarget === join(wsDir, 'projects', 'project'), cloneTarget)
+  // The app shows the workspace's canonical path; temp paths on CI use 8.3 short names (RUNNER~1): compare real paths.
+  check('the clone target is shown before cloning (the workspace projects/ folder)', cloneTarget.toLowerCase() === join(realpathSync.native(wsDir), 'projects', 'project').toLowerCase(), cloneTarget)
   await click('[data-add-project-clone]')
   const onPage = await until(async () => ((await cdp.evaluate(`location.hash`)).startsWith('#/projects/') ? true : null), 60000)
   const projectsNow = await inv('project_list', { workspaceId: ws.id }).catch(() => [])

@@ -9,7 +9,7 @@
 // Native folder pickers cannot be automated, so setup calls the same IPC commands those dialogs feed.
 import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -103,7 +103,9 @@ try {
   )
   const report = JSON.parse(raw)
   const env = report.env
-  check('CLAUDE_CONFIG_DIR is the profile directory', env.CLAUDE_CONFIG_DIR === join(root, 'cfg'), env.CLAUDE_CONFIG_DIR)
+  // Same folder, not the same spelling: CI temp paths use 8.3 short names (C:\Users\RUNNER~1) that NEXUS stores in long form.
+  const real = (p) => { try { return realpathSync.native(p).toLowerCase() } catch { return String(p).toLowerCase() } }
+  check('CLAUDE_CONFIG_DIR is the profile directory', !!env.CLAUDE_CONFIG_DIR && real(env.CLAUDE_CONFIG_DIR) === real(join(root, 'cfg')), env.CLAUDE_CONFIG_DIR)
   for (const k of ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_MESSAGING_TOKEN', 'ANTHROPIC_API_KEY', 'OTEL_EXPORTER_OTLP_ENDPOINT']) {
     check(`${k} does not reach Claude`, env[k] === null, String(env[k]))
   }
