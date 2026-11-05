@@ -305,7 +305,12 @@ pub fn run() {
             commands::notifications::e2e_focus_state,
             commands::notifications::e2e_notification_activate,
         ])
-        .build(tauri::generate_context!())
+        .build({
+            #[allow(unused_mut)]
+            let mut context = tauri::generate_context!();
+            e2e_browser_args(&mut context);
+            context
+        })
         .expect("failed to build the NEXUS application");
 
     app.run(|handle, event| {
@@ -321,6 +326,22 @@ pub fn run() {
         }
     });
 }
+
+/// E2E builds only: hand the test's WebView2 switches (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, e.g. the DevTools
+/// port) to the window's own browser arguments as well, next to wry's defaults. WebView2 on some systems (GitHub's
+/// Windows Server runners) ignores the variable once the app passes arguments itself. Release builds cannot contain
+/// this code: the e2e feature is refused at compile time there (ADR-0015, ADR-0033).
+#[cfg(feature = "e2e-webview-debugging")]
+fn e2e_browser_args(context: &mut tauri::Context<tauri::Wry>) {
+    if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+        for w in context.config_mut().app.windows.iter_mut() {
+            w.additional_browser_args = Some(format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection {extra}"));
+        }
+    }
+}
+
+#[cfg(not(feature = "e2e-webview-debugging"))]
+fn e2e_browser_args(_context: &mut tauri::Context<tauri::Wry>) {}
 
 #[cfg(test)]
 mod app_id_tests {
