@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { RunStep, RunView, WorkflowSummary } from '../src/lib/types'
-import { includedSteps, splitArgs, verificationLabel } from '../src/lib/workflow'
+import { approvalImpactText, includedSteps, splitArgs, verificationLabel } from '../src/lib/workflow'
 
 const api = vi.hoisted(() => ({
   workflowList: vi.fn(),
@@ -17,6 +17,7 @@ const api = vi.hoisted(() => ({
   gateSuggest: vi.fn(),
   gateUpsert: vi.fn(),
   gateApprove: vi.fn(),
+  gateApprovalImpact: vi.fn(),
   gateRevoke: vi.fn(),
   gateRun: vi.fn(),
   uiPreferencesSet: vi.fn(),
@@ -134,6 +135,7 @@ describe('GatesPanel', () => {
     api.gatesList.mockResolvedValue([[gate, null]])
     api.gateSuggest.mockResolvedValue([])
     api.gateApprove.mockResolvedValue({ ...gate, approved: true, approvedAt: 1 })
+    api.gateApprovalImpact.mockResolvedValue({ steps: 2, runs: 1, stillWaiting: 1 })
     const w = mount(GatesPanel, { attachTo: document.body })
     const dialog = mount(ConfirmDialog, { attachTo: document.body })
     await flushPromises()
@@ -141,11 +143,21 @@ describe('GatesPanel', () => {
     expect(w.find('[data-run-gate="test"]').attributes('disabled')).toBeDefined()
     await w.find('[data-approve-gate="test"]').trigger('click')
     await flushPromises()
-    expect(document.querySelector('[data-confirm-message]')?.textContent).toContain('npm test')
+    const message = document.querySelector('[data-confirm-message]')?.textContent ?? ''
+    expect(message).toContain('npm test')
+    expect(message).toContain('Approving resumes 2 waiting workflow steps in 1 run automatically. 1 step keeps waiting for other gates.')
     ;(document.querySelector('[data-confirm-ok]') as HTMLButtonElement).click()
     await flushPromises()
     expect(api.gateApprove).toHaveBeenCalledWith('p1', 'test', 'abc')
     dialog.unmount()
     w.unmount()
+  })
+})
+
+describe('approvalImpactText', () => {
+  it('says what an approval resumes, in plain words', () => {
+    expect(approvalImpactText({ steps: 0, runs: 0, stillWaiting: 0 })).toBe('No waiting workflow step resumes with this approval.')
+    expect(approvalImpactText({ steps: 1, runs: 1, stillWaiting: 0 })).toBe('Approving resumes 1 waiting workflow step in 1 run automatically.')
+    expect(approvalImpactText({ steps: 3, runs: 2, stillWaiting: 2 })).toBe('Approving resumes 3 waiting workflow steps in 2 runs automatically. 2 steps keep waiting for other gates.')
   })
 })

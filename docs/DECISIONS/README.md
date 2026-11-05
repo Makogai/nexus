@@ -14,7 +14,7 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0007](0007-terminal.md) | Terminal: xterm.js + portable-pty with raw byte channels | Accepted |
 | [0008](0008-session-identity-and-lifecycle.md) | NEXUS-assigned Claude session IDs and session state machine | Accepted |
 | [0009](0009-mcp-server.md) | stdio MCP server in the `nexus` binary, scope bound at launch | Accepted, implemented |
-| [0010](0010-usage-metrics-provenance.md) | Usage metrics with explicit provenance | Accepted (Phase 5) |
+| [0010](0010-usage-metrics-provenance.md) | Usage metrics with explicit provenance | Accepted; transcript source implemented by 0030 (OpenTelemetry opt-in still planned) |
 | [0011](0011-work-profiles.md) | Work profiles as data, separate from native effort | Accepted |
 | [0012](0012-workflows-reuse-native.md) | Workflows reuse native skills/subagents; no custom orchestrator | Accepted, implemented by 0029 |
 | [0013](0013-portable-knowledge-format.md) | Portable knowledge files: identity, schema, atomic writes, indexing, sync boundaries | Accepted, implemented (sync keys: Phase 6) |
@@ -34,3 +34,5 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0027](0027-constitutions.md) | Constitutions: structured rule documents with stable ids, enforcement levels and scoped inheritance | Accepted, implemented |
 | [0028](0028-context-manager.md) | Context Manager: per-project strategies, cited retrieval from project docs, an inspector built on observation | Accepted, implemented |
 | [0029](0029-workflow-engine.md) | Workflow Engine: portable definitions on tasks and sessions, trusted gates, AI-reported vs. verified | Accepted, implemented |
+| [0030](0030-usage-analytics.md) | Usage analytics: per-response counts parsed from local transcripts, provenance on every figure | Accepted, implemented; implements 0010's transcript source |
+| [0031](0031-git-workspace-sync.md) | Git-based workspace sync: the person's repository, explicit outgoing review, no sync service | Accepted; readiness implemented, sync flow is M29 |

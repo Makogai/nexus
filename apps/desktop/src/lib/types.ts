@@ -1156,6 +1156,13 @@ export interface Gate {
   approvedAt: number | null
 }
 
+/** What approving a gate resumes: steps waiting only for it (in `runs` runs) and steps that keep waiting. */
+export interface ApprovalImpact {
+  steps: number
+  runs: number
+  stillWaiting: number
+}
+
 export interface GateInput {
   name: string
   title?: string
@@ -1171,4 +1178,134 @@ export interface StartRunInput {
   goal: string
   rigor?: Rigor | null
   profileId?: string | null
+}
+
+// ---- Usage analytics (ADR-0030) -------------------------------------------------------------------------------
+
+export type UsageDimension = 'project' | 'profile' | 'model' | 'strategy' | 'work-profile' | 'task' | 'workflow'
+export type UsageStatus = 'measured' | 'no-requests' | 'pending' | 'missing' | 'unreadable'
+
+export interface UsageFilter {
+  from?: number | null
+  to?: number | null
+  workspaceId?: string | null
+  projectId?: string | null
+  profileId?: string | null
+  taskId?: string | null
+  workflowRunId?: string | null
+  strategy?: string | null
+  workProfile?: string | null
+  model?: string | null
+}
+
+/** Token counts reported by the Claude API, parsed from Claude Code's session transcripts (provenance `parsed`). */
+export interface UsageTokens {
+  requests: number
+  input: number
+  output: number
+  cacheWrite: number
+  cacheRead: number
+  webSearches: number
+  subagentRequests: number
+}
+
+export interface UsageEfficiency {
+  tokensPerSession: number | null
+  contextPerRequest: number | null
+  outputPerRequest: number | null
+  cacheHit: number | null
+}
+
+/** Claude Code's own cost estimate (API prices) — an estimate, never a bill; API-billed profiles only (ADR-0010). */
+export interface UsageCost {
+  usd: number | null
+  incomplete: boolean
+  /** Sessions left out: subscription usage is never converted into spend. */
+  withheldSubscription: number
+  /** Sessions left out because the profile's billing is not known yet. */
+  withheldUnknown: number
+}
+
+/** NEXUS's estimate (characters ÷ 4) of the context it added itself. */
+export interface UsageContextEstimate {
+  sessions: number
+  tokensPerSession: number | null
+  shareOfContext: number | null
+}
+
+export interface UsageGroup {
+  key: string
+  label: string
+  sessions: number
+  tokens: UsageTokens
+  efficiency: UsageEfficiency
+  cost: UsageCost
+  contextEstimate: UsageContextEstimate
+}
+
+export interface UsageDay {
+  day: string
+  tokens: UsageTokens
+}
+
+export interface UsageCoverage {
+  sessions: number
+  measured: number
+  noRequests: number
+  pending: number
+  missing: number
+  unreadable: number
+  outsideNexusRequests: number
+}
+
+export interface UsageReport {
+  totals: UsageTokens
+  sessions: number
+  efficiency: UsageEfficiency
+  cost: UsageCost
+  contextEstimate: UsageContextEstimate
+  coverage: UsageCoverage
+  daily: UsageDay[]
+  by: UsageDimension
+  groups: UsageGroup[]
+  claudeVersions: string[]
+  /** Every transcript format read is one NEXUS has verified; otherwise parsed values may be inaccurate. */
+  formatVerified: boolean
+  /** ADR-0010 provenance of the token counts: API-reported, parsed from Claude Code's transcripts. */
+  tokenProvenance: 'parsed'
+}
+
+export interface TelemetryNote {
+  profileId: string
+  profile: string
+  organizationManaged: boolean
+  managedTelemetry: boolean
+}
+
+export interface UsageView {
+  report: UsageReport
+  telemetry: TelemetryNote[]
+}
+
+export interface SessionUsage {
+  sessionId: string
+  title: string
+  startedAt: number
+  endedAt: number | null
+  live: boolean
+  projectId: string | null
+  project: string | null
+  profileId: string | null
+  profile: string | null
+  taskId: string | null
+  task: string | null
+  workflowRunId: string | null
+  workflow: string | null
+  strategy: string
+  workProfile: string | null
+  status: UsageStatus
+  detail: string | null
+  tokens: UsageTokens
+  cost: UsageCost
+  contextEstimate: number | null
 }

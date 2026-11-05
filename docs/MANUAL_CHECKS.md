@@ -92,5 +92,16 @@
     click the notification in the Action Center → NEXUS starts and opens that session (resumable). Uninstall →
     `HKCU\Software\Classes\AppUserModelId\dev.nexus.desktop` and `HKCU\Software\Classes\nexus` are gone.
 
+28. **Usage with a signed-in profile** (Personal profile, a short real session): run one prompt → *Usage* (or
+    `nexus usage --days 1`) → the session shows *Parsed* tokens and requests; compare with Claude's `/cost` (or
+    `/usage`) in that session: input/output/cache counts agree. *Claude profiles → check sign-in* for the profile →
+    an API-key profile then shows *≈ $… (Estimate)*, a subscription shows *not shown (subscription)*. The *Work*
+    (organisation-managed) profile: the page notes that telemetry is configured by the organisation; NEXUS changed
+    nothing in its settings.
+29. **After a Claude Code update** (any profile): if *Usage* warns that a transcript format is not verified, repeat
+    28 with the new version; when the numbers agree, add its `major.minor` to `usage::transcript::VERIFIED_FORMATS`.
+30. **Workspace sync readiness**: `git init` in a copy of the workspace folder → `nexus workspaces sync-status` →
+    it lists what would travel, flags a `.env` or key file you add by name only, and never fetches, commits or pushes.
+
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

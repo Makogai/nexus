@@ -268,8 +268,9 @@ fn gate_commands_run_only_in_their_approved_version() {
     assert!(v.steps[0].state.last_failure.as_deref().unwrap().contains("audit (version 1) are not approved"));
     assert!(v.steps[0].results.is_empty(), "nothing was executed");
     assert!(categories(&f, &id).contains(&"input-required".to_string()));
+    assert_eq!(approval_impact(&f.conn, &f.project.id, "audit").unwrap(), ApprovalImpact { steps: 1, runs: 1, still_waiting: 0 });
     gates::approve(&f.conn, &f.project.id, "audit", &g.command_hash).unwrap();
-    assert_eq!(resume_gate_waits(&f.conn, &f.project.id).unwrap(), 1, "approval resumes the waiting step");
+    assert_eq!(resume_gate_waits(&f.conn, &f.project.id).unwrap().steps, 1, "approval resumes the waiting step");
     verify(&f);
     let v = view(&f.conn, &id).unwrap();
     assert_eq!((v.run.status.as_str(), v.steps[0].results[0].gate_version), ("completed", Some(1)));
@@ -295,7 +296,7 @@ fn reported_work_waiting_for_gate_approval_resumes_without_a_new_report() {
     assert_eq!((v.steps[0].state.status.as_str(), v.steps[0].state.blocked_on.as_deref(), v.run.status.as_str()), ("blocked", Some("gates"), "waiting"));
     // Approving the command resumes verification; Claude does not have to report again.
     gates::approve(&f.conn, &f.project.id, "unit", &g.command_hash).unwrap();
-    assert_eq!(resume_gate_waits(&f.conn, &f.project.id).unwrap(), 1);
+    assert_eq!(resume_gate_waits(&f.conn, &f.project.id).unwrap(), ApprovalImpact { steps: 1, runs: 1, still_waiting: 0 });
     verify(&f);
     let v = view(&f.conn, &id).unwrap();
     assert_eq!((v.run.status.as_str(), v.steps[0].state.verification.as_deref(), v.steps[0].state.blocked_on.as_deref()), ("completed", Some("verified"), None));
@@ -306,4 +307,40 @@ fn reported_work_waiting_for_gate_approval_resumes_without_a_new_report() {
         .filter(|n| n.workflow_id.as_deref() == Some(id.as_str()) && n.category == "input-required" && n.resolved_at.is_none())
         .collect();
     assert!(open.is_empty(), "the approval request is resolved");
+}
+
+#[test]
+fn approval_preview_counts_exactly_the_steps_and_runs_that_resume() {
+    let f = fx();
+    let wf = workflow(&f, "## Build
+<!-- step: id=build kind=claude gates=unit -->
+
+## Docs
+<!-- step: id=docs kind=claude gates=unit,e2e -->
+");
+    let unit = gates::upsert(&f.conn, &f.project.id, &GateInput { name: "unit".into(), program: "git".into(), args: vec!["--version".into()], ..Default::default() }).unwrap();
+    let lint = gates::upsert(&f.conn, &f.project.id, &GateInput { name: "e2e".into(), program: "git".into(), args: vec!["--version".into()], ..Default::default() }).unwrap();
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let id = start(&f, &wf, "balanced").run.id; // each run gets its own task
+        for step in ["build", "docs"] {
+            report(&f.conn, &f.data, &f.ws, &id, step, &StepReport { status: Reported::Done, summary: "done", criteria: &[] }).unwrap();
+        }
+        ids.push(id);
+    }
+    verify(&f);
+    // Four steps wait: two need only `unit`, two need `unit` and `e2e`.
+    assert_eq!(gate_waits(&f.conn, &f.project.id).unwrap().len(), 4);
+    assert_eq!(approval_impact(&f.conn, &f.project.id, "unit").unwrap(), ApprovalImpact { steps: 2, runs: 2, still_waiting: 2 });
+    assert_eq!(approval_impact(&f.conn, &f.project.id, "e2e").unwrap(), ApprovalImpact { steps: 0, runs: 0, still_waiting: 2 });
+    // The preview is what happens: approving `unit` resumes exactly those two; the others keep waiting (no re-block).
+    gates::approve(&f.conn, &f.project.id, "unit", &unit.command_hash).unwrap();
+    assert_eq!(resume_gate_waits(&f.conn, &f.project.id).unwrap(), ApprovalImpact { steps: 2, runs: 2, still_waiting: 2 });
+    assert_eq!(approval_impact(&f.conn, &f.project.id, "e2e").unwrap(), ApprovalImpact { steps: 2, runs: 2, still_waiting: 0 });
+    gates::approve(&f.conn, &f.project.id, "e2e", &lint.command_hash).unwrap();
+    assert_eq!(resume_gate_waits(&f.conn, &f.project.id).unwrap().steps, 2);
+    verify(&f);
+    for id in &ids {
+        assert_eq!(view(&f.conn, id).unwrap().run.status, "completed");
+    }
 }

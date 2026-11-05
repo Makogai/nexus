@@ -654,9 +654,11 @@ fn workflow_runs_ai_reported_steps_and_trusted_gates_to_completion() {
     let v = e.json(&["workflow", "status", &run_id]);
     let checks = v["steps"].as_array().unwrap().iter().find(|s| s["stepId"] == "checks").unwrap().clone();
     assert!(checks["lastFailure"].as_str().unwrap().contains("typecheck (version 1) are not approved"), "{checks}");
-    // Approving resumes the waiting step on its own — no retry, no new report.
+    // Before approving, `gates list` shows what the approval will resume; approving resumes it on its own.
+    let preview = e.ok(&["gates", "list", "--project", "repo"]);
+    assert!(preview.contains("resumes 1 waiting step(s) in 1 run(s) automatically"), "{preview}");
     let approved = e.ok(&["gates", "approve", "--project", "repo", "typecheck", "--version", "1"]);
-    assert!(approved.contains("resumed 1 waiting step"), "{approved}");
+    assert!(approved.contains("resumed 1 waiting step(s) in 1 run(s) automatically"), "{approved}");
     e.ok(&["workflow", "verify"]);
     let v = e.json(&["workflow", "status", &run_id]);
     assert_eq!(v["status"], "completed");
@@ -668,6 +670,114 @@ fn workflow_runs_ai_reported_steps_and_trusted_gates_to_completion() {
     assert_eq!(task["task"]["checklist"].as_array().unwrap().iter().filter(|c| c["done"] == true).count(), 3, "the run ticks its checklist");
     let gates = e.ok(&["gates", "list", "--project", "repo"]);
     assert!(gates.contains("passed"), "{gates}");
+}
+
+/// ADR-0030: usage is read from the transcripts Claude writes (here the fake CLI, in the real format), measured
+/// counts are deduplicated per response, estimates and unavailable values are labelled, and nothing but numbers is
+/// stored. Transcripts are only read.
+#[test]
+fn usage_is_measured_from_transcripts_with_estimates_and_unavailable_values_apart() {
+    let e = Env::new();
+    e.setup();
+    let resp = |id: &str, ts: &str, input: u32, out: u32, cw: u32, cr: u32| {
+        format!(
+            r#"{{"type":"assistant","isSidechain":false,"sessionId":"{{SESSION}}","version":"2.1.311","timestamp":"{ts}","requestId":"req_{id}","message":{{"id":"msg_{id}","type":"message","role":"assistant","model":"claude-opus-5-5","content":[{{"type":"text","text":"SECRET-RESPONSE"}}],"usage":{{"input_tokens":{input},"output_tokens":{out},"cache_creation_input_tokens":{cw},"cache_read_input_tokens":{cr}}}}}}}"#
+        ) + "\n"
+    };
+    let fixture = String::new()
+        + r#"{"type":"user","sessionId":"{SESSION}","timestamp":"{TS}","message":{"role":"user","content":"SECRET-PROMPT"}}"# + "\n"
+        + &resp("1", "{TS+1}", 12, 300, 4_000, 0)
+        + &resp("1", "{TS+1}", 12, 300, 4_000, 0) // a second content block of the same response
+        + &resp("2", "{TS+2}", 8, 120, 0, 4_100)
+        + r#"{"type":"assistant","isApiErrorMessage":true,"timestamp":"{TS+3}","message":{"id":"e1","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0},"content":[]}}"# + "\n"
+        + r#"{"type":"cost-state","sessionId":"{SESSION}","totalCostUSD":0.12,"startTime":{START},"modelUsage":{},"hasUnknownModelCost":false}"# + "\n";
+    let fixture_path = e.data.parent().unwrap().join("fixture.jsonl");
+    std::fs::write(&fixture_path, fixture).unwrap();
+    let out = e.cmd(&["launch", "--project", "repo", "-q"]).env("FAKE_CLAUDE_TRANSCRIPT", &fixture_path).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let measured_id = e.json(&["sessions"])[0]["id"].as_str().unwrap().to_string();
+    e.ok(&["launch", "--project", "repo", "-q"]); // no transcript written
+
+    let transcript = walk(&e.cfg.join("projects")).into_iter().find(|p| p.extension().is_some_and(|x| x == "jsonl")).expect("the fake CLI wrote a transcript");
+    let before = std::fs::read(&transcript).unwrap();
+    let v = e.json(&["usage", "--days", "0"]);
+    let r = &v["report"];
+    assert_eq!(r["totals"]["requests"], 2, "deduplicated per response, the local error message is not a request: {r}");
+    assert_eq!((r["totals"]["input"].as_i64(), r["totals"]["output"].as_i64(), r["totals"]["cacheWrite"].as_i64(), r["totals"]["cacheRead"].as_i64()), (Some(20), Some(420), Some(4_000), Some(4_100)));
+    assert_eq!((r["cost"]["usd"].clone(), r["cost"]["withheldUnknown"].as_i64()), (Value::Null, Some(1)), "billing not known yet: no spend shown");
+    assert_eq!((r["tokenProvenance"].as_str(), r["formatVerified"].as_bool()), (Some("parsed"), Some(true)));
+    // The sign-in check classifies the profile (API key → billed per use); only then is Claude's estimate shown.
+    e.cmd(&["profiles", "status", "Fake"]).env("FAKE_CLAUDE_AUTH_METHOD", "api_key").output().unwrap();
+    let r = e.json(&["usage", "--days", "0"])["report"].clone();
+    assert!((r["cost"]["usd"].as_f64().unwrap() - 0.12).abs() < 1e-9, "Claude Code's own estimate: {r}");
+    assert_eq!((r["coverage"]["sessions"].as_i64(), r["coverage"]["measured"].as_i64(), r["coverage"]["missing"].as_i64()), (Some(2), Some(1), Some(1)));
+    assert_eq!(r["groups"][0]["label"], "repo");
+    assert!(r["contextEstimate"]["tokensPerSession"].as_f64().unwrap() > 0.0, "the prototype work profile prompt at least");
+    assert!(v["telemetry"].as_array().unwrap().iter().all(|t| t["managedTelemetry"] == false));
+    assert_eq!(std::fs::read(&transcript).unwrap(), before, "transcripts are only read");
+
+    let sessions = e.json(&["usage", "sessions", "--days", "0"]);
+    let by_status: Vec<(String, String)> = sessions.as_array().unwrap().iter().map(|s| (s["sessionId"].as_str().unwrap().to_string(), s["status"].as_str().unwrap().to_string())).collect();
+    assert!(by_status.contains(&(measured_id.clone(), "measured".into())), "{by_status:?}");
+    assert!(by_status.iter().any(|(id, st)| *id != measured_id && st == "missing"), "{by_status:?}");
+    let text = e.ok(&["usage", "--by", "strategy"]);
+    assert!(text.contains("Balanced") && text.contains("≈ $0.12") && text.contains("not a bill") && text.contains("parsed from") && text.contains("1 of 2 Claude session(s) measured"), "{text}");
+    // A subscription is never converted into spend.
+    e.cmd(&["profiles", "status", "Fake"]).env("FAKE_CLAUDE_AUTH_METHOD", "claude.ai").output().unwrap();
+    let text = e.ok(&["usage", "--days", "0"]);
+    assert!(text.contains("not shown (subscription)") && text.contains("not converted into spend"), "{text}");
+    let text = e.ok(&["usage", "sessions"]);
+    assert!(text.contains("missing") && text.contains("no transcript"), "{text}");
+    assert_eq!(e.json(&["usage", "--days", "0", "--project", "repo", "--model", "claude-opus-5-5"])["report"]["cost"]["usd"], Value::Null, "costs are per session, not per model");
+
+    // Only numbers reach the database.
+    for file in ["nexus.db", "nexus.db-wal"] {
+        let bytes = std::fs::read(e.data.join(file)).unwrap_or_default();
+        assert!(!bytes.windows(6).any(|w| w == b"SECRET"), "no prompt or response text is stored ({file})");
+    }
+}
+
+/// ADR-0031: sync readiness is read-only and reports what would travel and what must not, by name only.
+#[test]
+fn workspace_sync_status_is_read_only_and_flags_what_must_not_travel() {
+    let e = Env::new();
+    e.setup();
+    let ws_dir = e.data.parent().unwrap().join("ws");
+    let not_repo = e.run(&["workspaces", "sync-status"]);
+    assert_eq!(not_repo.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&not_repo.stdout).contains("not a Git repository"));
+    let git = |args: &[&str]| {
+        let out = Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@example.invalid", "-c", "init.defaultBranch=main"]).args(args).current_dir(&ws_dir).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "init"]);
+    std::fs::write(ws_dir.join("deploy.key"), "SECRET-KEY-MATERIAL").unwrap();
+    let head = std::fs::read_to_string(ws_dir.join(".git").join("HEAD")).unwrap();
+    let v = e.json(&["workspaces", "sync-status"]);
+    assert_eq!(v["ready"], true, "warnings only: {v}");
+    assert_eq!(v["sensitive"][0]["path"], "deploy.key");
+    assert_eq!(v["sensitive"][0]["tracked"], false);
+    let text = e.ok(&["workspaces", "sync-status"]);
+    assert!(text.contains("not ignored: deploy.key (private key or keystore)") && text.contains("no remote configured"), "{text}");
+    assert!(!text.contains("SECRET-KEY-MATERIAL"), "names only, never contents");
+    assert_eq!(std::fs::read_to_string(ws_dir.join(".git").join("HEAD")).unwrap(), head, "nothing in the repository changed");
+}
+
+fn walk(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                out.extend(walk(&p));
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    out
 }
 
 /// ADR-0028: the project's context strategy changes what launches and SessionStart get; project docs are searchable

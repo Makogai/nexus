@@ -32,7 +32,10 @@ reuse tasks, sessions, skills, hooks, constitutions, checkpoints and MCP; keep t
   step whose gates are missing or unapproved is blocked with `blocked_on = gates` (nothing executes) and an
   input-required notification; approving resumes its verification without a new report from Claude. Results record
   the gate version that produced them. `nexus gates approve|revoke`, desktop Approve / Revoke, constitution
-  compliance `not-approved`.
+  compliance `not-approved`. **Approval preview** (2026-11-05): before confirming, the desktop dialog and
+  `nexus gates list` show how many waiting steps (in how many runs) resume automatically — exactly the steps whose
+  gates are then all defined and approved — and how many keep waiting for other gates; `approve` reports the same
+  numbers. Informational only: it is the same single approval, not a second mechanism.
 * **Run** = machine-local state (`workflow_runs`, `workflow_steps`, `gate_results`, migration 0012) over a snapshot of
   the approved definition, carried by an ordinary **task** (created with one checklist item per included step, or an
   existing task left as it is). Steps go pending → ready / verifying / awaiting-review → passed | failed | blocked |

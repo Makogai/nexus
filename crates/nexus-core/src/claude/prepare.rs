@@ -276,6 +276,7 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
             kits: kit_launches,
             context: Some(ContextLaunch { strategy, observe_instructions: observing }),
             workflow: run.map(|x| WorkflowLaunch { run_id: x.id, workflow: x.workflow_title, rigor: x.rigor, skills: extra, refused }),
+            prompt_chars: (!parts.is_empty()).then(|| parts.iter().map(|p| p.chars().count()).sum::<usize>() + 2 * (parts.len() - 1)),
         },
         prompt: (!parts.is_empty()).then(|| parts.join("\n\n")),
         settings,

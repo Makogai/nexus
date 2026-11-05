@@ -46,6 +46,10 @@ pub struct Integrations {
     /// The workflow run this session works on (ADR-0029).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<super::prepare::WorkflowLaunch>,
+    /// Characters NEXUS appended to the system prompt after the work profile (rules, pointers) — for usage
+    /// estimates (ADR-0030); the work profile's own text is known from its id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_chars: Option<usize>,
 }
 
 impl IntegrationStatus {

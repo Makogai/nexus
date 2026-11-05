@@ -96,6 +96,7 @@ pub fn run() {
             spawn_heartbeat(ctx.clone());
             notifier::spawn_poller(app.handle().clone(), ctx.clone());
             commands::workflows::spawn_runner(app.handle().clone(), ctx.clone());
+            commands::usage::spawn_scanner(app.handle().clone(), ctx.clone());
             app.manage(ctx);
             Ok(())
         })
@@ -180,7 +181,11 @@ pub fn run() {
             commands::workflows::workflow_retry,
             commands::workflows::gates_list,
             commands::workflows::gate_upsert,
+            commands::usage::usage_report,
+            commands::usage::usage_sessions,
+            commands::usage::usage_scan,
             commands::workflows::gate_approve,
+            commands::workflows::gate_approval_impact,
             commands::workflows::gate_revoke,
             commands::workflows::gate_remove,
             commands::workflows::gate_suggest,

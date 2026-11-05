@@ -11,6 +11,7 @@ export const router = createRouter({
     { path: '/constitutions', name: 'constitutions', component: () => import('./views/ConstitutionsView.vue') },
     { path: '/context', name: 'context', component: () => import('./views/ContextView.vue') },
     { path: '/workflows', name: 'workflows', component: () => import('./views/WorkflowsView.vue') },
+    { path: '/usage', name: 'usage', component: () => import('./views/UsageView.vue') },
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
     { path: '/profiles', name: 'profiles', component: () => import('./views/ProfilesView.vue') },
     { path: '/profiles/:id', name: 'profile-diagnostics', component: () => import('./views/ProfileDiagnosticsView.vue'), props: true },

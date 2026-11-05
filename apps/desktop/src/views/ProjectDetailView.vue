@@ -11,6 +11,7 @@ import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
 import GitSummary from '../components/GitSummary.vue'
+import UsageSummary from '../components/UsageSummary.vue'
 import SessionRow from '../components/SessionRow.vue'
 import InstructionsPanel from '../components/InstructionsPanel.vue'
 
@@ -120,6 +121,8 @@ async function unregister() {
     </div>
 
     <div v-if="!project.available" class="notice notice-warn"><TriangleAlert /> This project is registered in the workspace but has no folder on this machine. Use “Locate…” on the Projects page.</div>
+
+    <UsageSummary :project-id="project.id" />
 
     <div class="grid grid-2 top">
       <section class="card">

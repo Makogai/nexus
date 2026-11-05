@@ -102,7 +102,10 @@ pub async fn profile_auth_status(ctx: State<'_, Ctx>, id: String) -> IpcResult<A
     blocking(move || {
         let p = profile::get(&ctx.db(), &id)?;
         let exe = install::resolve(p.executable.as_deref(), &ctx.home)?;
-        Ok(auth::status(&exe, &p)?)
+        let s = auth::status(&exe, &p)?;
+        // Classification only (subscription / API / unknown) — decides whether usage may be shown as spend.
+        let _ = nexus_core::usage::record_billing(&ctx.db(), &p.id, &s);
+        Ok(s)
     })
     .await
 }

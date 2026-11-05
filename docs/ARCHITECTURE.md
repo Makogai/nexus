@@ -249,7 +249,8 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Proposals | `knowledge_proposals` (extract + list pending), `knowledge_proposal_approve` (with edits/scope), `knowledge_proposal_reject` (ADR-0022) |
 | Diagnostics | `profile_diagnostics` (ADR-0023) |
 | Kits | `kit_list`, `kit_register` (local/Git), `kit_approve`, `kit_update`, `kit_remove`, `kit_enable` (selection), `kit_disable`, `kit_validate` (ADR-0024) |
-| Workflows | `workflow_templates`, `workflow_list`, `workflow_get`, `workflow_create`, `workflow_save`, `workflow_save_raw`, `workflow_start`, `workflow_runs`, `workflow_run`, `workflow_review`, `workflow_cancel`, `workflow_retry`, `gates_list`, `gate_upsert`, `gate_remove`, `gate_suggest`, `gate_run` (ADR-0029) |
+| Workflows | `workflow_templates`, `workflow_list`, `workflow_get`, `workflow_create`, `workflow_save`, `workflow_save_raw`, `workflow_start`, `workflow_runs`, `workflow_run`, `workflow_review`, `workflow_cancel`, `workflow_retry`, `gates_list`, `gate_upsert`, `gate_approve`, `gate_approval_impact`, `gate_revoke`, `gate_remove`, `gate_suggest`, `gate_run` (ADR-0029) |
+| Usage | `usage_report`, `usage_sessions`, `usage_scan`; event `nexus://usage` from the desktop's usage scanner thread (ADR-0030) |
 | Context | `context_get`, `context_set` (strategy, custom settings), `context_presets`, `context_analyze`, `context_docs`, `context_inspect` (project, profile for the prediction) (ADR-0028) |
 | Constitutions | `constitution_list`, `constitution_get`, `constitution_create`, `constitution_save` (structure, expected hash), `constitution_save_raw`, `constitution_effective` (project, task, what-if), `constitution_search`, `constitution_history`, `constitution_version` (ADR-0027); approval via `knowledge_approve` |
 | Notifications | `notifications_list` (filters), `notifications_counts`, `notifications_mark_read`, `notifications_dismiss`, `notifications_snooze`, `notifications_prefs`, `notifications_set_prefs`, `notifications_set_view` (visible terminal, time zone), `notifications_availability`, `notifications_test`, `notification_target`; E2E builds only: `e2e_notifications_recorded`, `e2e_notification_activate`, `e2e_focus_state` (ADR-0025) |
@@ -281,3 +282,13 @@ every filesystem/process operation goes through a purpose-built, validated comma
 
 Core features never depend on hooks or MCP. When policy blocks a surface, NEXUS shows *why* and keeps
 working (session tracking falls back to PTY exit + `claude agents --json`).
+
+## Usage analytics and workspace sync (ADR-0030, ADR-0031)
+
+* `nexus_core::usage` — `transcript` (locate `projects/*/<id>.jsonl` and subagent files in the profile's config dir;
+  incremental typed parsing; version compatibility list), ingestion (`scan_session`, `scan_due`; attribution through
+  `session_conversations`), `report` (totals, daily, groups, efficiency, coverage, sessions, telemetry notes), billing
+  classification from `claude auth status`. Machine-local tables from migration 0014; nothing is synced.
+* Hosts scan: the desktop's `usage-scanner` thread (8 s, a few sessions per tick) and the CLI before each `nexus usage`.
+* `nexus_core::workspace_sync::readiness` — read-only Git checks of the workspace folder (no fetch, commit or push);
+  the planned sync flow (M29) builds on it.
