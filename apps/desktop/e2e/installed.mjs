@@ -11,7 +11,7 @@
 // synthetic Claude profile backed by the fake CLI; never touches real profiles. Always uninstalls at the end.
 // Windows only.
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -268,6 +268,14 @@ try {
   // Leave the machine as it was: the remembered install location did not exist before this run.
   if (regQuery(LOCATION_KEY)) spawnSync('reg', ['delete', LOCATION_PARENT, '/f'], { stdio: 'ignore' })
   check('no installer state is left behind', !regQuery(LOCATION_KEY) && !regQuery(UNINSTALL_KEY))
+  // The temporary folders (synthetic data, profile, repository) go too — kept only when something failed.
+  if (failures === 0) {
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+    } catch (e) {
+      console.log(`      could not remove ${root}: ${e.code ?? e.message}`)
+    }
+  } else console.log(`      kept for inspection: ${root}`)
 }
 console.log(failures === 0 ? `\nINSTALLED ${ui ? 'UI ' : ''}OK` : `\nINSTALLED ${ui ? 'UI ' : ''}FAILED (${failures})`)
 process.exitCode = failures === 0 ? 0 : 1
