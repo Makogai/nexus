@@ -293,6 +293,10 @@ fn commit_inspection_blocks_secrets_sensitive_files_and_private_knowledge() {
     let token = format!("{}{}", "ghp_", "Z".repeat(36));
     std::fs::write(a.root().join("notes.md"), format!("deploy with {token}\n")).unwrap();
     std::fs::write(a.root().join("deploy.pem"), "not read").unwrap();
+    // New workspaces ignore .nexus-local/ (ADR-0036); an older .gitignore without that line is still caught.
+    let gi = std::fs::read_to_string(a.root().join(".gitignore")).unwrap();
+    assert!(gi.lines().any(|l| l == ".nexus-local/"));
+    std::fs::write(a.root().join(".gitignore"), gi.lines().filter(|l| *l != ".nexus-local/").collect::<Vec<_>>().join("\n")).unwrap();
     std::fs::create_dir_all(a.root().join(".nexus-local").join("knowledge")).unwrap();
     std::fs::write(a.root().join(".nexus-local").join("knowledge").join("mine.md"), "private").unwrap();
     std::fs::write(a.root().join("paths.md"), format!("log: {}\n", a.home.join("x.log").display())).unwrap();

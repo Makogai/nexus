@@ -1,6 +1,6 @@
 use tauri::State;
 
-use nexus_core::workspace::{self, Workspace};
+use nexus_core::workspace::{self, Workspace, migrate};
 
 use crate::error::IpcResult;
 use crate::state::Ctx;
@@ -37,4 +37,19 @@ pub fn workspace_activate(ctx: State<'_, Ctx>, id: String) -> IpcResult<Workspac
 #[tauri::command]
 pub fn workspace_forget(ctx: State<'_, Ctx>, id: String) -> IpcResult<()> {
     Ok(workspace::forget(&ctx.db(), &id)?)
+}
+
+/// What migrating the workspace to the current schema would change (ADR-0036). Read-only.
+#[tauri::command]
+pub fn workspace_migration_plan(ctx: State<'_, Ctx>, id: String) -> IpcResult<migrate::Plan> {
+    let ws = workspace::get(&ctx.db(), &id)?;
+    Ok(migrate::plan(&ws.root_path)?)
+}
+
+/// Apply the migration after the person reviewed the plan: changed files are backed up first and restored on failure.
+#[tauri::command]
+pub fn workspace_migrate(ctx: State<'_, Ctx>, id: String) -> IpcResult<migrate::Migrated> {
+    let db = ctx.db();
+    let ws = workspace::get(&db, &id)?;
+    Ok(migrate::apply(&db, &ctx.data_dir, &ws)?)
 }

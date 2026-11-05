@@ -865,6 +865,56 @@ fn backup_and_restore_keep_everything_recoverable() {
     assert!(e.run(&["backup", "restore", "../outside", "--yes"]).status.code() == Some(1), "ids are names, not paths");
 }
 
+/// ADR-0036: a schema 1 workspace is migrated only after the plan was shown and confirmed, with a backup; a workspace
+/// from a newer NEXUS opens read-only and refuses changes.
+#[test]
+fn workspace_schema_migration_and_read_only_compatibility() {
+    let e = Env::new();
+    let old = e.home().join("old-ws");
+    std::fs::create_dir_all(old.join("repos")).unwrap();
+    std::fs::write(old.join(".gitignore"), "repos/\n").unwrap();
+    let manifest = r#"{"schemaVersion":1,"id":"0192f2a4-0000-7000-8000-00000000aa01","name":"Old","projects":[]}"#;
+    std::fs::write(old.join("nexus-workspace.json"), manifest).unwrap();
+    e.ok(&["workspaces", "open", old.to_str().unwrap()]);
+    let info = e.json(&["workspaces", "info"]);
+    assert_eq!(info["schemaVersion"], 1);
+    assert_eq!(info["compat"]["needsMigration"], true);
+    assert_eq!(info["projectsDir"], "repos");
+
+    // Without --yes: the plan, nothing changed.
+    let dry = e.run(&["workspaces", "migrate"]);
+    assert_eq!(dry.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&dry.stdout);
+    assert!(text.contains("update nexus-workspace.json") && text.contains("append .gitignore") && text.contains("Repeat with --yes"), "{text}");
+    assert_eq!(std::fs::read_to_string(old.join("nexus-workspace.json")).unwrap(), manifest);
+
+    let done = e.json(&["workspaces", "migrate", "--yes"]);
+    assert_eq!(done["applied"], true);
+    let backup = PathBuf::from(done["backupDir"].as_str().unwrap());
+    assert!(backup.starts_with(&e.data), "backups live in the NEXUS data folder: {}", backup.display());
+    assert_eq!(std::fs::read_to_string(backup.join("nexus-workspace.json")).unwrap(), manifest);
+    let info = e.json(&["workspaces", "info"]);
+    assert_eq!((info["schemaVersion"].as_i64(), info["projectsDir"].as_str()), (Some(2), Some("repos")));
+    assert!(e.ok(&["workspaces", "migrate"]).contains("nothing to migrate"));
+
+    // New workspaces start on schema 2 with projects/.
+    e.ok(&["workspaces", "create", e.home().join("new-ws").to_str().unwrap(), "--name", "New"]);
+    let info = e.json(&["workspaces", "info"]);
+    assert_eq!((info["schemaVersion"].as_i64(), info["projectsDir"].as_str()), (Some(2), Some("projects")));
+    assert!(e.home().join("new-ws").join("projects").is_dir());
+
+    // A workspace from a newer NEXUS: readable, not writable.
+    let future = e.home().join("future-ws");
+    std::fs::create_dir_all(&future).unwrap();
+    std::fs::write(future.join("nexus-workspace.json"), r#"{"schemaVersion":9,"id":"0192f2a4-0000-7000-8000-00000000aa02","name":"Future","projects":[]}"#).unwrap();
+    e.ok(&["workspaces", "open", future.to_str().unwrap()]);
+    assert!(e.ok(&["workspaces", "info"]).contains("READ-ONLY"));
+    let add = e.run(&["projects", "add", e.repo.to_str().unwrap()]);
+    assert!(!add.status.success());
+    assert!(String::from_utf8_lossy(&add.stderr).contains("read-only"), "{}", String::from_utf8_lossy(&add.stderr));
+    assert!(!e.run(&["workspaces", "migrate", "--yes"]).status.success(), "a newer schema is never migrated backwards");
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {

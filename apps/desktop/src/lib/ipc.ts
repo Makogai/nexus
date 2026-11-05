@@ -2,6 +2,8 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type {
   AppInfo,
+  Migrated,
+  MigrationPlan,
   AuthStatus,
   Checkpoint,
   ClaudeProfile,
@@ -138,6 +140,8 @@ export const api = {
   workspaceImport: (path: string) => call<Workspace>('workspace_import', { path }),
   workspaceActivate: (id: string) => call<Workspace>('workspace_activate', { id }),
   workspaceForget: (id: string) => call<void>('workspace_forget', { id }),
+  workspaceMigrationPlan: (id: string) => call<MigrationPlan>('workspace_migration_plan', { id }),
+  workspaceMigrate: (id: string) => call<Migrated>('workspace_migrate', { id }),
 
   projectList: (workspaceId: string) => call<Project[]>('project_list', { workspaceId }),
   projectGet: (id: string) => call<Project>('project_get', { id }),

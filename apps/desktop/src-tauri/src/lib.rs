@@ -136,6 +136,8 @@ pub fn run() {
             commands::workspaces::workspace_import,
             commands::workspaces::workspace_activate,
             commands::workspaces::workspace_forget,
+            commands::workspaces::workspace_migration_plan,
+            commands::workspaces::workspace_migrate,
             commands::projects::project_list,
             commands::projects::project_get,
             commands::projects::project_inspect_path,

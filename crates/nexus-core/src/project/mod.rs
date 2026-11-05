@@ -142,6 +142,7 @@ pub fn register(conn: &Connection, workspace_id: &str, raw: &str, name: Option<&
         name: name.clone(),
         remote_url: remote_url.clone(),
         path: rel,
+        context: None,
         extra: Default::default(),
     });
 

@@ -145,6 +145,24 @@ Branch `milestone/beta-readiness` (off `main` at `efd3dd4`). No large product fe
 | B4 | User documentation: first run, user guide, backups, troubleshooting, local vs. synced | docs/user | ✅ |
 | B5 | Decisions for the owner: application identity (ADR-0034), licence (ADR-0035), code signing, updater | — | proposed |
 
+## Stage: Portable Workspace (owner specification, 2026-11-05)
+
+Branch `milestone/portable-workspace` (off `main` at `7beef88`). Audit, gap analysis and plan:
+[`PORTABLE_WORKSPACE.md`](PORTABLE_WORKSPACE.md). Goal: carry the whole AI development environment and its knowledge
+between computers through one portable Git repository.
+
+| # | Milestone | Acceptance check | Status |
+| --- | --- | --- | --- |
+| P0 | Audit of the implementation against the specification, gap analysis, migration strategy, ADR-0036 | docs | ✅ |
+| P1 | Workspace schema 2 (ADR-0036): version/template/feature/layout fields, `projects/` for new workspaces, `constitutions/` + `project-context/` scanned, newer workspaces read-only (writes refused centrally), explained migration with backup and rollback; `nexus workspaces info/migrate`, desktop banner | core + CLI E2E + vitest + desktop E2E `portable.mjs` 11/11 | ✅ |
+| P2 | Templates Minimal / Developer / AI Engineering Pro with lock file and safe updates; progressive constitution delivery; workspace skills kit | core + CLI E2E + content validation | planned |
+| P3 | Workspace Doctor (core, CLI, desktop) with reviewable repairs | core + CLI E2E + desktop E2E | planned |
+| P4 | Project discovery and restoration; project context initialization | core + CLI E2E + desktop E2E | planned |
+| P5 | Environment manifest, toolchain check, Claude Code setup | core + CLI E2E + desktop E2E | planned |
+| P6 | Development records, durable checkpoints, Development History view | core + hooks E2E + desktop E2E | planned |
+| P7 | Sync policies: manual, automatic with review, trusted automatic (opt-in) on M29 | core with local bare remotes + desktop E2E | planned |
+| P8 | New-computer restoration flow; second-machine reconstruction | desktop E2E across two data folders | planned |
+
 ## Phase 6 — Product maturity
 
 | # | Milestone | Acceptance check |

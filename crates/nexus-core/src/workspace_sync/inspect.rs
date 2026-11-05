@@ -139,8 +139,8 @@ pub fn path_findings(rel: &str, mode: &str, dir: Direction) -> Vec<Finding> {
     if lower.starts_with(".nexus-local/") || lower == ".nexus-local" {
         out.push(finding(rel, None, "local-only-knowledge", out_block, "local-only knowledge stays on this machine"));
     }
-    if lower.starts_with("repos/") {
-        out.push(finding(rel, None, "project-repository", out_block, "project repositories cloned into repos/ are separate repositories"));
+    if lower.starts_with("repos/") || lower.starts_with("projects/") {
+        out.push(finding(rel, None, "project-repository", out_block, "project repositories cloned into projects/ (or repos/) are separate repositories"));
     }
     let name = lower.rsplit('/').next().unwrap_or(&lower);
     if name == "claude.local.md" || (lower.contains(".claude/") && name == "settings.local.json") {

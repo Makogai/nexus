@@ -1,5 +1,8 @@
 //! Workspaces: a folder with a portable manifest (`nexus-workspace.json`) plus a machine-local
-//! binding in SQLite (ADR-0005).
+//! binding in SQLite (ADR-0005). Schema 2 (ADR-0036) adds version, template and layout fields; newer workspaces open
+//! read-only instead of being refused, and `migrate` moves schema 1 workspaces forward explicitly.
+
+pub mod migrate;
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +14,13 @@ use crate::paths::{self, Expect};
 use crate::{new_id, now_ms, settings};
 
 pub const MANIFEST_FILE: &str = "nexus-workspace.json";
-pub const MANIFEST_SCHEMA: u32 = 1;
+/// The workspace schema this NEXUS writes (and the newest it can change).
+pub const MANIFEST_SCHEMA: u32 = 2;
+/// The version of this NEXUS (recorded as `createdWith` / `migratedWith`, compared with `minNexusVersion`).
+pub const NEXUS_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Default folder for project clones in new workspaces (schema 2) and in schema 1 workspaces.
+pub const PROJECTS_DIR: &str = "projects";
+pub const LEGACY_PROJECTS_DIR: &str = "repos";
 const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Portable workspace manifest. Unknown fields are preserved so newer NEXUS versions can add data
@@ -24,10 +33,134 @@ pub struct Manifest {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// NEXUS version that created the workspace (schema 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_with: Option<String>,
+    /// NEXUS version that last migrated the workspace to a newer schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrated_with: Option<String>,
+    /// Oldest NEXUS version that may change the workspace; older ones open it read-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_nexus_version: Option<String>,
+    /// Starter template the workspace was created from (component versions: `nexus.lock.json`, ADR-0037).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<TemplateRef>,
+    /// Features the workspace uses (e.g. `project-context`, `development-records`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<Layout>,
     #[serde(default)]
     pub projects: Vec<ManifestProject>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateRef {
+    pub id: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Layout {
+    /// Folder (directly under the workspace) for project clones; ignored by Git.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projects: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Manifest {
+    /// Folder for project clones: the manifest's layout when it names a safe folder, otherwise the schema default.
+    pub fn projects_dir(&self) -> &str {
+        match self.layout.as_ref().and_then(|l| l.projects.as_deref()) {
+            Some(d) if valid_folder_name(d) => d,
+            _ if self.schema_version >= 2 => PROJECTS_DIR,
+            _ => LEGACY_PROJECTS_DIR,
+        }
+    }
+    pub fn has_feature(&self, f: &str) -> bool {
+        self.features.iter().any(|x| x == f)
+    }
+}
+
+/// A single, plain folder name (no separators, no `..`, not hidden).
+pub fn valid_folder_name(d: &str) -> bool {
+    !d.is_empty() && d.len() <= 64 && !d.starts_with('.') && d.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// What this NEXUS may do with a workspace (ADR-0036).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Compat {
+    pub schema_version: u32,
+    /// False: the workspace opens read-only (`reason` says why).
+    pub writable: bool,
+    pub reason: Option<String>,
+    /// An older schema that `migrate` can bring forward.
+    pub needs_migration: bool,
+}
+
+pub fn compat(m: &Manifest) -> Compat {
+    let mut c = Compat { schema_version: m.schema_version, writable: true, reason: None, needs_migration: m.schema_version < MANIFEST_SCHEMA };
+    if m.schema_version > MANIFEST_SCHEMA {
+        c.writable = false;
+        c.reason = Some(format!(
+            "This workspace uses schema {} from a newer NEXUS (this one writes schema {MANIFEST_SCHEMA}); it opens read-only — update NEXUS to change it",
+            m.schema_version
+        ));
+    } else if let Some(min) = m.min_nexus_version.as_deref().filter(|min| version_cmp(NEXUS_VERSION, min) == std::cmp::Ordering::Less) {
+        c.writable = false;
+        c.reason = Some(format!("This workspace needs NEXUS {min} or newer to change it (this is {NEXUS_VERSION}); it opens read-only"));
+    }
+    c
+}
+
+/// Compare dotted versions (`1.2.3`, `0.1.0-beta.2`): numerically per component; a pre-release sorts before its release.
+pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    fn split(v: &str) -> (Vec<u64>, bool) {
+        let v = v.trim().trim_start_matches('v');
+        let (core, pre) = match v.find(['-', '+']) {
+            Some(i) => (&v[..i], v.as_bytes()[i] == b'-'),
+            None => (v, false),
+        };
+        (core.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect(), pre)
+    }
+    let ((mut x, xp), (mut y, yp)) = (split(a), split(b));
+    let n = x.len().max(y.len());
+    x.resize(n, 0);
+    y.resize(n, 0);
+    x.cmp(&y).then(match (xp, yp) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => std::cmp::Ordering::Equal,
+    })
+}
+
+/// Refuse to change a workspace this NEXUS can only read (newer schema or minimum version, ADR-0036).
+pub fn ensure_writable(root: &Path) -> Result<()> {
+    if !root.join(MANIFEST_FILE).is_file() {
+        return Ok(());
+    }
+    let c = compat(&read_manifest(root)?);
+    match c.reason {
+        Some(reason) if !c.writable => Err(CoreError::Unsupported(reason)),
+        _ => Ok(()),
+    }
+}
+
+/// `ensure_writable` for a file somewhere inside a workspace (knowledge documents): the nearest folder above it with
+/// a manifest decides. Files outside any workspace (the global knowledge folder) are not affected.
+pub fn ensure_writable_at(path: &Path) -> Result<()> {
+    for dir in path.ancestors().skip(1).take(8) {
+        if dir.join(MANIFEST_FILE).is_file() {
+            return ensure_writable(dir);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -42,6 +175,9 @@ pub struct ManifestProject {
     /// Projects elsewhere on disk have no portable path; their location is machine-local (SQLite).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Portable project knowledge folder, relative (`project-context/<slug>`, schema 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -58,12 +194,20 @@ pub struct Workspace {
     pub project_count: i64,
     /// False when the folder or its manifest is missing on this machine.
     pub available: bool,
+    /// Schema, writability and migration state of the manifest (ADR-0036); `None` when it cannot be read.
+    pub compat: Option<Compat>,
+    pub template: Option<TemplateRef>,
 }
 
-const WORKSPACE_GITIGNORE: &str = "\
+pub(crate) const WORKSPACE_GITIGNORE: &str = "\
 # NEXUS workspace
-# Project repositories cloned into repos/ are independent Git repositories: never commit them here.
+# Project repositories cloned into projects/ (or repos/ in older workspaces) are independent Git repositories:
+# never commit them here.
+projects/
 repos/
+
+# Local-only knowledge stays on this machine.
+.nexus-local/
 
 # Machine-local runtime data never belongs in a workspace repository.
 *.db
@@ -76,8 +220,10 @@ repos/
 fn workspace_readme(name: &str) -> String {
     format!(
         "# {name}\n\nThis folder is a NEXUS workspace.\n\n\
-         * `{MANIFEST_FILE}` — portable workspace manifest (projects, settings).\n\
-         * `repos/` — default location for cloned project repositories (ignored by Git).\n\n\
+         * `{MANIFEST_FILE}` — portable workspace manifest (identity, schema, template, projects).\n\
+         * `constitutions/`, `rules/`, `skills/`, `workflows/` — how Claude works here.\n\
+         * `knowledge/`, `project-context/` — decisions, notes, specs and per-project knowledge.\n\
+         * `projects/` — default location for cloned project repositories (ignored by Git).\n\n\
          The workspace can be a Git repository so it follows you to other machines. It never contains\n\
          credentials, session transcripts or the NEXUS database.\n"
     )
@@ -94,11 +240,9 @@ pub fn read_manifest(root: &Path) -> Result<Manifest> {
         what: MANIFEST_FILE.to_string(),
         source,
     })?;
-    if manifest.schema_version > MANIFEST_SCHEMA {
-        return Err(CoreError::Unsupported(format!(
-            "{MANIFEST_FILE} uses schema version {}; this build understands up to {MANIFEST_SCHEMA}",
-            manifest.schema_version
-        )));
+    // A newer schema is read (and opened read-only, ADR-0036) as long as its known fields still parse.
+    if manifest.schema_version == 0 {
+        return Err(CoreError::invalid(format!("{MANIFEST_FILE} has no valid schemaVersion")));
     }
     validate_name(&manifest.name)?;
     uuid::Uuid::parse_str(&manifest.id)
@@ -106,8 +250,10 @@ pub fn read_manifest(root: &Path) -> Result<Manifest> {
     Ok(manifest)
 }
 
-/// Write the manifest atomically (temp file in the same directory, then rename).
+/// Write the manifest atomically (temp file in the same directory, then rename). Refused when the manifest on disk
+/// belongs to a workspace this NEXUS can only read.
 pub fn write_manifest(root: &Path, manifest: &Manifest) -> Result<()> {
+    ensure_writable(root)?;
     let mut json = serde_json::to_string_pretty(manifest).map_err(|source| CoreError::Json {
         what: MANIFEST_FILE.to_string(),
         source,
@@ -165,22 +311,33 @@ pub fn create(conn: &Connection, root_raw: &str, name: &str, description: &str) 
     std::fs::create_dir_all(&root).map_err(|e| CoreError::io("cannot create", &root, e))?;
     let root = dunce::canonicalize(&root).map_err(|e| CoreError::io("cannot access", &root, e))?;
 
-    let manifest = Manifest {
+    let manifest = new_manifest(name, description);
+    write_manifest(&root, &manifest)?;
+    write_if_missing(&root.join(".gitignore"), WORKSPACE_GITIGNORE)?;
+    write_if_missing(&root.join("README.md"), &workspace_readme(&manifest.name))?;
+    let projects = root.join(manifest.projects_dir());
+    std::fs::create_dir_all(&projects).map_err(|e| CoreError::io("cannot create", &projects, e))?;
+
+    insert_row(conn, &manifest, &root)?;
+    get(conn, &manifest.id)
+}
+
+/// A schema 2 manifest for a new workspace.
+pub fn new_manifest(name: &str, description: &str) -> Manifest {
+    Manifest {
         schema_version: MANIFEST_SCHEMA,
         id: new_id(),
         name: name.trim().to_string(),
         description: description.trim().to_string(),
+        created_with: Some(NEXUS_VERSION.to_string()),
+        migrated_with: None,
+        min_nexus_version: Some(NEXUS_VERSION.to_string()),
+        template: None,
+        features: vec!["project-context".into()],
+        layout: Some(Layout { projects: Some(PROJECTS_DIR.into()), extra: Default::default() }),
         projects: Vec::new(),
         extra: Default::default(),
-    };
-    write_manifest(&root, &manifest)?;
-    write_if_missing(&root.join(".gitignore"), WORKSPACE_GITIGNORE)?;
-    write_if_missing(&root.join("README.md"), &workspace_readme(&manifest.name))?;
-    let repos = root.join("repos");
-    std::fs::create_dir_all(&repos).map_err(|e| CoreError::io("cannot create", &repos, e))?;
-
-    insert_row(conn, &manifest, &root)?;
-    get(conn, &manifest.id)
+    }
 }
 
 /// Register an existing workspace folder (e.g. cloned from Git on a new machine).
@@ -248,6 +405,7 @@ const SELECT: &str = "SELECT w.id, w.name, w.description, w.root_path, w.created
 fn from_row(r: &Row<'_>) -> rusqlite::Result<Workspace> {
     let root = PathBuf::from(r.get::<_, String>(3)?);
     let available = root.join(MANIFEST_FILE).is_file();
+    let manifest = if available { read_manifest(&root).ok() } else { None };
     Ok(Workspace {
         id: r.get(0)?,
         name: r.get(1)?,
@@ -257,6 +415,8 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<Workspace> {
         last_opened_at: r.get(5)?,
         project_count: r.get(6)?,
         available,
+        compat: manifest.as_ref().map(compat),
+        template: manifest.and_then(|m| m.template),
     })
 }
 
@@ -395,8 +555,14 @@ mod tests {
         assert_eq!(m.id, ws.id);
         assert_eq!(m.schema_version, MANIFEST_SCHEMA);
         let gi = std::fs::read_to_string(ws.root_path.join(".gitignore")).unwrap();
-        assert!(gi.lines().any(|l| l == "repos/"), "repos/ must be ignored");
-        assert!(ws.root_path.join("repos").is_dir());
+        assert!(gi.lines().any(|l| l == "projects/") && gi.lines().any(|l| l == "repos/"), "clone folders must be ignored");
+        assert!(gi.lines().any(|l| l == ".nexus-local/"));
+        assert!(ws.root_path.join("projects").is_dir());
+        assert!(!ws.root_path.join("repos").exists(), "new workspaces do not create the legacy folder");
+        assert_eq!(m.created_with.as_deref(), Some(NEXUS_VERSION));
+        assert_eq!(m.projects_dir(), "projects");
+        let c = ws.compat.clone().unwrap();
+        assert!(c.writable && !c.needs_migration && c.schema_version == 2);
         assert_eq!(list(&conn).unwrap().len(), 1);
     }
 
@@ -435,10 +601,18 @@ mod tests {
         assert_eq!(import(&conn, t.path().to_str().unwrap()).unwrap_err().code(), "json");
         std::fs::write(
             t.path().join(MANIFEST_FILE),
+            r#"{"schemaVersion": 0, "id": "8f0e6d34-5b4b-4b8a-9a43-5a3b0d0b3c11", "name": "x"}"#,
+        )
+        .unwrap();
+        assert_eq!(import(&conn, t.path().to_str().unwrap()).unwrap_err().code(), "invalid");
+        // A newer schema is no longer refused: it opens read-only (ADR-0036, see migrate::tests).
+        std::fs::write(
+            t.path().join(MANIFEST_FILE),
             r#"{"schemaVersion": 99, "id": "8f0e6d34-5b4b-4b8a-9a43-5a3b0d0b3c11", "name": "x"}"#,
         )
         .unwrap();
-        assert_eq!(import(&conn, t.path().to_str().unwrap()).unwrap_err().code(), "unsupported");
+        let ws = import(&conn, t.path().to_str().unwrap()).unwrap();
+        assert!(!ws.compat.unwrap().writable);
     }
 
     #[test]
@@ -468,6 +642,7 @@ mod tests {
             name: "App".into(),
             remote_url: None,
             path: Some("repos/app".into()),
+            context: None,
             extra: Default::default(),
         });
         m.projects.push(ManifestProject {
@@ -475,6 +650,7 @@ mod tests {
             name: "Evil".into(),
             remote_url: None,
             path: Some("../../outside".into()),
+            context: None,
             extra: Default::default(),
         });
         write_manifest(&ws.root_path, &m).unwrap();

@@ -76,8 +76,9 @@ impl Kind {
     }
 }
 
-/// Top-level folders scanned under every knowledge root.
-pub const SCANNED_FOLDERS: &[&str] = &["rules", "tasks", "knowledge", "workflows"];
+/// Top-level folders scanned under every knowledge root (`constitutions/` and `project-context/` since schema 2,
+/// ADR-0036).
+pub const SCANNED_FOLDERS: &[&str] = &["rules", "constitutions", "tasks", "knowledge", "workflows", "project-context"];
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]

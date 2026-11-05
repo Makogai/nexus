@@ -1,16 +1,32 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-05 (session 9, Beta readiness)._ Read this first, then `docs/ROADMAP.md`.
+_Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, then `docs/ROADMAP.md` and
+`docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8).
 
 ## Where we are
 
-* `main` = … `7bd238e` (usage analytics) + **`efd3dd4`** (M29 workspace Git sync, merged `--no-ff` after the
-  verification of session 8). Nothing pushed.
-* Branch **`milestone/beta-readiness`** (off `main` at `efd3dd4`): stage *Beta readiness* B1–B4 done, B5 = owner
-  decisions (proposed in ADR-0034/0035). Committed locally after the verification below; not merged, not pushed, no
-  release published, identifier and licence unchanged.
+* `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
+  Nothing pushed.
+* Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
+  P1 (workspace schema 2) done and committed; P2 (templates) next. Not merged, not pushed, no release.
 
-## What exists now (session 9, beta readiness on the branch)
+## Portable Workspace — progress (session 10)
+
+* **P0** — `docs/PORTABLE_WORKSPACE.md`: what exists per area, gap per specification section, target layout reconciled
+  with the implemented storage, migration strategy, milestones. ADR-0036.
+* **P1 — workspace schema 2 (ADR-0036)**: `nexus-workspace.json` stays the one manifest (JSON — the spec's
+  `nexus.yaml`), now with `createdWith`, `migratedWith`, `minNexusVersion`, `template`, `features`, `layout.projects`,
+  per-project `context`. New workspaces: schema 2, `projects/` (not `repos/`), `.gitignore` with `projects/`, `repos/`,
+  `.nexus-local/`. Knowledge scans `constitutions/` and `project-context/` too; `store::create_in_folder`. A newer
+  schema or a higher `minNexusVersion` opens **read-only** (`workspace::compat`; writes refused centrally in
+  `write_manifest` and the knowledge store via `ensure_writable[_at]`) instead of being refused. Migration 1 → 2
+  (`workspace::migrate`): explained plan, copies of the changed files in `<data>/workspace-backups/<id>/<time>/`,
+  rollback on failure, idempotent, nothing moved. `nexus workspaces info|migrate [--yes]`; IPC
+  `workspace_migration_plan`/`workspace_migrate`; desktop `WorkspaceBanner` (read-only reason, review → migrate).
+  Verified: core 192/192, CLI 33 + 6, vitest banner 2/2, desktop E2E `portable.mjs` 11/11, `run-smoke` 27/27,
+  `sync` 18/18, clippy clean.
+
+## Previous stage: Beta readiness (merged as `7beef88`)
 
 * **Upgrade safety and backups (ADR-0032)**: the database carries a NEXUS `application_id`; a foreign SQLite file is
   refused untouched; a failed migration is reported (never treated as corruption, never replaced by an empty
@@ -42,7 +58,7 @@ _Last updated: 2026-11-05 (session 9, Beta readiness)._ Read this first, then `d
   `bundle.publisher`; no data migration needed), ADR-0035 licence (recommends Apache-2.0, or dual MIT/Apache-2.0;
   dependency inventory: 293 Rust packages, 288 permissive + 5 MPL-2.0; frontend bundle MIT/ISC/Apache; no GPL).
 
-## Verification log (sequential groups, `CARGO_BUILD_JOBS=2`)
+## Verification log of the Beta readiness stage (sequential groups, `CARGO_BUILD_JOBS=2`)
 
 One group at a time; free memory sampled every 3 s. "Latest" = run against the final code of this stage.
 
@@ -99,13 +115,14 @@ now without `\\?\`); no telemetry variables set. `src-tauri/binaries/` (staged C
 
 ## Next actions (in order)
 
-1. Owner decisions (B5): identifier + publisher (ADR-0034), product name and `nexus://` scheme for a public release,
+1. Portable Workspace P2–P8 (`docs/PORTABLE_WORKSPACE.md` §5), each verified before it is marked done.
+2. Owner decisions (B5): identifier + publisher (ADR-0034), product name and `nexus://` scheme for a public release,
    licence (ADR-0035), code-signing certificate, updater (signing key, channel) — then implement them in one change
    before the first installer leaves this machine.
-2. Owner manual checks: MANUAL_CHECKS 27 (what the toast looks like, lock screen, click after quitting), 28–31,
+3. Owner manual checks: MANUAL_CHECKS 27 (what the toast looks like, lock screen, click after quitting), 28–31,
    32 (installer by hand, SmartScreen while unsigned).
-3. Third-party notices from the ADR-0035 inventory into the installer; first tagged draft release from CI.
-4. U5 OpenTelemetry opt-in for personal profiles (*measured* usage provenance); performance budget (M31).
+4. Third-party notices from the ADR-0035 inventory into the installer; first tagged draft release from CI.
+5. U5 OpenTelemetry opt-in for personal profiles (*measured* usage provenance); performance budget (M31).
 
 ## Known issues / decisions to revisit
 

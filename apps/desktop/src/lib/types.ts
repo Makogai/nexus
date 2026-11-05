@@ -41,6 +41,35 @@ export interface Workspace {
   lastOpenedAt: number | null
   projectCount: number
   available: boolean
+  /** Schema, writability and migration state (ADR-0036); null when the manifest cannot be read. */
+  compat: WorkspaceCompat | null
+  template: { id: string; version: string } | null
+}
+
+export interface WorkspaceCompat {
+  schemaVersion: number
+  writable: boolean
+  reason: string | null
+  needsMigration: boolean
+}
+
+export interface MigrationChange {
+  path: string
+  action: 'update' | 'append' | 'create'
+  description: string
+}
+
+export interface MigrationPlan {
+  workspaceId: string
+  from: number
+  to: number
+  changes: MigrationChange[]
+  notes: string[]
+}
+
+export interface Migrated {
+  plan: MigrationPlan
+  backupDir: string | null
 }
 
 export interface ScriptHint {

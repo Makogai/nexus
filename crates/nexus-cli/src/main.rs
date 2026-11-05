@@ -129,6 +129,14 @@ enum WorkspaceCmd {
     /// Would syncing the active workspace folder through Git be safe? Read-only: no fetch, commit or push (ADR-0031).
     /// Exit code 1 when something blocks syncing.
     SyncStatus,
+    /// Schema, compatibility, template, features and layout of the active workspace (ADR-0036).
+    Info,
+    /// Migrate the active workspace to the current schema. Shows the plan; changes nothing without --yes. The files it
+    /// changes are backed up to the NEXUS data folder first and put back if a step fails.
+    Migrate {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -401,6 +409,76 @@ fn cmd_workspaces(ctx: &Ctx, cmd: WorkspaceCmd) -> nexus_core::Result<()> {
                 }
             }
             std::process::exit(if r.ready { 0 } else { 1 });
+        }
+        WorkspaceCmd::Info => {
+            let ws = active_workspace(&conn)?;
+            let m = workspace::read_manifest(&ws.root_path)?;
+            let c = workspace::compat(&m);
+            if ctx.json {
+                out::json(&serde_json::json!({
+                    "workspace": ws, "schemaVersion": m.schema_version, "createdWith": m.created_with, "migratedWith": m.migrated_with,
+                    "minNexusVersion": m.min_nexus_version, "template": m.template, "features": m.features,
+                    "projectsDir": m.projects_dir(), "compat": c, "nexusVersion": workspace::NEXUS_VERSION,
+                }));
+                return Ok(());
+            }
+            println!("{} ({})", ws.name, ws.root_path.display());
+            println!("  schema {} · {}", m.schema_version, if c.writable { "writable" } else { "READ-ONLY" });
+            if let Some(r) = &c.reason {
+                println!("  {r}");
+            }
+            if c.needs_migration {
+                println!("  an older schema — `nexus workspaces migrate` shows what moving to schema {} changes", workspace::MANIFEST_SCHEMA);
+            }
+            println!(
+                "  created with NEXUS {} · minimum NEXUS {} · this NEXUS {}",
+                m.created_with.as_deref().unwrap_or("(unknown)"),
+                m.min_nexus_version.as_deref().unwrap_or("(none)"),
+                workspace::NEXUS_VERSION
+            );
+            match &m.template {
+                Some(t) => println!("  template {} {}", t.id, t.version),
+                None => println!("  no starter template"),
+            }
+            println!("  features: {}", if m.features.is_empty() { "(none)".to_string() } else { m.features.join(", ") });
+            println!("  project clones: {}/ · {} project(s)", m.projects_dir(), m.projects.len());
+        }
+        WorkspaceCmd::Migrate { yes } => {
+            let ws = active_workspace(&conn)?;
+            let plan = workspace::migrate::plan(&ws.root_path)?;
+            if plan.is_empty() {
+                if ctx.json {
+                    out::json(&serde_json::json!({ "plan": plan, "applied": false }));
+                } else {
+                    println!("{} is on workspace schema {} — nothing to migrate.", ws.name, plan.to);
+                }
+                return Ok(());
+            }
+            if !yes {
+                if ctx.json {
+                    out::json(&serde_json::json!({ "plan": plan, "applied": false }));
+                } else {
+                    println!("Migrating {} from workspace schema {} to {} would:", ws.name, plan.from, plan.to);
+                    for c in &plan.changes {
+                        println!("  {} {} — {}", c.action, c.path, c.description);
+                    }
+                    for n in &plan.notes {
+                        println!("  · {n}");
+                    }
+                    println!("Repeat with --yes to apply. The files above are backed up to the NEXUS data folder first.");
+                }
+                std::process::exit(1);
+            }
+            let done = workspace::migrate::apply(&conn, &ctx.data_dir, &ws)?;
+            if ctx.json {
+                out::json(&serde_json::json!({ "plan": done.plan, "applied": true, "backupDir": done.backup_dir }));
+            } else {
+                println!("{} is now on workspace schema {}.", ws.name, done.plan.to);
+                if let Some(b) = &done.backup_dir {
+                    println!("  previous versions of the changed files: {}", b.display());
+                }
+                println!("  review and commit the change through the Sync Center (`nexus sync review`).");
+            }
         }
     }
     Ok(())
