@@ -70,6 +70,7 @@ fn spawn_heartbeat(ctx: Ctx) {
                 .and_then(|_| nexus_core::workflow::run::reconcile(&db, now_ms()))
                 .and_then(|_| nexus_core::workspace_sync::history::reconcile(&db, now_ms()))
                 .and_then(|_| nexus_core::devrecord::finalize_pending(&db, &ctx.data_dir))
+                .and_then(|_| nexus_core::workspace_sync::policy::run_due(&db, &ctx.data_dir, &ctx.home, &ctx.host.id, &nexus_core::workspace_sync::policy::default_managed_path()))
             {
                 tracing::warn!(error = %e, "host heartbeat failed");
             }
@@ -148,6 +149,8 @@ pub fn run() {
             commands::projects::project_context_init,
             commands::projects::project_environment,
             commands::projects::project_history,
+            commands::sync::sync_policy_get,
+            commands::sync::sync_policy_set,
             commands::claude::claude_setup_status,
             commands::workspaces::workspace_doctor,
             commands::workspaces::workspace_repair_plan,

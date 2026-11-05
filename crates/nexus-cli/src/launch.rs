@@ -206,8 +206,17 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
 
     let code = status.ok().and_then(|s| s.code()).map(i64::from);
     nexus_core::notify::session_exited(&conn, &session.id, code, false)?;
-    if let Err(e) = nexus_core::devrecord::finalize(&conn, &ctx.data_dir, &session.id) {
-        eprintln!("nexus: the development record was not written: {e}");
+    match nexus_core::devrecord::finalize(&conn, &ctx.data_dir, &session.id) {
+        Err(e) => eprintln!("nexus: the development record was not written: {e}"),
+        Ok(Some(_)) => {
+            let managed = nexus_core::workspace_sync::policy::default_managed_path();
+            if let Ok(done) = nexus_core::workspace_sync::policy::run_due(&conn, &ctx.data_dir, &ctx.home, &me.id, &managed) {
+                for (_, o) in done.iter().filter(|(_, o)| o.action != "none") {
+                    eprintln!("nexus: workspace sync ({:?}): {}", o.mode, o.message);
+                }
+            }
+        }
+        Ok(None) => {}
     }
     host::shutdown(&conn, &me.id)?;
     Ok(code.map(|c| c as i32).unwrap_or(1))

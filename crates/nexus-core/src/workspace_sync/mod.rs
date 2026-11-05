@@ -12,6 +12,7 @@
 pub mod history;
 pub mod inspect;
 pub mod ops;
+pub mod policy;
 
 #[cfg(test)]
 mod tests;

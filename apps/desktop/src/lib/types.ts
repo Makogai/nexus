@@ -179,6 +179,17 @@ export interface DevHistory {
   blockers: [string, number][]
 }
 
+export type SyncPolicyMode = 'manual' | 'review' | 'trusted'
+
+export interface SyncPolicyView {
+  policy: { mode: SyncPolicyMode; trust: { remote: string; branch: string; authorizedAt: number } | null }
+  managed: { trustedAllowed: boolean; reviewAllowed: boolean; source: string | null }
+  allowlist: string[]
+  trustedUnavailable: string | null
+  remote: string | null
+  branch: string | null
+}
+
 export type DoctorStatus = 'ok' | 'info' | 'warn' | 'error'
 
 export interface DoctorFinding {

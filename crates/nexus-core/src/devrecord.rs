@@ -252,6 +252,8 @@ pub fn finalize(conn: &Connection, data_dir: &Path, session_id: &str) -> Result<
     workspace::write_atomic(&path, doc.render().as_bytes())?;
     mark(Some(&path))?;
     let _ = project::context::refresh_state(conn, data_dir, &ws, &pid);
+    // The workspace's sync policy acts on new records (ADR-0039); manual = nothing happens.
+    let _ = crate::workspace_sync::policy::mark_due(conn, &ws.id);
     knowledge::service::refresh(conn, data_dir, &ws)?;
     Ok(Some(path))
 }

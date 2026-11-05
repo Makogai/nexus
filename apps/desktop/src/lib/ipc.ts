@@ -8,6 +8,8 @@ import type {
   EnvironmentReport,
   DoctorReport,
   ProjectScan,
+  SyncPolicyMode,
+  SyncPolicyView,
   Migrated,
   MigrationPlan,
   RepairPlan,
@@ -149,6 +151,9 @@ export const api = {
     call<Workspace>('workspace_create', { path, name, description, template: template ?? null }),
   workspaceDoctor: (workspaceId: string) => call<DoctorReport>('workspace_doctor', { workspaceId }),
   projectScan: (workspaceId: string) => call<ProjectScan>('project_scan', { workspaceId }),
+  syncPolicyGet: (workspaceId: string) => call<SyncPolicyView>('sync_policy_get', { workspaceId }),
+  syncPolicySet: (workspaceId: string, mode: SyncPolicyMode, remoteIsPrivate: boolean) =>
+    call<SyncPolicyView>('sync_policy_set', { workspaceId, mode, remoteIsPrivate }),
   projectHistory: (workspaceId: string, id: string) => call<DevHistory>('project_history', { workspaceId, id }),
   projectEnvironment: (workspaceId: string, id: string, check: boolean) => call<EnvironmentReport | null>('project_environment', { workspaceId, id, check }),
   claudeSetupStatus: () => call<ClaudeSetupStatus>('claude_setup_status'),

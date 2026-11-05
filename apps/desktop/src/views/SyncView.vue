@@ -11,6 +11,7 @@ import type { SyncCloned, SyncCommitReview, SyncFileDiff, SyncPulled, SyncPushRe
 import { relativeTime } from '../lib/format'
 import BaseModal from '../components/BaseModal.vue'
 import CloneWorkspaceForm from '../components/CloneWorkspaceForm.vue'
+import SyncPolicyCard from '../components/SyncPolicyCard.vue'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
 
@@ -45,7 +46,7 @@ const STATE: Record<SyncStatus['state'], { label: string; tone: 'ok' | 'warn' | 
   ahead: { label: 'Outgoing changes', tone: 'accent' },
   'up-to-date': { label: 'Up to date', tone: 'ok' },
 }
-const OP_LABEL: Record<string, string> = { fetch: 'Fetch', pull: 'Pull', commit: 'Commit', push: 'Push', clone: 'Clone' }
+const OP_LABEL: Record<string, string> = { fetch: 'Fetch', pull: 'Pull', commit: 'Commit', push: 'Push', clone: 'Clone', 'auto-sync': 'Automatic sync' }
 
 async function load() {
   if (!wsId.value) return
@@ -220,6 +221,8 @@ watch(wsId, () => {
     </div>
 
     <template v-else-if="st">
+      <SyncPolicyCard v-if="st.readiness.repo && wsId" :workspace-id="wsId" />
+
       <!-- Status -->
       <section class="card status" data-sync-status>
         <div class="status-row">

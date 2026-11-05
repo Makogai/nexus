@@ -57,6 +57,14 @@ pub enum SyncCmd {
     },
     /// Recent sync operations of this workspace.
     History,
+    /// The workspace's sync policy on this machine (manual, review, trusted) — or set it. Trusted needs --private (you
+    /// confirm the remote is private and approved) and is refused when your organisation's policy forbids it.
+    Policy {
+        #[arg(value_parser = ["manual", "review", "trusted"])]
+        mode: Option<String>,
+        #[arg(long)]
+        private: bool,
+    },
     /// Onboard a workspace from an existing Git repository into FOLDER (new or empty) and make it active.
     Clone { url: String, folder: String },
     /// What restoring the active workspace on this machine still needs.
@@ -250,6 +258,37 @@ fn run_inner(ctx: &Ctx, conn: &nexus_core::db::Connection, host_id: &str, c: Syn
                 if ctx.json { out::json(&p) } else { println!("pushed {} commit(s) to {}/{}", p.commits, p.remote, p.branch) }
             }
         },
+        SyncCmd::Policy { mode, private } => {
+            use nexus_core::workspace_sync::policy;
+            let managed_path = policy::default_managed_path();
+            if let Some(m) = mode {
+                let mode = match m.as_str() {
+                    "review" => policy::Mode::Review,
+                    "trusted" => policy::Mode::Trusted,
+                    _ => policy::Mode::Manual,
+                };
+                policy::set(conn, &ws, mode, private, &policy::managed(&managed_path))?;
+            }
+            let v = policy::view(conn, &ws, &managed_path)?;
+            if ctx.json {
+                out::json(&v);
+                return Ok(0);
+            }
+            let mode = match v.policy.mode {
+                policy::Mode::Manual => "manual — nothing is committed or published until you review it",
+                policy::Mode::Review => "automatic with review — NEXUS asks when records are ready; you confirm the commit and push",
+                policy::Mode::Trusted => "trusted automatic — NEXUS publishes its records to the approved remote on its own",
+            };
+            println!("{}: {mode}", ws.name);
+            if let Some(t) = &v.policy.trust {
+                println!("  approved remote {} on {} ({})", t.remote, t.branch, out::ago(Some(t.authorized_at)));
+            }
+            println!("  records NEXUS may publish in trusted mode: {}", v.allowlist.join(", "));
+            if let Some(why) = &v.trusted_unavailable {
+                println!("  trusted mode unavailable: {why}");
+            }
+            return Ok(0);
+        }
         SyncCmd::History => {
             let list = history::list(conn, &ws.id, 30)?;
             if ctx.json {

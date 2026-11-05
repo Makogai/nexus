@@ -8,7 +8,7 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
   Nothing pushed.
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
-  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup) and P6 (development records, history) done and committed; P7 (sync policies) next. Not merged, not pushed, no release.
+  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup), P6 (development records, history) and P7 (sync policies) done and committed; P8 (new-computer restoration) next. Not merged, not pushed, no release.
 
 ## Portable Workspace — progress (session 10)
 
@@ -100,6 +100,17 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   page): records with sync state (not committed / committed, not pushed / synced / workspace not in Git), sessions,
   open tasks, decisions, recent commits, gate results, blockers. Verified: core 214, CLI 37 + 6, vitest 87, desktop E2E
   `portable.mjs` 43/43, `task-flow` 29, `attention` 27, `context` 9, clippy clean.
+* **P7 — sync policies (ADR-0039)** (`workspace_sync::policy`): machine-local per workspace — *manual* (default),
+  *automatic with review* (notification → Sync Center), *trusted automatic* (opt-in with a private-remote
+  confirmation; approved remote + branch stored). Trusted publishes only `project-context/*/development/*.md`,
+  `current-state.md`, `project.json`, `environment.json` via M29's `review_commit → commit → fetch → review_push →
+  push` (tokens, inspections) and pauses to ask on any finding, remote/branch change, remote ahead (never forced),
+  outgoing commits outside the allowlist, or a managed policy (`<ProgramData>\NEXUS\policy.json`, strict) that forbids
+  it; offline → committed locally, retried after 10 min. Records mark their workspace due; hosts run `run_due` after a
+  record and on heartbeats. Audited as `auto-sync` (migration 0017 rebuilds `sync_history` to allow it). Sync Center
+  *Sync policy* card, `nexus sync policy`, IPC `sync_policy_get/set`. Threat model T45. Verified: core 216 (2 policy
+  tests with local bare remotes), CLI 37 + 6, vitest 89, desktop E2E `portable.mjs` 50/50 (trusted publish through the
+  UI), `sync.mjs` 18/18, clippy clean.
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 

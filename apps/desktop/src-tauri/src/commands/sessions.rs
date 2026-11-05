@@ -495,8 +495,17 @@ fn spawn(app: &AppHandle, ctx: &Ctx, session: &Session, req: SpawnRequest) -> Ip
             tracing::error!(session = %sid, error = %e, "cannot record session exit");
         }
         // The session's development record (ADR-0038), on its own connection so the UI stays responsive.
-        if let Err(e) = nexus_core::db::open(&ctx_exit.data_dir.join(nexus_core::db::DB_FILE)).map_err(|e| e.to_string()).and_then(|c| nexus_core::devrecord::finalize(&c, &ctx_exit.data_dir, &sid).map_err(|e| e.to_string())) {
-            tracing::warn!(session = %sid, error = %e, "development record not written");
+        // …and the workspace's sync policy acts on it (ADR-0039; manual = nothing happens).
+        let record = nexus_core::db::open(&ctx_exit.data_dir.join(nexus_core::db::DB_FILE)).map_err(|e| e.to_string()).and_then(|c| {
+            let written = nexus_core::devrecord::finalize(&c, &ctx_exit.data_dir, &sid).map_err(|e| e.to_string())?;
+            if written.is_some() {
+                let managed = nexus_core::workspace_sync::policy::default_managed_path();
+                nexus_core::workspace_sync::policy::run_due(&c, &ctx_exit.data_dir, &ctx_exit.home, &ctx_exit.host.id, &managed).map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        });
+        if let Err(e) = record {
+            tracing::warn!(session = %sid, error = %e, "development record or sync policy not applied");
         }
         emit(&app_exit, &ctx_exit, &sid);
     };

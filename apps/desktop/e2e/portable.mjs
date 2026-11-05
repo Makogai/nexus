@@ -14,6 +14,9 @@
 //   P6 — a Claude session (fake CLI) in a project edits a file (real `nexus hook`) and records a decision (real
 //        `nexus mcp`); when it ends, its development record appears in the project's context and in the Development
 //        History view with separate Verified / Observed / Reported sections.
+//   P7 — the workspace becomes a repository with a local bare remote → trusted sync is turned on in the Sync Center only
+//        after confirming the remote is private → the next session's record is committed and pushed on its own (the
+//        person's task file stays local) and the automatic run is in the sync history.
 //
 //   cargo build -p fake-claude -p nexus-cli
 //   npx tauri build --debug --no-bundle --features e2e-webview-debugging
@@ -270,6 +273,47 @@ try {
   await click('[data-history-records] .record-head')
   const panels = await cdp.waitFor(`[...document.querySelectorAll('[data-record-body] .section h3')].map((e) => e.textContent).join('|')`, 10000).catch(() => '')
   check('…and opens it as Verified / Observed / Reported sections', panels.includes('Verified') && panels.includes('Observed') && panels.includes('Reported by Claude (unverified)'), panels)
+
+  // ---- P7: sync policies ----
+  const wsRoot = join(root, 'pro-ws')
+  const wsBare = join(root, 'remotes', 'workspace.git')
+  mkdirSync(wsBare, { recursive: true })
+  git(wsBare, 'init', '-q', '--bare')
+  git(wsRoot, 'init', '-q')
+  git(wsRoot, 'config', 'user.name', 'E2E')
+  git(wsRoot, 'config', 'user.email', 'e2e@example.invalid')
+  git(wsRoot, 'add', '-A')
+  git(wsRoot, 'commit', '-q', '-m', 'workspace')
+  git(wsRoot, 'remote', 'add', 'origin', `file:///${wsBare.replace(/\\/g, '/')}`)
+  git(wsRoot, 'push', '-q', '-u', 'origin', 'main')
+  await cdp.evaluate(`location.hash = '#/sync'; location.reload(); true`)
+  await cdp.waitFor(`document.querySelector('[data-sync-policy="" ], [data-sync-policy]')`, 20000)
+  check('the Sync Center starts on manual sync', (await cdp.evaluate(`document.querySelector('[data-sync-policy]').getAttribute('data-sync-policy-mode')`)) === 'manual')
+  await cdp.evaluate(`(() => { const r = document.querySelector('[data-sync-policy-choose="trusted"]'); r.checked = true; r.dispatchEvent(new Event('change')); return true })()`)
+  const allow = await cdp.waitFor(`document.querySelector('[data-trusted-allowlist]')?.innerText`, 10000).catch(() => '')
+  check('choosing trusted shows exactly what may be published', allow.includes('project-context/*/development/*.md') && !allow.includes('tasks'), allow)
+  check('…and cannot be confirmed without the private-remote confirmation', !!(await cdp.evaluate(`document.querySelector('[data-trusted-confirm]').disabled`)))
+  await click('[data-trusted-private]')
+  await click('[data-trusted-confirm]')
+  const mode = await cdp.waitFor(`document.querySelector('[data-sync-policy]')?.getAttribute('data-sync-policy-mode') === 'trusted' ? 'trusted' : ''`, 10000).catch(() => '')
+  check('trusted sync is on for this computer', mode === 'trusted')
+  // A personal task file next to the records must not travel.
+  writeFileSync(join(wsRoot, 'project-context', 'invoices', 'tasks', 'mine-local.md'), 'not a record\n')
+  const s2 = await inv('session_start_claude', { args: { profileId: profile.id, projectId: inv1.id, title: 'Reminder retries', cols: 100, rows: 30 } })
+  await sleep(1500)
+  await cli(['hook', '--session', s2.id, 'post-tool-use'], js({ session_id: s2.claudeSessionId, tool_name: 'Edit', tool_input: { file_path: join(repoDir, 'src', 'retry.ts') } }))
+  await inv('session_terminate', { id: s2.id })
+  const onRemote = (rel) => spawnSync('git', ['--git-dir', wsBare, 'cat-file', '-e', `HEAD:${rel}`]).status === 0
+  let published = ''
+  for (let i = 0; i < 120 && !published; i++) {
+    const files = readdirSync(devDir).filter((f) => f.endsWith('.md'))
+    published = files.find((f) => f !== recordFile && onRemote(`project-context/invoices/development/${f}`)) ?? ''
+    if (!published) await sleep(250)
+  }
+  check('the next record is committed and pushed on its own', !!published, published)
+  check('…the person\u2019s task file stays local', !onRemote('project-context/invoices/tasks/mine-local.md'))
+  const hist = await inv('sync_status', { workspaceId: proWs.id })
+  check('…and the automatic run is in the sync history', hist.history.some((h) => h.op === 'auto-sync' && h.status === 'ok'), js(hist.history.slice(0, 3).map((h) => [h.op, h.status, h.message])))
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)
