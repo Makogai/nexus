@@ -414,6 +414,8 @@ export interface LaunchOptions {
   workProfiles: WorkProfile[]
   defaultWorkProfile: string
   effortLevels: string[]
+  /** The first message NEXUS sends when Claude should start on a task right away (shown verbatim). */
+  taskKickoff: string
 }
 
 export type SessionKind = 'claude' | 'shell'
@@ -611,6 +613,8 @@ export interface StartClaude {
   taskId?: string | null
   /** Move a backlog/ready task to in-progress (default true). */
   startTask?: boolean
+  /** Ask Claude to start on the task right away: NEXUS sends `LaunchOptions.taskKickoff` first (default false). */
+  kickoff?: boolean
   cols?: number
   rows?: number
 }

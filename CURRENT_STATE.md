@@ -60,8 +60,11 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
     the launch for it.
   * **Drafts:** Claude drafts through the new MCP tool `draft_project_document` (22 tools); the drafts are unverified
     notes. *Use as overview* / *Use as architecture summary* / *Set aside* are the person's decision.
-  * **Graphify:** when it is on the PATH, NEXUS types `graphify extract . --code-only` (offline) into a project
-    terminal and keeps `graphify-out/` out of Git via `.git/info/exclude`.
+  * **Graphify:** when it is on the PATH, NEXUS types `graphify extract . --code-only; graphify cluster-only .
+    --no-label` (both offline; the second writes `GRAPH_REPORT.md`) into a project terminal and keeps `graphify-out/`
+    out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
+  * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
+    first message so the session starts working; any task launch can tick it.
   * **After adding a project:** it opens on Learn.
   * **Fix:** the knowledge index refresh takes SQLite's write lock up front (IMMEDIATE). A deferred read-then-write
     upgrade failed at once with "database is locked" when the desktop and the MCP server refreshed together; it showed

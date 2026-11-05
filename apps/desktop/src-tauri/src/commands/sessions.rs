@@ -116,6 +116,8 @@ pub struct StartClaude {
     pub task_id: Option<String>,
     /// Move a backlog/ready task to in-progress (default: yes).
     pub start_task: Option<bool>,
+    /// Ask Claude to start on the task right away (NEXUS sends `tasks::KICKOFF` as the first message; default: no).
+    pub kickoff: Option<bool>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
 }
@@ -271,6 +273,9 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 settings: settings_path.as_deref(),
                 context_prompt: prepared.prompt.as_deref(),
                 plugin_dirs: &plugin_dirs,
+                // Only for a task whose text reaches Claude (session start or tools) — otherwise nothing to start on.
+                first_prompt: (args.kickoff == Some(true) && integrations.task.as_ref().is_some_and(|t| t.delivery != "none"))
+                    .then_some(nexus_core::knowledge::tasks::KICKOFF),
             },
             &env::current(),
         )?;
@@ -380,6 +385,7 @@ pub async fn session_resume(
                 settings: settings_path.as_deref(),
                 context_prompt: prepared.prompt.as_deref(),
                 plugin_dirs: &plugin_dirs,
+                first_prompt: None, // a resumed conversation continues where it was
             },
             &env::current(),
         )?;

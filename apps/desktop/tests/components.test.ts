@@ -56,6 +56,7 @@ const OPTIONS: LaunchOptions = {
   })),
   defaultWorkProfile: 'balanced',
   effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  taskKickoff: 'Please start on this session’s NEXUS task now.',
 }
 
 function profile(id: string, over: Partial<ClaudeProfile> = {}): ClaudeProfile {
@@ -219,7 +220,24 @@ describe('LaunchDialog', () => {
     api.sessionStartClaude.mockResolvedValue(session({ id: 'new', running: true, state: 'running' }))
     await w.findAll('footer .btn-primary')[0]!.trigger('click')
     await flushPromises()
-    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ projectId: 'p1', taskId: 'task-1', startTask: false, title: null })
+    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ projectId: 'p1', taskId: 'task-1', startTask: false, kickoff: false, title: null })
+  })
+
+  it('“start right away” is preselected only when asked, shows the exact first message and is sent', async () => {
+    seed()
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-1', title: 'Learn App', projectId: 'p1' }, { kickoff: true })
+    await flushPromises()
+    expect((w.find('[data-launch-kickoff] input').element as HTMLInputElement).checked).toBe(true)
+    expect(w.find('.kickoff-text').text()).toBe(`“${OPTIONS.taskKickoff}”`)
+    api.sessionStartClaude.mockResolvedValue(session({ id: 'new', running: true, state: 'running' }))
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ taskId: 'task-1', kickoff: true })
+    // Without a task there is nothing to start on.
+    app.openLaunch('p1', 'game', null, { kickoff: true })
+    expect(app.launchDialog.kickoff).toBe(false)
   })
 
   it('switching profile applies that profile’s defaults', async () => {
@@ -429,6 +447,6 @@ describe('CommandPalette', () => {
     expect(first.text()).toContain('Launch Claude in Game')
     await w.find('.palette input').trigger('keydown', { key: 'Enter' })
     expect(app.paletteOpen).toBe(false)
-    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null })
+    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null, kickoff: false })
   })
 })

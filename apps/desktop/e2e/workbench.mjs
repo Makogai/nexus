@@ -10,7 +10,7 @@
 //
 // Windows only (WebView2 DevTools protocol).
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,7 +34,7 @@ const check = (name, ok, detail = '') => {
 const root = mkdtempSync(join(tmpdir(), 'nexus-workbench-'))
 let log = ''
 const child = spawn(app, [], {
-  env: { ...process.env, NEXUS_DATA_DIR: join(root, 'data'), NEXUS_E2E_NOTIFIER: 'record', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
+  env: { ...process.env, NEXUS_DATA_DIR: join(root, 'data'), NEXUS_E2E_NOTIFIER: 'record', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, FAKE_CLAUDE_REPORT: join(root, 'fake-report.json') },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 child.stdout.on('data', (d) => (log += d))
@@ -197,7 +197,21 @@ try {
   await click('[data-learn-start]')
   const launch = await cdp.waitFor(`document.querySelector('[data-launch-task]')?.innerText`, 10000).catch(() => '')
   check('Start a learning session opens the launch for the learning task', launch.includes('Learn App'), launch.replace(/\n/g, ' ').slice(0, 120))
-  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.innerText.trim() === 'Cancel')?.click(); true`)
+  const kickoff = await cdp.evaluate(`(() => ({ on: !!document.querySelector('[data-launch-kickoff] input')?.checked, text: document.querySelector('.kickoff-text')?.innerText ?? '' }))()`)
+  check('…with “Start right away” ticked, showing the exact first message', kickoff.on && kickoff.text.includes('update_task'), kickoff.text)
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] footer .btn-primary')][0].click(); true`)
+  const reportFile = join(root, 'fake-report.json')
+  const report = await until(async () => {
+    try {
+      const r = existsSync(reportFile) ? JSON.parse(readFileSync(reportFile, 'utf8')) : null
+      return r?.args?.[0] === '--session-id' ? r : null
+    } catch {
+      return null
+    }
+  })
+  const tail = report?.args.slice(-2) ?? []
+  check('…and Claude gets it as its first message, after `--` (no option can take it)', tail[0] === '--' && `“${tail[1]}”` === kickoff.text, JSON.stringify(tail).slice(0, 160))
+  await click('[data-project-tab="learn"]')
   const lm = await inv('project_learn_map', { workspaceId: ws.id, projectId: proj.id })
   const brief = lm.task ? (await inv('knowledge_read', { workspaceId: ws.id, id: lm.task.id })).body : ''
   check('…the task carries NEXUS\'s map and the drafting instructions (graph included)', brief.includes('draft_project_document') && brief.includes('GRAPH_REPORT.md') && brief.includes('do not change any file'), brief.slice(0, 100))

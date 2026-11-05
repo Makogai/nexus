@@ -43,6 +43,9 @@ pub struct LaunchRequest<'a> {
     pub context_prompt: Option<&'a str>,
     /// AI Kit overlays for this profile (`--plugin-dir`, ADR-0024).
     pub plugin_dirs: &'a [PathBuf],
+    /// A first message for a new conversation, sent on the person's request (e.g. "start the task now"). A `'static`
+    /// NEXUS constant by type — never workspace text (threat T22). Ignored when resuming.
+    pub first_prompt: Option<&'static str>,
 }
 
 /// Everything needed to spawn the process. `env` is the *complete* environment (the spawner clears the
@@ -146,6 +149,10 @@ pub fn build(req: &LaunchRequest<'_>, base_env: &[(String, String)]) -> Result<L
         }
         args.extend(["--plugin-dir".to_string(), dir.display().to_string()]);
     }
+    // After `--`, or a variadic option before it (`--mcp-config <configs...>`) would take the message as a file.
+    if let (Some(first), Mode::New) = (req.first_prompt, &req.mode) {
+        args.extend(["--".to_string(), first.to_string()]);
+    }
 
     let mut extra = vec![
         ("NEXUS_SESSION_ID".to_string(), req.nexus_session_id.to_string(), Reason::NexusScope),
@@ -229,7 +236,21 @@ mod tests {
             settings: None,
             context_prompt: None,
             plugin_dirs: &[],
+            first_prompt: None,
         }
+    }
+
+    #[test]
+    fn a_first_message_comes_last_after_the_options_and_only_for_new_conversations() {
+        let t = tempfile::tempdir().unwrap();
+        let p = profile(None);
+        let mcp = t.path().join("mcp.json");
+        let req = LaunchRequest { mcp_config: Some(&mcp), first_prompt: Some("Start now."), ..request(&p, t.path(), Mode::New) };
+        let args = build(&req, &base_env()).unwrap().args;
+        assert_eq!(&args[args.len() - 4..], ["--mcp-config", &mcp.display().to_string(), "--", "Start now."]);
+        let resumed = LaunchRequest { first_prompt: Some("Start now."), ..request(&p, t.path(), Mode::Resume) };
+        let args = build(&resumed, &base_env()).unwrap().args;
+        assert!(!args.iter().any(|a| a == "--" || a == "Start now."), "{args:?}");
     }
 
     #[test]

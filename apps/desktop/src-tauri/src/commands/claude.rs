@@ -116,6 +116,8 @@ pub struct LaunchOptions {
     pub work_profiles: &'static [WorkProfile],
     pub default_work_profile: &'static str,
     pub effort_levels: &'static [&'static str],
+    /// The first message NEXUS sends when the person asks Claude to start on a task right away (shown verbatim).
+    pub task_kickoff: &'static str,
 }
 
 #[tauri::command]
@@ -124,6 +126,7 @@ pub fn launch_options() -> LaunchOptions {
         work_profiles: workprofile::builtins(),
         default_work_profile: workprofile::DEFAULT,
         effort_levels: EFFORT_LEVELS,
+        task_kickoff: nexus_core::knowledge::tasks::KICKOFF,
     }
 }
 

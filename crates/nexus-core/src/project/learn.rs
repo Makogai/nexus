@@ -29,8 +29,11 @@ use crate::workspace::Workspace;
 use crate::{git, project, toolchain};
 
 pub const GRAPH_DIR: &str = "graphify-out";
-/// The build command NEXUS offers: code-only runs fully offline (Graphify README, verified 2026-11-05).
-pub const GRAPH_COMMAND: &str = "graphify extract . --code-only";
+/// The build NEXUS offers, both steps offline (Graphify 0.9.93 help, run on a synthetic repository 2026-11-05):
+/// `extract --code-only` writes `graph.json` from the code alone (local AST, no API key); `cluster-only --no-label`
+/// writes `GRAPH_REPORT.md` and keeps placeholder community names — without `--no-label` Graphify asks a model to name
+/// them. `;` runs both in PowerShell, bash and zsh.
+pub const GRAPH_COMMAND: &str = "graphify extract . --code-only; graphify cluster-only . --no-label";
 pub const LEARN_LABEL: &str = "learn";
 pub const DRAFT_LABEL: &str = "draft";
 pub const TOPICS: [&str; 2] = ["overview", "architecture"];
@@ -260,6 +263,9 @@ pub fn map(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str)
     })
 }
 
+/// The checklist step for a built graph (also added to a learning task created before the graph existed).
+const GRAPH_STEP: &str = "- [ ] Read the Graphify report (graphify-out/GRAPH_REPORT.md); use `/graphify query` if the skill is available";
+
 /// The learning session's brief: what to do, with NEXUS's map as data.
 fn brief(m: &ProjectMap) -> String {
     let mut b = String::from(
@@ -268,7 +274,8 @@ fn brief(m: &ProjectMap) -> String {
     );
     b.push_str("- [ ] Read NEXUS's map below and the project's own documentation\n");
     if m.graph.built {
-        b.push_str("- [ ] Read the Graphify report (graphify-out/GRAPH_REPORT.md); use `/graphify query` if the skill is available\n");
+        b.push_str(GRAPH_STEP);
+        b.push('\n');
     }
     b.push_str("- [ ] Draft the overview with `draft_project_document` (topic overview): purpose, users, main features, how to run and test it\n");
     b.push_str("- [ ] Draft the architecture summary with `draft_project_document` (topic architecture): components, data flow, boundaries, key decisions\n");
@@ -302,6 +309,9 @@ fn brief(m: &ProjectMap) -> String {
 pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str) -> Result<LearnTask> {
     let m = map(conn, data_dir, ws, project_id)?;
     if let Some(t) = m.task.clone() {
+        if m.graph.built {
+            add_graph_step(conn, data_dir, ws, &t.id)?;
+        }
         return Ok(t);
     }
     let input = CreateInput {
@@ -316,6 +326,38 @@ pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &st
     };
     let item = service::create(conn, data_dir, ws, &input, Author::Human)?;
     Ok(LearnTask { id: item.id.clone().unwrap_or_default(), title: item.title, status: item.status })
+}
+
+/// A graph built after the learning task was created joins the task's checklist — once, after its first step (or at
+/// the end when the list has no checklist lines). Written through the knowledge store like every task change.
+fn add_graph_step(conn: &Connection, data_dir: &Path, ws: &Workspace, task_id: &str) -> Result<()> {
+    let item = index::get(conn, &ws.id, task_id)?;
+    let (doc, _) = store::read(&item.path)?;
+    if doc.body.contains(&format!("{GRAPH_DIR}/GRAPH_REPORT.md")) {
+        return Ok(());
+    }
+    let privacy = index::root_privacy(conn, &item.path)?;
+    store::update(&item.path, None, privacy, |d| {
+        d.body = with_step_after_first(&d.body, GRAPH_STEP);
+        Ok(())
+    })?;
+    service::refresh(conn, data_dir, ws)?;
+    Ok(())
+}
+
+/// `body` with `step` as a new line after its first checklist line, or at the end when it has none.
+fn with_step_after_first(body: &str, step: &str) -> String {
+    let mut lines: Vec<&str> = body.lines().collect();
+    match lines.iter().position(|l| l.trim_start().starts_with("- [")) {
+        Some(i) => lines.insert(i + 1, step),
+        None => {
+            if lines.last().is_some_and(|l| !l.trim().is_empty()) {
+                lines.push("");
+            }
+            lines.push(step);
+        }
+    }
+    format!("{}\n", lines.join("\n"))
 }
 
 /// Claude's draft of the overview or the architecture summary (MCP `draft_project_document`): saved as an unverified
@@ -527,5 +569,21 @@ mod tests {
         std::fs::write(repo.join(GRAPH_DIR).join("GRAPH_REPORT.md"), "# Report\n").unwrap();
         let m = map(&conn, &data, &ws, &p.id).unwrap();
         assert!(m.graph.built && m.graph.report.as_deref() == Some("graphify-out/GRAPH_REPORT.md"));
+
+        // A graph built after the task was created joins its checklist, after the first step, once.
+        assert_eq!(start(&conn, &data, &ws, &p.id).unwrap().id, task.id);
+        assert_eq!(start(&conn, &data, &ws, &p.id).unwrap().id, task.id);
+        let brief = service::read(&conn, &ws, &task.id, 50_000).unwrap().body;
+        assert_eq!(brief.matches("graphify-out/GRAPH_REPORT.md").count(), 1, "{brief}");
+        let steps: Vec<&str> = brief.lines().filter(|l| l.starts_with("- [")).collect();
+        assert!(steps[0].contains("NEXUS's map") && steps[1].contains("Graphify report"), "{steps:?}");
+        assert_eq!(crate::knowledge::tasks::checklist(crate::knowledge::tasks::split_log(&brief).0).len(), steps.len(), "every step is a checklist item");
+    }
+
+    #[test]
+    fn a_step_goes_after_the_first_checklist_line_or_at_the_end() {
+        assert_eq!(with_step_after_first("Intro\n\n- [ ] a\n- [x] b\n", "- [ ] g"), "Intro\n\n- [ ] a\n- [ ] g\n- [x] b\n");
+        assert_eq!(with_step_after_first("Only text.", "- [ ] g"), "Only text.\n\n- [ ] g\n");
+        assert_eq!(with_step_after_first("", "- [ ] g"), "- [ ] g\n");
     }
 }

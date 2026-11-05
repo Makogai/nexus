@@ -40,6 +40,8 @@ export const useAppStore = defineStore('app', () => {
     profileId?: string | null
     /** Launch for a knowledge task (ADR-0018). */
     task?: { id: string; title: string; projectId: string | null } | null
+    /** Preselect "start right away" (the Learn view's guided session). */
+    kickoff?: boolean
   }>({ open: false })
   /** Increments when another process (nexus CLI, MCP server) committed to the database (ADR-0009). */
   const externalChanges = ref(0)
@@ -134,8 +136,13 @@ export const useAppStore = defineStore('app', () => {
     }, intervalMs)
   }
 
-  function openLaunch(projectId?: string | null, profileId?: string | null, task?: { id: string; title: string; projectId: string | null } | null) {
-    launchDialog.value = { open: true, projectId: task?.projectId ?? projectId, profileId, task: task ?? null }
+  function openLaunch(
+    projectId?: string | null,
+    profileId?: string | null,
+    task?: { id: string; title: string; projectId: string | null } | null,
+    opts: { kickoff?: boolean } = {},
+  ) {
+    launchDialog.value = { open: true, projectId: task?.projectId ?? projectId, profileId, task: task ?? null, kickoff: !!task && !!opts.kickoff }
   }
 
   return {

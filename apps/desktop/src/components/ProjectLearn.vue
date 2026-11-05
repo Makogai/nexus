@@ -45,7 +45,7 @@ async function startSession() {
   if (!ws) return
   try {
     const task = await api.projectLearnStart(ws.id, props.projectId)
-    app.openLaunch(props.projectId, null, { id: task.id, title: task.title, projectId: props.projectId })
+    app.openLaunch(props.projectId, null, { id: task.id, title: task.title, projectId: props.projectId }, { kickoff: true })
     await load()
   } catch (e) {
     app.toast('error', `Could not prepare the learning session: ${toIpcError(e).message}`)
