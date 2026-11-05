@@ -5,6 +5,7 @@ pub mod context;
 pub mod detect;
 pub mod discovery;
 pub mod environment;
+pub mod explorer;
 
 use std::path::{Path, PathBuf};
 

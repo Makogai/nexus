@@ -46,6 +46,10 @@ const highlight = HighlightStyle.define([
   { tag: [t.link, t.url], color: 'var(--syn-string)', textDecoration: 'underline' },
   { tag: [t.meta, t.processingInstruction], color: 'var(--syn-comment)' },
   { tag: [t.invalid], color: 'var(--red)' },
+  // Diffs (commit view): added and removed lines, hunk headers.
+  { tag: [t.inserted], color: 'var(--green)' },
+  { tag: [t.deleted], color: 'var(--red)' },
+  { tag: [t.changed], color: 'var(--amber)' },
 ])
 
 const theme = EditorView.theme({

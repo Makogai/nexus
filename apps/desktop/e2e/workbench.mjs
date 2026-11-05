@@ -1,13 +1,15 @@
 // End-to-end: the project workbench milestone (W2–W4) against the REAL app — temporary workspace and repositories only.
 //   W2 Knowledge: a constitution opens as rule cards (no raw markers); a note opens as rendered Markdown with raw HTML
 //      escaped; Edit → Save writes the file (approved here); a stale save is a conflict; Constitutions open in Read mode.
+//   W3 Explorer: project tree without .git and ignored output, read-only viewer, secrets never shown; commits with
+//      changed files, renames and diffs.
 //
 //   npx tauri build --debug --no-bundle --features e2e-webview-debugging
 //   node e2e/workbench.mjs [path/to/nexus-desktop(.exe)]
 //
 // Windows only (WebView2 DevTools protocol).
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -124,6 +126,55 @@ try {
   check('the Constitution Manager opens a document in Read mode', (await textOf('[data-constitution-detail] [data-mode="read"]')) === 'Read' && !(await cdp.evaluate(`!!document.querySelector('[data-save]')`)))
   await click('[data-mode="structured"]')
   check('…and Edit shows the tree editor', !!(await until(async () => ((await cdp.evaluate(`!!document.querySelector('[data-save]')`)) ? true : null), 5000)))
+
+  // --- W3: project explorer ----------------------------------------------------------------------------------------
+  const repo = join(root, 'app')
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=Ann', '-c', 'user.email=ann@example.invalid', '-c', 'init.defaultBranch=main', '-c', 'core.autocrlf=false', ...args], { cwd: repo, encoding: 'utf8' })
+  mkdirSync(join(repo, 'src'), { recursive: true })
+  writeFileSync(join(repo, 'src', 'main.ts'), 'export const answer = 41\n')
+  writeFileSync(join(repo, 'README.md'), '# App\n')
+  writeFileSync(join(repo, '.gitignore'), 'dist/\n')
+  git('init', '-q')
+  git('add', '-A')
+  git('commit', '-qm', 'First version')
+  writeFileSync(join(repo, 'src', 'main.ts'), 'export const answer = 42\n')
+  git('mv', 'README.md', 'ABOUT.md')
+  git('commit', '-qam', 'Fix the answer')
+  mkdirSync(join(repo, 'dist'))
+  writeFileSync(join(repo, 'dist', 'bundle.js'), 'x')
+  writeFileSync(join(repo, '.env'), 'API_TOKEN=never-shown-in-nexus\n')
+  const proj = await inv('project_register', { workspaceId: ws.id, path: repo, name: 'App' })
+  // Registered through IPC: reload so the project store knows it (as after adding it in the UI).
+  await cdp.evaluate(`location.hash = '#/projects/${proj.id}?tab=files'; location.reload(); true`)
+  await cdp.waitFor(`!!document.querySelector('[data-project-files] [data-file="src"]')`, 20000)
+  const tree = await cdp.evaluate(`[...document.querySelectorAll('[data-project-files] [data-file]')].map((n) => n.dataset.file).join(',')`)
+  check('Files shows the project tree, folders first, without .git or ignored output', tree === 'src,.env,.gitignore,ABOUT.md', tree)
+  await click('[data-project-files] [data-file="src"]')
+  await cdp.waitFor(`!!document.querySelector('[data-file="src/main.ts"]')`, 10000)
+  await click('[data-file="src/main.ts"]')
+  const shown = await until(async () => {
+    const t = await cdp.evaluate(`document.querySelector('[data-file-viewer] .cm-content')?.innerText ?? ''`)
+    return t.includes('answer') ? t : null
+  })
+  check('…a file opens in the read-only viewer', !!shown && shown.includes('42') && (await cdp.evaluate(`document.querySelector('[data-file-viewer] .cm-content')?.getAttribute('aria-readonly')`)) === 'true', shown ?? '')
+  await click('[data-file=".env"]')
+  const hidden = await cdp.waitFor(`document.querySelector('[data-file-hidden]')?.innerText`, 10000).catch(() => '')
+  check('…a file that may hold secrets is never shown', hidden.includes('secrets') && !(await cdp.evaluate(`document.body.innerText.includes('never-shown-in-nexus')`)), hidden.slice(0, 80))
+
+  await click('[data-project-tab="commits"]')
+  await cdp.waitFor(`document.querySelectorAll('[data-project-commits] [data-commit]').length === 2`, 15000)
+  const history = await cdp.evaluate(`[...document.querySelectorAll('[data-commit] .summary')].map((s) => s.innerText).join(' | ')`)
+  check('Commits lists the history, newest first, with author', history === 'Fix the answer | First version' && (await textOf('[data-commit]')).includes('Ann'), history)
+  await cdp.evaluate(`document.querySelector('[data-commit]').click(); true`)
+  await cdp.waitFor(`!!document.querySelector('[data-commit-file="src/main.ts"]')`, 10000)
+  const changed = await textOf('[data-commit-files]')
+  check('…a commit shows its changed files with counts and renames', changed.includes('README.md → ABOUT.md') && changed.includes('+1'), changed.replace(/\n/g, ' '))
+  await click('[data-commit-file="src/main.ts"]')
+  const diffText = await until(async () => {
+    const t = await cdp.evaluate(`document.querySelector('[data-commit-diff] .cm-content')?.innerText ?? ''`)
+    return t.includes('+export') ? t : null
+  })
+  check('…and a file opens as its diff', !!diffText && diffText.includes('-export const answer = 41') && diffText.includes('+export const answer = 42'), (diffText ?? '').slice(0, 80))
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

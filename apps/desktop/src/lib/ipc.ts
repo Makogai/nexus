@@ -94,6 +94,11 @@ import type {
   ShellInfo,
   StartClaude,
   Workspace,
+  ExplorerListing,
+  ExplorerFile,
+  ChangedFile,
+  CommitDiff,
+  GitLogEntry,
 } from './types'
 
 export class IpcError extends Error {
@@ -178,6 +183,12 @@ export const api = {
     call<PathInspection>('project_inspect_path', { workspaceId, path }),
   projectRegister: (workspaceId: string, path: string, name?: string) =>
     call<Project>('project_register', { workspaceId, path, name }),
+  /** Project explorer (W3): read-only folders, files and Git history. */
+  projectTree: (projectId: string, dir: string) => call<ExplorerListing>('project_tree', { projectId, dir }),
+  projectFile: (projectId: string, path: string) => call<ExplorerFile>('project_file', { projectId, path }),
+  projectLog: (projectId: string, skip: number, limit: number) => call<GitLogEntry[]>('project_log', { projectId, skip, limit }),
+  projectCommit: (projectId: string, oid: string) => call<ChangedFile[]>('project_commit', { projectId, oid }),
+  projectCommitDiff: (projectId: string, oid: string, path: string) => call<CommitDiff>('project_commit_diff', { projectId, oid, path }),
   /** A new project from Git: cloned into `projects/<name>` (or `folder`), registered with its context. */
   projectCloneNew: (workspaceId: string, url: string, name: string | null, folder: string | null) =>
     call<Project>('project_clone_new', { workspaceId, url, name, folder }),

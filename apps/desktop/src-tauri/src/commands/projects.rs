@@ -39,6 +39,43 @@ fn own_conn(ctx: &Ctx) -> IpcResult<nexus_core::db::Connection> {
     Ok(nexus_core::db::open(&ctx.data_dir.join(nexus_core::db::DB_FILE))?)
 }
 
+// ---- Project explorer (W3): read-only files and history ------------------------------------------------------------
+
+/// One folder of the project (`dir` project-relative, "" = the top).
+#[tauri::command]
+pub async fn project_tree(ctx: State<'_, Ctx>, project_id: String, dir: String) -> IpcResult<project::explorer::Listing> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::explorer::list(&own_conn(&ctx)?, &project_id, &dir)?)).await
+}
+
+/// A project file to look at (text only; files that may hold secrets are not shown).
+#[tauri::command]
+pub async fn project_file(ctx: State<'_, Ctx>, project_id: String, path: String) -> IpcResult<project::explorer::FileView> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::explorer::read(&own_conn(&ctx)?, &project_id, &path)?)).await
+}
+
+/// A page of the project's commits, newest first.
+#[tauri::command]
+pub async fn project_log(ctx: State<'_, Ctx>, project_id: String, skip: usize, limit: usize) -> IpcResult<Vec<nexus_core::git::LogEntry>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::explorer::log(&own_conn(&ctx)?, &project_id, skip, limit)?)).await
+}
+
+/// The files a commit changed.
+#[tauri::command]
+pub async fn project_commit(ctx: State<'_, Ctx>, project_id: String, oid: String) -> IpcResult<Vec<nexus_core::git::ChangedFile>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::explorer::commit(&own_conn(&ctx)?, &project_id, &oid)?)).await
+}
+
+/// What a commit changed in one file.
+#[tauri::command]
+pub async fn project_commit_diff(ctx: State<'_, Ctx>, project_id: String, oid: String, path: String) -> IpcResult<project::explorer::CommitDiff> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::explorer::commit_diff(&own_conn(&ctx)?, &project_id, &oid, &path)?)).await
+}
+
 /// Add a new project from Git: clone (into `projects/<name>` or `folder`), register, create its context. A clone can
 /// take minutes, so it runs on its own connection.
 #[tauri::command]

@@ -1706,3 +1706,48 @@ export interface SyncCloned {
   workspace: Workspace
   restore: SyncRestore
 }
+
+// ---- Project explorer (W3): mirrors nexus_core::project::explorer and git::ChangedFile --------------------------------
+
+export interface ExplorerEntry {
+  name: string
+  /** Project-relative, forward slashes. */
+  path: string
+  dir: boolean
+  symlink: boolean
+  size: number | null
+  /** Git ignores it (build output, dependencies, local files). */
+  ignored: boolean
+}
+
+export interface ExplorerListing {
+  path: string
+  entries: ExplorerEntry[]
+  truncated: boolean
+}
+
+export interface ExplorerFile {
+  path: string
+  size: number
+  /** null when binary or hidden. */
+  text: string | null
+  binary: boolean
+  truncated: boolean
+  /** Why the content is not shown (a file that may hold secrets). */
+  hidden: string | null
+}
+
+export interface ChangedFile {
+  status: string
+  path: string
+  oldPath: string | null
+  additions: number | null
+  deletions: number | null
+}
+
+export interface CommitDiff {
+  path: string
+  text: string | null
+  truncated: boolean
+  hidden: string | null
+}

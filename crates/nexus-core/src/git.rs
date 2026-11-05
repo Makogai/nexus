@@ -445,6 +445,150 @@ pub fn log_range(repo: &Path, range: &str, max: usize) -> Result<Vec<LogEntry>> 
         .collect())
 }
 
+// ---- Project explorer (W3): read-only history views ---------------------------------------------------------------
+
+/// Options for every history read: no external diff programs, no textconv filters, no signature checks — viewing a
+/// commit never runs a program configured for the repository.
+const SAFE_SHOW: [&str; 4] = ["-c", "log.showSignature=false", "-c", "diff.external="];
+
+fn valid_oid(oid: &str) -> Result<()> {
+    if (4..=64).contains(&oid.len()) && oid.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(CoreError::invalid("not a commit id"))
+    }
+}
+
+/// Commits reachable from HEAD, newest first, `skip` skipped and at most `max` (paging). An empty repository has none.
+pub fn log_page(repo: &Path, skip: usize, max: usize) -> Result<Vec<LogEntry>> {
+    if head(repo).is_none() {
+        return Ok(Vec::new());
+    }
+    let n = format!("-n{}", max.clamp(1, 200));
+    let skip = format!("--skip={skip}");
+    let mut args: Vec<&str> = SAFE_SHOW.to_vec();
+    args.extend(["log", "--no-color", "--no-show-signature", &n, &skip, "--format=%H%x1f%at%x1f%an%x1f%s%x1e", "HEAD", "--"]);
+    let out = run_git(Some(repo), &args)?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git log".into(), message: first_line(&out.stderr_str()) });
+    }
+    Ok(out
+        .stdout_str()
+        .split('\x1e')
+        .filter_map(|rec| {
+            let mut f = rec.trim_start_matches(['\n', '\r']).split('\x1f');
+            let oid = f.next()?.trim().to_string();
+            if oid.len() < 7 {
+                return None;
+            }
+            let ts: i64 = f.next()?.trim().parse().ok()?;
+            Some(LogEntry { oid, timestamp_ms: ts * 1000, author: clean(f.next().unwrap_or(""), 80), summary: clean(f.next().unwrap_or(""), 200) })
+        })
+        .collect())
+}
+
+/// A file a commit changed: status letter (A, M, D, R, C, T), path (the new one for renames), the old path of a
+/// rename or copy, and line counts (`None` for binary files).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedFile {
+    pub status: String,
+    pub path: String,
+    pub old_path: Option<String>,
+    pub additions: Option<u32>,
+    pub deletions: Option<u32>,
+}
+
+/// The files `oid` changed against its first parent (renames detected), with line counts. Commit messages and paths
+/// come from the repository: callers show them as text.
+pub fn commit_files(repo: &Path, oid: &str) -> Result<Vec<ChangedFile>> {
+    valid_oid(oid)?;
+    let show = |extra: &str| -> Result<String> {
+        let mut args: Vec<&str> = SAFE_SHOW.to_vec();
+        args.extend(["show", "--no-color", "--no-ext-diff", "--no-textconv", "--format=", "-M", "--diff-merges=first-parent", "-z", extra, oid, "--"]);
+        let out = run_git(Some(repo), &args)?;
+        if !out.success() {
+            return Err(CoreError::External { program: "git show".into(), message: first_line(&out.stderr_str()) });
+        }
+        Ok(out.stdout_str())
+    };
+    // --name-status -z: "M\0path\0" or "R100\0old\0new\0"
+    let mut files: Vec<ChangedFile> = Vec::new();
+    let names = show("--name-status")?;
+    let mut it = names.split('\0').filter(|s| !s.is_empty());
+    while let Some(st) = it.next() {
+        let status = st.trim().chars().next().map(|c| c.to_string()).unwrap_or_default();
+        if status == "R" || status == "C" {
+            let (Some(old), Some(new)) = (it.next(), it.next()) else { break };
+            files.push(ChangedFile { status, path: new.to_string(), old_path: Some(old.to_string()), additions: None, deletions: None });
+        } else {
+            let Some(p) = it.next() else { break };
+            files.push(ChangedFile { status, path: p.to_string(), old_path: None, additions: None, deletions: None });
+        }
+        if files.len() >= 2000 {
+            break;
+        }
+    }
+    // --numstat -z: "add\tdel\tpath\0" or, for renames, "add\tdel\t\0old\0new\0"; "-\t-" for binary files.
+    let counts = show("--numstat")?;
+    let mut it = counts.split('\0');
+    while let Some(rec) = it.next() {
+        let mut f = rec.splitn(3, '\t');
+        let (Some(a), Some(d), Some(p)) = (f.next(), f.next(), f.next()) else { continue };
+        let path = if p.is_empty() {
+            let _old = it.next();
+            it.next().unwrap_or("").to_string()
+        } else {
+            p.to_string()
+        };
+        if let Some(cf) = files.iter_mut().find(|c| c.path == path) {
+            cf.additions = a.parse().ok();
+            cf.deletions = d.parse().ok();
+        }
+    }
+    Ok(files)
+}
+
+/// The diff `oid` made to `path` (against its first parent), at most `max_bytes`; whether it was cut.
+pub fn commit_file_diff(repo: &Path, oid: &str, path: &str, max_bytes: usize) -> Result<(String, bool)> {
+    valid_oid(oid)?;
+    if path.is_empty() || path.starts_with('-') || path.split(['/', '\\']).any(|s| s == "..") {
+        return Err(CoreError::invalid("not a path in the repository"));
+    }
+    let mut args: Vec<&str> = SAFE_SHOW.to_vec();
+    args.extend(["show", "--no-color", "--no-ext-diff", "--no-textconv", "--format=", "-M", "--diff-merges=first-parent", oid, "--", path]);
+    let out = run_git(Some(repo), &args)?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git show".into(), message: first_line(&out.stderr_str()) });
+    }
+    let text = out.stdout_str();
+    if text.len() <= max_bytes {
+        return Ok((text, false));
+    }
+    let mut cut = max_bytes;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    Ok((text[..cut].to_string(), true))
+}
+
+/// Which of `paths` (repository-relative, forward slashes) Git ignores. Not a repository → none.
+pub fn ignored_paths(repo: &Path, paths: &[String]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    if paths.is_empty() {
+        return out;
+    }
+    // In chunks, as arguments (exit code 1 = none of them ignored, which is not an error).
+    for chunk in paths.chunks(150) {
+        let mut args = vec!["check-ignore", "--no-index", "--"];
+        args.extend(chunk.iter().filter(|p| !p.starts_with('-')).map(String::as_str));
+        if let Ok(o) = run_git(Some(repo), &args) {
+            out.extend(o.stdout_str().lines().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string));
+        }
+    }
+    out
+}
+
 /// A changed path between two trees (or a tree and the working tree): status letter, mode of the new side, path.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
