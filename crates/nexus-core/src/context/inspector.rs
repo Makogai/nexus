@@ -82,14 +82,18 @@ pub fn check_bleed(conn: &Connection, session_id: &str, path: &str, home: &Path)
     let Ok(s) = session::get(conn, session_id) else { return Ok(false) };
     let profiles = crate::claude::profile::list(conn, true)?;
     let Some(own) = s.profile_id.as_deref().and_then(|id| profiles.iter().find(|p| p.id == id)) else { return Ok(false) };
-    let own_dir = own.effective_config_dir(home);
-    let file = Path::new(path);
+    // Canonical forms on both sides: Claude, the profile record and the OS may spell the same folder differently
+    // (8.3 short names such as `RUNNER~1`, symlinks, case).
+    let canon = |p: &Path| crate::paths::canonical_or_given(p);
+    let own_dir = canon(&own.effective_config_dir(home));
+    let file_canon = canon(Path::new(path));
+    let file = file_canon.as_path();
     if crate::paths::is_within(file, &own_dir) {
         return Ok(false);
     }
-    let default_dir = home.join(".claude");
+    let default_dir = canon(&home.join(".claude"));
     let mut others: Vec<(String, std::path::PathBuf)> =
-        profiles.iter().filter(|p| p.id != own.id).map(|p| (p.name.clone(), p.effective_config_dir(home))).collect();
+        profiles.iter().filter(|p| p.id != own.id).map(|p| (p.name.clone(), canon(&p.effective_config_dir(home)))).collect();
     if !others.iter().any(|(_, d)| crate::paths::same_path(d, &default_dir)) {
         others.push(("the default profile".into(), default_dir));
     }

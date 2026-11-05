@@ -169,6 +169,26 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// `path` in its canonical form where the file system knows it: the deepest existing ancestor is canonicalised (long
+/// names instead of 8.3 short names such as `RUNNER~1`, symlinks resolved, `\\?\` dropped on Windows) and the
+/// non-existing rest appended. Paths that exist nowhere stay as given. For comparing paths from different sources.
+pub fn canonical_or_given(path: &Path) -> PathBuf {
+    let mut rest: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(c) = dunce::canonicalize(cur) {
+            return rest.iter().rev().fold(c, |p, r| p.join(r));
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+                rest.push(name.to_os_string());
+                cur = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
 /// `path` is `dir` or inside it (lexical, by components; case-insensitive and `/`≡`\` on Windows). No file access.
 pub fn is_within(path: &Path, dir: &Path) -> bool {
     let norm = |p: &Path| {
@@ -277,5 +297,25 @@ mod tests {
         assert_eq!(relative_slash_path(&root, &root), None);
         let other = PathBuf::from(if cfg!(windows) { r"D:\elsewhere" } else { "/elsewhere" });
         assert_eq!(relative_slash_path(&root, &other), None);
+    }
+
+    /// Different spellings of one folder compare equal after canonical_or_given — also for files that do not exist
+    /// yet (CI runners report temp paths with 8.3 short names such as `C:\Users\RUNNER~1`).
+    #[test]
+    fn canonical_or_given_unifies_spellings_of_a_path() {
+        let t = tempfile::tempdir().unwrap();
+        let real = dunce::canonicalize(t.path()).unwrap();
+        let missing = t.path().join("cfg").join("CLAUDE.md");
+        assert_eq!(canonical_or_given(&missing), real.join("cfg").join("CLAUDE.md"), "the existing ancestor is canonicalised");
+        if cfg!(windows) {
+            let shouted = PathBuf::from(t.path().to_string_lossy().to_uppercase()).join("x.md");
+            assert!(same_path(&canonical_or_given(&shouted), &real.join("x.md")));
+            let short = Path::new(r"C:\PROGRA~1");
+            if short.exists() {
+                assert_eq!(canonical_or_given(&short.join("nexus-test-missing")), dunce::canonicalize(r"C:\Program Files").unwrap().join("nexus-test-missing"));
+            }
+        }
+        let nowhere = PathBuf::from("relative-nowhere/file.md");
+        assert_eq!(canonical_or_given(&nowhere), nowhere, "a path that exists nowhere stays as given");
     }
 }

@@ -39,7 +39,7 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
       - name: Tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       - name: Test double for the installed-app check
         run: cargo build -p fake-claude --locked
       - name: Release installer (CLI bundled as sidecar)
@@ -92,7 +92,7 @@ jobs:
         run: npm ci
       - name: Tests (the runner's own architecture)
         if: matrix.target == 'aarch64-apple-darwin'
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       # Not notarized yet (needs an Apple Developer ID, ADR-0033): the bundle is ad-hoc signed (`signingIdentity: "-"`),
       # so macOS asks the person to confirm the first start.
       - name: App bundle and disk image (CLI bundled as sidecar)
@@ -125,7 +125,7 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
       - name: Tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       - name: AppImage and Debian package (CLI bundled as sidecar)
         working-directory: apps/desktop
         run: npx tauri build --config src-tauri/tauri.installer.conf.json --bundles appimage,deb
