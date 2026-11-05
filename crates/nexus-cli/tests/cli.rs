@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 21);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 22);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -1793,4 +1793,28 @@ fn git_kits_are_cloned_by_nexus_and_updates_need_a_new_review() {
     let updated = e.json(&["kits", "update", "probe-kit"]);
     assert_eq!(updated["status"], "changed", "{updated:#}");
     assert_eq!(e.run(&["kits", "add", "--git", "ext::sh -c id"]).status.code(), Some(1), "command-running transports are refused");
+}
+
+/// W4: Claude drafts a project document only through `draft_project_document` — an unverified note labelled for the
+/// person's review, never a direct write into the project context; unknown topics are refused.
+#[test]
+fn claude_drafts_project_documents_for_review() {
+    let e = Env::new();
+    e.setup();
+    let report = e.data.parent().unwrap().join("learn.json");
+    let out = e.cmd(&["launch", "--profile", "fake", "--project", "repo", "-q"]).env("FAKE_CLAUDE_REPORT", &report).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let sid = e.json(&["sessions"])[0]["id"].as_str().unwrap().to_string();
+    let r = mcp_calls(&e, &sid, &[
+        ("draft_project_document", serde_json::json!({ "topic": "architecture", "body": "## Architecture summary\n\nOne crate (verified: Cargo.toml)." })),
+        ("draft_project_document", json(r#"{"topic":"security","body":"x"}"#)),
+    ]);
+    assert_eq!(r[0]["isError"], false, "{}", r[0]);
+    assert_eq!(r[0]["structuredContent"]["drafted"]["topic"], "architecture");
+    assert_eq!(r[1]["isError"], true, "only overview or architecture");
+    let ctx = ws_dir(&e).join("project-context").join("repo");
+    let arch = std::fs::read_to_string(ctx.join("architecture.md")).unwrap();
+    assert!(arch.contains("_Not written yet._"), "the draft does not touch the architecture document");
+    let notes: Vec<String> = std::fs::read_dir(ctx.join("memory")).into_iter().chain(std::fs::read_dir(ctx.join("notes"))).flatten().flatten().map(|f| std::fs::read_to_string(f.path()).unwrap_or_default()).collect();
+    assert!(notes.iter().any(|n| n.contains("One crate (verified: Cargo.toml).") && n.contains("draft") && n.contains("architecture")), "a labelled draft note: {notes:?}");
 }

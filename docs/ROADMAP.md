@@ -165,6 +165,18 @@ between computers through one portable Git repository.
 | P9 | Quality review of the template library before merging ([`TEMPLATE_REVIEW.md`](TEMPLATE_REVIEW.md)): 319 → 284 rules (duplicates merged, generic and default-restating rules removed, versions checked, proportionality scoped, unsafe execution forbidden: CORE-6, SEC-16, OPS-9, GIT-4, TST-12), 11 skill descriptions ≤ 160 characters, two workflow dependency fixes; on-demand listing ordered mandatory → task/project/stack → workspace; independent repositories never enter the workspace repository (projects registered inside it are git-ignored, nested repositories and gitlinks block the commit review, Doctor `projects-ignored`) | core + CLI 286, clippy ×2, vitest 90, desktop E2E (portable 50, restore 12, constitutions 13, sync 18, context 9, workflows 24, smoke 27, task-flow 29, MCP 9, profiles-kits 9, attention 27, usage 18), real Claude (kits 19, context 7, security 14) | ✅ |
 | P10 | New workspace in a prepared place (owner feedback after the merge; branch `fix/workspace-setup`): create in a new folder, an existing empty folder or an **empty Git repository** (cloned, set up with the template, first reviewed push goes there); opening an empty repository or a folder without a manifest offers that setup; a folder or repository with other content (a project) is refused; an existing `.gitignore`/README is kept (NEXUS lines appended); standard folders `constitutions/ knowledge/ project-context/ workflows/` with READMEs from the start (index skips READMEs); shared form in onboarding and Settings (ADR-0036 amendment) | core 220 + CLI (288 total), clippy ×2, vitest 90, build, desktop E2E `workspace-setup.mjs` 14/14 + sync 18, restore 12, portable 50, smoke 27, constitutions 13, context 9, task-flow 29, workflows 24, profiles-kits 9, attention 27, usage 18, MCP 9, real-Claude kits 19 | ✅ (not merged) |
 
+## Stage: Project workbench (owner requests, 2026-11-05)
+
+Branch `milestone/project-workbench` (off `fix/workspace-setup`). Decisions: ADR-0040. The owner chose CodeMirror 6
+read-only, a guided Claude session whose drafts they approve, and Graphify used when installed and run by them.
+
+| # | Milestone | Acceptance check | Status |
+| --- | --- | --- | --- |
+| W1 | Add a project from Git: desktop *Clone from Git* and `nexus projects add <url> [--into]`; clone into `projects/<name>` or an empty folder, registered with its context; duplicates, bad URLs, occupied folders refused; failed clones leave nothing; clones get 20 min | core `clone_new`, CLI, E2E `workspace-setup.mjs` 17/17 | ✅ |
+| W2 | Knowledge read formatted (Markdown with raw HTML escaped; constitutions as rule cards) and edited in place (`update_doc`: optimistic, validated, approved here); Constitution Manager opens in Read mode; calmer lists (no native grey button rows), compact empty terminal panel | core, vitest markdown safety, E2E `workbench.mjs` | ✅ |
+| W3 | Project explorer: Files (lazy tree, CodeMirror read-only viewer, secrets never shown, nothing leaves the project, symlinks not followed) and Commits (paged history, changed files with renames and counts, coloured diffs; no external diff/textconv/signature programs) | core `explorer`, E2E `workbench.mjs` | ✅ |
+| W4 | Learn a project: NEXUS's own map (no model), a learning task carrying it, `draft_project_document` (MCP, 22 tools) → unverified draft notes, *Use* / *Set aside* by the person, Graphify offered when installed (offline code-only build typed into a terminal, `graphify-out/` excluded locally) | core `learn`, CLI MCP test, MCP interop 22, E2E `workbench.mjs` 22/22 | ✅ |
+
 ## Phase 6 — Product maturity
 
 | # | Milestone | Acceptance check |

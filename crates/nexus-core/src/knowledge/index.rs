@@ -87,7 +87,10 @@ fn mtime_ms(meta: &std::fs::Metadata) -> i64 {
 /// Bring the index in line with the files under `roots`. Unchanged files (same size and mtime) are not read.
 pub fn refresh(conn: &Connection, roots: &[Root]) -> Result<RefreshReport> {
     let mut report = RefreshReport::default();
-    let tx = conn.unchecked_transaction()?;
+    // IMMEDIATE: take the write lock up front. A deferred transaction that reads and then writes cannot be upgraded
+    // while another process (desktop, MCP server, hook) also refreshes — SQLite then fails at once with "database is
+    // locked" instead of waiting for the busy timeout.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     for root in roots {
         let root_key = root.dir.to_string_lossy().into_owned();
         let workspace_id = match &root.scope {

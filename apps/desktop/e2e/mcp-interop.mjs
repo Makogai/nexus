@@ -39,7 +39,7 @@ await client.connect(new StdioClientTransport({ command: nexus, args: ['--data-d
 check('initialize handshake with the official SDK', client.getServerVersion()?.name === 'nexus', JSON.stringify(client.getServerVersion()))
 
 const { tools } = await client.listTools()
-check('tools/list parsed by the SDK', tools.length === 21, tools.map((t) => t.name).join(', '))
+check('tools/list parsed by the SDK', tools.length === 22, tools.map((t) => t.name).join(', '))
 check('read-only tools are annotated', tools.filter((t) => t.annotations?.readOnlyHint).length === 15)
 
 const cp = await client.callTool({ name: 'checkpoint', arguments: { kind: 'progress', summary: 'Player movement works' } })

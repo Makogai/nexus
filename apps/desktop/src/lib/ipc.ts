@@ -99,6 +99,8 @@ import type {
   ChangedFile,
   CommitDiff,
   GitLogEntry,
+  LearnDraft,
+  ProjectMap,
 } from './types'
 
 export class IpcError extends Error {
@@ -183,6 +185,14 @@ export const api = {
     call<PathInspection>('project_inspect_path', { workspaceId, path }),
   projectRegister: (workspaceId: string, path: string, name?: string) =>
     call<Project>('project_register', { workspaceId, path, name }),
+  /** Learn a project (W4): NEXUS's map, the learning task, Claude's drafts, Graphify's output kept out of Git. */
+  projectLearnMap: (workspaceId: string, projectId: string) => call<ProjectMap>('project_learn_map', { workspaceId, projectId }),
+  projectLearnStart: (workspaceId: string, projectId: string) =>
+    call<{ id: string; title: string; status: string | null }>('project_learn_start', { workspaceId, projectId }),
+  projectLearnDrafts: (workspaceId: string, projectId: string) => call<LearnDraft[]>('project_learn_drafts', { workspaceId, projectId }),
+  projectLearnDecide: (workspaceId: string, projectId: string, draftId: string, apply: boolean) =>
+    call<void>('project_learn_decide', { workspaceId, projectId, draftId, apply }),
+  projectLearnExcludeGraph: (projectId: string) => call<boolean>('project_learn_exclude_graph', { projectId }),
   /** Project explorer (W3): read-only folders, files and Git history. */
   projectTree: (projectId: string, dir: string) => call<ExplorerListing>('project_tree', { projectId, dir }),
   projectFile: (projectId: string, path: string) => call<ExplorerFile>('project_file', { projectId, path }),

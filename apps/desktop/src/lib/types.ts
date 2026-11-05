@@ -1751,3 +1751,45 @@ export interface CommitDiff {
   truncated: boolean
   hidden: string | null
 }
+
+// ---- Learn a project (W4): mirrors nexus_core::project::learn ---------------------------------------------------------
+
+export interface LearnCount {
+  name: string
+  files: number
+}
+
+export interface ProjectMap {
+  projectId: string
+  name: string
+  files: number
+  filesTruncated: boolean
+  languages: LearnCount[]
+  folders: LearnCount[]
+  docs: string[]
+  stacks: string[]
+  packageManagers: string[]
+  scripts: [string, string][]
+  history: { commits: number; firstMs: number | null; lastMs: number | null; contributors: number } | null
+  context: {
+    overviewId: string | null
+    /** Still the text NEXUS generated from the README. */
+    overviewGenerated: boolean
+    architectureId: string | null
+    architectureSummary: boolean
+    notes: number
+    decisions: number
+    openTasks: number
+  }
+  graph: { installed: boolean; built: boolean; report: string | null; builtMs: number | null; ignored: boolean; command: string }
+  task: { id: string; title: string; status: string | null } | null
+  drafts: number
+}
+
+export interface LearnDraft {
+  id: string
+  topic: 'overview' | 'architecture'
+  title: string
+  updated: string | null
+  body: string
+}

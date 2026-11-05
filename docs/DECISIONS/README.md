@@ -44,3 +44,4 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0037](0037-workspace-templates-and-progressive-loading.md) | Workspace templates, the workspace AI Kit and progressive loading | Accepted, implemented (P2) |
 | [0038](0038-development-records-and-checkpoints.md) | Development records, durable checkpoints and project history | Accepted, implemented (P6) |
 | [0039](0039-workspace-sync-policies.md) | Workspace sync policies: manual, automatic with review, trusted automatic | Accepted, implemented (P7) |
+| [0040](0040-project-workbench.md) | Project workbench: add from Git, knowledge reading/editing, project explorer, learning a project | Accepted, implemented (W1–W4) |

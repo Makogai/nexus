@@ -572,6 +572,47 @@ pub fn commit_file_diff(repo: &Path, oid: &str, path: &str, max_bytes: usize) ->
     Ok((text[..cut].to_string(), true))
 }
 
+/// Tracked files (`git ls-files`), forward slashes, at most `max`; whether there were more.
+pub fn tracked_files_capped(repo: &Path, max: usize) -> Result<(Vec<String>, bool)> {
+    let out = run_git(Some(repo), &["ls-files", "-z"])?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git ls-files".into(), message: first_line(&out.stderr_str()) });
+    }
+    let all = out.stdout_str();
+    let mut files: Vec<String> = all.split('\0').filter(|s| !s.is_empty()).take(max + 1).map(str::to_string).collect();
+    let truncated = files.len() > max;
+    files.truncate(max);
+    Ok((files, truncated))
+}
+
+/// Size of a repository's history: commits on HEAD, first and last commit time, number of distinct authors (a count —
+/// names and e-mail addresses are not kept).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryStats {
+    pub commits: u64,
+    pub first_ms: Option<i64>,
+    pub last_ms: Option<i64>,
+    pub contributors: usize,
+}
+
+pub fn history_stats(repo: &Path) -> Option<HistoryStats> {
+    head(repo)?;
+    let text = |args: &[&str]| run_git(Some(repo), args).ok().filter(|o| o.success()).map(|o| o.stdout_str());
+    let commits = text(&["rev-list", "--count", "HEAD"])?.trim().parse().ok()?;
+    let last_ms = text(&["log", "-1", "--format=%at", "HEAD"]).and_then(|s| s.trim().parse::<i64>().ok()).map(|s| s * 1000);
+    let first_ms = text(&["log", "--max-parents=0", "--format=%at", "HEAD"]).and_then(|s| s.lines().filter_map(|l| l.trim().parse::<i64>().ok()).min()).map(|s| s * 1000);
+    let contributors = text(&["shortlog", "-s", "-n", "HEAD"]).map(|s| s.lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0);
+    Some(HistoryStats { commits, first_ms, last_ms, contributors })
+}
+
+/// The clone's own exclude file (`.git/info/exclude`): ignore rules that stay on this computer and are never committed.
+pub fn local_exclude_file(repo: &Path) -> Option<PathBuf> {
+    let out = run_git(Some(repo), &["rev-parse", "--git-path", "info/exclude"]).ok().filter(|o| o.success())?;
+    let p = PathBuf::from(out.stdout_str().trim());
+    Some(if p.is_absolute() { p } else { repo.join(p) })
+}
+
 /// Which of `paths` (repository-relative, forward slashes) Git ignores. Not a repository → none.
 pub fn ignored_paths(repo: &Path, paths: &[String]) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();

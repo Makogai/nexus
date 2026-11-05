@@ -62,7 +62,7 @@ async function cloneAndAdd() {
     const p = await projects.cloneNew(url.value.trim(), name.value.trim() || null, into.value.trim() || null)
     app.toast('success', `${p.name} cloned and added to ${workspaces.active?.name}`)
     emit('close')
-    router.push(`/projects/${p.id}`)
+    router.push({ path: `/projects/${p.id}`, query: { tab: 'learn' } })
   } catch (e) {
     error.value = toIpcError(e).message
   } finally {
@@ -93,7 +93,7 @@ async function register() {
     const p = await projects.register(inspection.value.path, name.value.trim() || undefined)
     app.toast('success', `${p.name} added to ${workspaces.active?.name}`)
     emit('close')
-    router.push(`/projects/${p.id}`)
+    router.push({ path: `/projects/${p.id}`, query: { tab: 'learn' } })
   } catch (e) {
     error.value = toIpcError(e).message
   } finally {

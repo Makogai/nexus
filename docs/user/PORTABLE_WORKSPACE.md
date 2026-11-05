@@ -20,10 +20,13 @@ computer from their recorded remotes.
    private data; the first push publishes the workspace to your repository. (Git needs your `user.name` and
    `user.email` to commit.)
 4. **Claude profiles** → add your profile(s); **Claude Code setup** helps if Claude Code is not installed yet.
-5. **Projects → Add project** for each repository. NEXUS creates its portable context under
+5. **Projects → Add project** for each repository — a folder on this computer or **Clone from Git** (into the
+   workspace's `projects/`, or a folder you choose). NEXUS creates its portable context under
    `project-context/<project>/` from the project's own files (nothing is invented). Clones you keep inside the
    workspace go to `projects/` (ignored by Git). A project you register from another folder inside the workspace is
-   added to `.gitignore` too, and NEXUS refuses to commit any other repository nested in the workspace.
+   added to `.gitignore` too, and NEXUS refuses to commit any other repository nested in the workspace. The project
+   opens on **Learn**: NEXUS shows what it read itself, *Start a learning session* lets Claude draft the overview and
+   architecture and record memories, and you decide which drafts enter the knowledge base (Graphify optional).
 6. Work as usual. When a Claude session that changed something ends, NEXUS writes a **development record** into the
    project's context — verified Git facts, what Claude Code's hooks observed, and what Claude reported (marked
    unverified). See it in the project's **Development history**.

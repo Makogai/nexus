@@ -3,6 +3,7 @@
 //      escaped; Edit → Save writes the file (approved here); a stale save is a conflict; Constitutions open in Read mode.
 //   W3 Explorer: project tree without .git and ignored output, read-only viewer, secrets never shown; commits with
 //      changed files, renames and diffs.
+//   W4 Learn: NEXUS's own map, Graphify optional, the learning task with the map as brief, drafts applied or set aside.
 //
 //   npx tauri build --debug --no-bundle --features e2e-webview-debugging
 //   node e2e/workbench.mjs [path/to/nexus-desktop(.exe)]
@@ -175,6 +176,45 @@ try {
     return t.includes('+export') ? t : null
   })
   check('…and a file opens as its diff', !!diffText && diffText.includes('-export const answer = 41') && diffText.includes('+export const answer = 42'), (diffText ?? '').slice(0, 80))
+
+  // --- W4: learn the project -----------------------------------------------------------------------------------------
+  await click('[data-project-tab="learn"]')
+  const mapText = await cdp.waitFor(`document.querySelector('[data-learn-map]')?.innerText`, 30000).catch(() => '')
+  check('Learn shows what NEXUS read itself (files, languages, history)', mapText.includes('tracked files') && mapText.includes('TypeScript') && /2\s*commits/.test(mapText), mapText.replace(/\n/g, ' ').slice(0, 160))
+  check('…and Graphify only as an option (install hint or build button)', await cdp.evaluate(`!!document.querySelector('[data-learn-graph-missing], [data-learn-graph-build]')`))
+  mkdirSync(join(repo, 'graphify-out'))
+  writeFileSync(join(repo, 'graphify-out', 'GRAPH_REPORT.md'), '# Graph report\n')
+  await cdp.evaluate(`[...document.querySelectorAll('[data-learn-map] button')].find((b) => b.innerText.includes('Read again'))?.click(); true`)
+  const graphReady = await until(async () => ((await textOf('[data-learn-graph]')).includes('Graph ready') ? true : null))
+  check('…a built graph is recognised', !!graphReady)
+
+  // A synthetic profile (fake Claude, temporary config folder) so the launch dialog can show the task.
+  const cfg = join(root, 'claude-cfg')
+  mkdirSync(cfg)
+  await inv('profile_create', { input: { name: 'Fake', configDir: cfg, executable: fileURLToPath(new URL('../../../target/debug/fake-claude.exe', import.meta.url)), defaultWorkProfile: 'balanced' } })
+  await cdp.evaluate(`location.reload(); true`)
+  await cdp.waitFor(`!!document.querySelector('[data-learn-start]')`, 30000)
+  await click('[data-learn-start]')
+  const launch = await cdp.waitFor(`document.querySelector('[data-launch-task]')?.innerText`, 10000).catch(() => '')
+  check('Start a learning session opens the launch for the learning task', launch.includes('Learn App'), launch.replace(/\n/g, ' ').slice(0, 120))
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.innerText.trim() === 'Cancel')?.click(); true`)
+  const lm = await inv('project_learn_map', { workspaceId: ws.id, projectId: proj.id })
+  const brief = lm.task ? (await inv('knowledge_read', { workspaceId: ws.id, id: lm.task.id })).body : ''
+  check('…the task carries NEXUS\'s map and the drafting instructions (graph included)', brief.includes('draft_project_document') && brief.includes('GRAPH_REPORT.md') && brief.includes('do not change any file'), brief.slice(0, 100))
+
+  for (const [topic, text] of [['overview', 'A tiny app that answers (verified in src/main.ts).'], ['architecture', 'One module, src/main.ts (inferred).']]) {
+    await inv('knowledge_create', { workspaceId: ws.id, input: { kind: 'note', title: `App — ${topic} draft`, body: text, projectId: proj.id, labels: ['draft', topic] } })
+  }
+  await cdp.evaluate(`[...document.querySelectorAll('[data-learn-map] button')].find((b) => b.innerText.includes('Read again'))?.click(); true`)
+  await cdp.waitFor(`!!document.querySelector('[data-draft="overview"]') && !!document.querySelector('[data-draft="architecture"]')`, 15000)
+  await click('[data-draft="overview"] [data-draft-apply]')
+  await until(async () => ((await cdp.evaluate(`!document.querySelector('[data-draft="overview"]')`)) ? true : null))
+  const ctxDir = join(root, 'ws', 'project-context', 'app')
+  const overview = readFileSync(join(ctxDir, 'overview.md'), 'utf8')
+  check('Use as overview writes the draft into the project overview', overview.includes('A tiny app that answers') && overview.includes('accepted on'), overview.split('\n').slice(-3).join(' | '))
+  await click('[data-draft="architecture"] [data-draft-discard]')
+  const none = await until(async () => ((await textOf('[data-learn-drafts]')).includes('No drafts waiting') ? true : null))
+  check('Set aside leaves the architecture untouched and the list empty', !!none && readFileSync(join(ctxDir, 'architecture.md'), 'utf8').includes('_Not written yet._'))
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

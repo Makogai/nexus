@@ -39,6 +39,69 @@ fn own_conn(ctx: &Ctx) -> IpcResult<nexus_core::db::Connection> {
     Ok(nexus_core::db::open(&ctx.data_dir.join(nexus_core::db::DB_FILE))?)
 }
 
+// ---- Learn a project (W4) -------------------------------------------------------------------------------------------
+
+fn learn_ws(c: &nexus_core::db::Connection, workspace_id: &str) -> IpcResult<nexus_core::workspace::Workspace> {
+    Ok(nexus_core::workspace::get(c, workspace_id)?)
+}
+
+/// NEXUS's own map of the project (no model, nothing executed).
+#[tauri::command]
+pub async fn project_learn_map(ctx: State<'_, Ctx>, workspace_id: String, project_id: String) -> IpcResult<project::learn::ProjectMap> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        Ok(project::learn::map(&c, &ctx.data_dir, &learn_ws(&c, &workspace_id)?, &project_id)?)
+    })
+    .await
+}
+
+/// Create (or reuse) the learning task; the desktop launches Claude on it.
+#[tauri::command]
+pub async fn project_learn_start(ctx: State<'_, Ctx>, workspace_id: String, project_id: String) -> IpcResult<project::learn::LearnTask> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        Ok(project::learn::start(&c, &ctx.data_dir, &learn_ws(&c, &workspace_id)?, &project_id)?)
+    })
+    .await
+}
+
+/// Claude's drafts waiting for the person.
+#[tauri::command]
+pub async fn project_learn_drafts(ctx: State<'_, Ctx>, workspace_id: String, project_id: String) -> IpcResult<Vec<project::learn::Draft>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        Ok(project::learn::drafts(&c, &learn_ws(&c, &workspace_id)?, &project_id)?)
+    })
+    .await
+}
+
+/// The person accepts a draft (`apply`) or sets it aside.
+#[tauri::command]
+pub async fn project_learn_decide(ctx: State<'_, Ctx>, workspace_id: String, project_id: String, draft_id: String, apply: bool) -> IpcResult<()> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = learn_ws(&c, &workspace_id)?;
+        if apply {
+            project::learn::apply_draft(&c, &ctx.data_dir, &ws, &project_id, &draft_id)?;
+        } else {
+            project::learn::discard_draft(&c, &ctx.data_dir, &ws, &project_id, &draft_id)?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Keep `graphify-out/` out of Git in this clone (local exclude file) before the person builds the graph.
+#[tauri::command]
+pub async fn project_learn_exclude_graph(ctx: State<'_, Ctx>, project_id: String) -> IpcResult<bool> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::learn::exclude_graph_output(&own_conn(&ctx)?, &project_id)?)).await
+}
+
 // ---- Project explorer (W3): read-only files and history ------------------------------------------------------------
 
 /// One folder of the project (`dir` project-relative, "" = the top).

@@ -2,7 +2,7 @@
 import { computed, onActivated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, BookMarked, Boxes, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
+import { ArrowLeft, BookMarked, Boxes, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, GraduationCap, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
 import { relativeTime } from '../lib/format'
 import { api, toIpcError } from '../lib/ipc'
 import { useWorkspaceStore } from '../stores/workspaces'
@@ -18,6 +18,7 @@ import SessionRow from '../components/SessionRow.vue'
 import InstructionsPanel from '../components/InstructionsPanel.vue'
 import ProjectCommits from '../components/ProjectCommits.vue'
 import ProjectFiles from '../components/ProjectFiles.vue'
+import ProjectLearn from '../components/ProjectLearn.vue'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
@@ -27,9 +28,9 @@ const router = useRouter()
 const route = useRoute()
 const refreshing = ref(false)
 
-/** Overview (cards), Files (read-only explorer) and Commits (Git history) — W3; kept in the URL (`?tab=`). */
-type Tab = 'overview' | 'files' | 'commits'
-const tab = computed<Tab>(() => (route.query.tab === 'files' || route.query.tab === 'commits' ? route.query.tab : 'overview'))
+/** Overview (cards), Learn (knowledge base, W4), Files (read-only explorer) and Commits (Git history) — W3; kept in the URL (`?tab=`). */
+type Tab = 'overview' | 'learn' | 'files' | 'commits'
+const tab = computed<Tab>(() => (route.query.tab === 'learn' || route.query.tab === 'files' || route.query.tab === 'commits' ? route.query.tab : 'overview'))
 function setTab(t: Tab) {
   router.replace({ query: { ...route.query, tab: t === 'overview' ? undefined : t } })
 }
@@ -176,11 +177,13 @@ async function unregister() {
 
     <div class="tabs" role="tablist" aria-label="Project views">
       <button role="tab" class="tab" :class="{ active: tab === 'overview' }" :aria-selected="tab === 'overview'" data-project-tab="overview" @click="setTab('overview')">Overview</button>
+      <button role="tab" class="tab" :class="{ active: tab === 'learn' }" :aria-selected="tab === 'learn'" :disabled="!project.available" data-project-tab="learn" @click="setTab('learn')"><GraduationCap class="tab-ic" /> Learn</button>
       <button role="tab" class="tab" :class="{ active: tab === 'files' }" :aria-selected="tab === 'files'" :disabled="!project.available" data-project-tab="files" @click="setTab('files')"><FileText class="tab-ic" /> Files</button>
       <button role="tab" class="tab" :class="{ active: tab === 'commits' }" :aria-selected="tab === 'commits'" :disabled="!project.available" data-project-tab="commits" @click="setTab('commits')"><GitCommitHorizontal class="tab-ic" /> Commits</button>
     </div>
 
-    <ProjectFiles v-if="tab === 'files' && project.available && project.localPath" :project-id="project.id" :root="project.localPath" />
+    <ProjectLearn v-if="tab === 'learn' && project.available" :project-id="project.id" />
+    <ProjectFiles v-else-if="tab === 'files' && project.available && project.localPath" :project-id="project.id" :root="project.localPath" />
     <ProjectCommits v-else-if="tab === 'commits' && project.available" :project-id="project.id" />
     <template v-else>
     <UsageSummary :project-id="project.id" />
