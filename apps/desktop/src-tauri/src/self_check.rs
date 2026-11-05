@@ -54,7 +54,7 @@ pub fn run(out: &Path) -> i32 {
     };
     #[cfg(windows)]
     let notifier = {
-        let id = crate::notifier::windows_toast::identity("dev.nexus.desktop");
+        let id = crate::notifier::windows_toast::identity(crate::APP_ID);
         json!({ "aumid": id.aumid, "display": id.display, "protocol": id.protocol })
     };
     #[cfg(not(windows))]

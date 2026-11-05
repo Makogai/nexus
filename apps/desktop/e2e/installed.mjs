@@ -112,7 +112,7 @@ try {
   if (ui) check('this is a test installer (debugging compiled in — never publish it)', sc.e2eWebviewDebugging === true)
   else check('webview debugging is not compiled in and the override was dropped (T18)', sc.e2eWebviewDebugging === false && sc.webviewArgumentsAfterHardening === null, js([sc.e2eWebviewDebugging, sc.webviewArgumentsAfterHardening]))
   check('the default data folder is the per-user NEXUS folder, outside the program folder', sc.dataDir?.toLowerCase() === defaultData.toLowerCase() && sc.dataInsideInstallDir === false, sc.dataDir)
-  if (!ui) check('notifications are sent as NEXUS (installed identity, nexus:// activation)', sc.notifier?.aumid === 'dev.nexus.desktop' && sc.notifier.display === 'NEXUS' && sc.notifier.protocol === true, js(sc.notifier))
+  if (!ui) check('notifications are sent as NEXUS (installed identity, nexus:// activation)', sc.notifier?.aumid === 'io.github.makogai.nexus' && sc.notifier.display === 'NEXUS' && sc.notifier.protocol === true, js(sc.notifier))
 
   // ---- a synthetic profile launched through the installed CLI: sessions get the installed tools ----
   const repo = join(root, 'repo')
@@ -169,7 +169,7 @@ try {
     const historyScript =
       "[Console]::OutputEncoding = [Text.Encoding]::UTF8; " +
       "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; " +
-      "$h = [Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory('dev.nexus.desktop'); " +
+      "$h = [Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory('io.github.makogai.nexus'); " +
       "$t = @($h | ForEach-Object { $_.Content.GetElementsByTagName('text') | ForEach-Object { $_.InnerText } }); " +
       "@{ count = $h.Count; text = ($t -join ' | ') } | ConvertTo-Json -Compress"
     let history = { count: -1, text: '' }
@@ -191,7 +191,7 @@ try {
       shown.length > 0 && ![dataDir, repo, sessionId, homedir()].some((s) => shown.toLowerCase().includes(String(s).toLowerCase())),
       shown.slice(0, 120),
     )
-    const display = regQuery('HKCU\\Software\\Classes\\AppUserModelId\\dev.nexus.desktop', 'DisplayName') ?? ''
+    const display = regQuery('HKCU\\Software\\Classes\\AppUserModelId\\io.github.makogai.nexus', 'DisplayName') ?? ''
     check('…registered with the display name NEXUS', /DisplayName\s+REG_\w+\s+NEXUS\s*$/m.test(display), display.trim().split('\n').pop()?.trim())
     const proto = regQuery('HKCU\\Software\\Classes\\nexus\\shell\\open\\command') ?? ''
     check('…and nexus:// opens the installed program', proto.toLowerCase().includes(desktopExe.toLowerCase()), proto.trim().split('\n').pop()?.trim())
@@ -261,7 +261,7 @@ try {
   check('uninstalling removes the programs', !existsSync(desktopExe) && !existsSync(cliExe))
   if (!ui) {
     check('…the Windows uninstall entry', !regQuery(UNINSTALL_KEY))
-    check('…and what NEXUS registered for itself (sender, nexus://)', !regQuery('HKCU\\Software\\Classes\\AppUserModelId\\dev.nexus.desktop') && !regQuery('HKCU\\Software\\Classes\\nexus'))
+    check('…and what NEXUS registered for itself (sender, nexus://)', !regQuery('HKCU\\Software\\Classes\\AppUserModelId\\io.github.makogai.nexus') && !regQuery('HKCU\\Software\\Classes\\nexus'))
   }
   check('user data stays: the database and its backups survive the uninstall', existsSync(join(dataDir, 'nexus.db')) && (ui || existsSync(join(dataDir, 'backups'))))
   check('the per-user data folder was not touched by installing or uninstalling', existsSync(defaultData) === dataExistedBefore)

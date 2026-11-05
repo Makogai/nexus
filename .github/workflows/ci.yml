@@ -112,6 +112,18 @@ jobs:
       - name: MCP interoperability (official TypeScript SDK client)
         working-directory: apps/desktop
         run: node e2e/mcp-interop.mjs
+      - name: End-to-end Portable Workspace (schema, templates, Doctor, projects, records, sync policy)
+        working-directory: apps/desktop
+        run: node e2e/portable.mjs
+      - name: End-to-end new-computer restoration (two app instances)
+        working-directory: apps/desktop
+        run: node e2e/restore.mjs
+      - name: End-to-end new workspace in a prepared place, project from Git
+        working-directory: apps/desktop
+        run: node e2e/workspace-setup.mjs
+      - name: End-to-end project workbench (knowledge editing, explorer, learning)
+        working-directory: apps/desktop
+        run: node e2e/workbench.mjs
       - name: Installer (debug profile, production configuration, CLI as sidecar)
         working-directory: apps/desktop
         run: npx tauri build --debug --config src-tauri/tauri.installer.conf.json

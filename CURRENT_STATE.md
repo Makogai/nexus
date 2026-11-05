@@ -20,6 +20,17 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace → Project workbench)
   UI, W3 project explorer (files, viewer, commits), W4 learn a project. All four verified and committed; **not merged**
   — merging this branch brings P10 along.
 
+* **First release v0.1.0** (branch `release/v0.1.0`, merged into `main`):
+  * **Repository:** private repo `github.com/Makogai/nexus`, no licence yet (owner decision 2026-11-05).
+  * **Identifier:** `io.github.makogai.nexus`, publisher `Makogai` (ADR-0034 accepted). Legacy `dev.nexus.desktop`
+    registrations are cleaned up at start and by the installer hooks; NEXUS data is unchanged.
+  * **`release.yml`:** builds and tests Windows (NSIS, T18, installed-app check), macOS Apple silicon + Intel (ad-hoc
+    signed `.dmg`, not notarized) and Linux (AppImage + `.deb`, Ubuntu 22.04). It creates ONE **draft** release with
+    a combined `SHA256SUMS.txt` and build provenance; the owner publishes it.
+  * **CI:** now also runs portable, restore, workspace-setup and workbench.
+  * **First run:** macOS and Linux are built for the first time by this run — not verified locally (no
+    cross-toolchain here).
+
 ## Project workbench — progress (session 10)
 
 * **W1 — add a project from Git** (`1861d74`):
@@ -308,10 +319,10 @@ free.
 
 ## Next actions (in order)
 
-1. Owner: review `milestone/project-workbench` (contains P10). On approval merge it into `main` with `--no-ff`, then
-   rebuild the installer. Then create the first personal workspace from the empty repository
-   (`docs/user/PORTABLE_WORKSPACE.md`), add a project from Git and try *Learn*. Do MANUAL_CHECKS 33 (with
-   `docs/TEMPLATE_REVIEW.md`).
+1. Owner: watch the first Actions run for tag `v0.1.0` (CI and Release (draft)) — macOS and Linux are built for the
+   first time; failures there need fixing before the draft appears. Then review the draft release and publish it.
+2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
+   project from Git and try *Learn*; MANUAL_CHECKS 33 (with `docs/TEMPLATE_REVIEW.md`).
 2. Owner decisions still open from Beta readiness (B5): identifier + publisher (ADR-0034), product name and `nexus://`,
    licence (ADR-0035), code signing, updater.
 3. Owner manual checks: MANUAL_CHECKS 27 (notification look, lock screen, click after quitting), 28–32.

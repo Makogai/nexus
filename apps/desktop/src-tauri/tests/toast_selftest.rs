@@ -1,5 +1,5 @@
 //! Real Windows notification self-test (opt-in: `cargo test -p nexus-desktop --test toast_selftest -- --ignored`).
-//! Registers a temporary, NEXUS-owned sender (`dev.nexus.desktop.selftest`), shows one toast **without a popup**
+//! Registers a temporary, NEXUS-owned sender (`io.github.makogai.nexus.selftest`), shows one toast **without a popup**
 //! (straight to the Action Center), checks Windows filed it under that sender, withdraws it and removes the
 //! registration again — also when an assertion fails. Nothing else on the machine is changed.
 
@@ -9,7 +9,7 @@
 fn nexus_is_the_registered_sender_and_handled_toasts_are_withdrawn() {
     use nexus_desktop_lib::notifier::windows_toast as t;
 
-    const AUMID: &str = "dev.nexus.desktop.selftest";
+    const AUMID: &str = "io.github.makogai.nexus.selftest";
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
