@@ -20,8 +20,23 @@ const fakeClaude = fileURLToPath(new URL(`../../../target/debug/${exe}`, import.
 const nexusCli = fileURLToPath(new URL(`../../../target/debug/nexus${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url))
 const js = (v) => JSON.stringify(v)
 
-/** Runs every check against the already-running app; resolves to the number of failures. */
-export async function runSmoke() {
+/** The report fake Claude wrote for a session launch (probes such as `--version` write the file too). */
+async function waitForSessionReport(path, ms = 15000) {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 200))) {
+    try {
+      const text = readFileSync(path, 'utf8')
+      if (JSON.parse(text).args?.[0] === '--session-id') return text
+    } catch {}
+  }
+  throw new Error(`fake Claude wrote no session report to ${path}`)
+}
+
+/**
+ * Runs every check against the already-running app; resolves to the number of failures. `appReport` is the
+ * `FAKE_CLAUDE_REPORT` file the app was started with (run-smoke.mjs); without it the report is read from the terminal,
+ * which works only when the window is tall enough to show all of it.
+ */
+export async function runSmoke({ appReport } = {}) {
 let failures = 0
 const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`)
@@ -98,15 +113,19 @@ try {
   check('launch dialog applies the profile default rigor', selected === 'Prototype', selected)
   await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] footer .btn-primary')][0].click(), true`)
   // A first launch on a cold CI runner can take a while (the session host, `nexus mcp`, fake Claude starting up).
-  const raw = await cdp
-    .waitFor(
-      `(() => { const r = [...document.querySelectorAll('.xterm-rows')].pop(); const t = r?.innerText.replace(/\\n/g, '') ?? ''; const m = t.match(/\\{"args".*"fakeClaude":true\\}/); return m && m[0] })()`,
-      60000,
-    )
+  // The terminal shows Claude's output; it renders only its visible rows, so on a small screen (CI runners) the start of
+  // the long report has scrolled out of view — the end of it is always visible, and the whole report is in its file.
+  const terminalText = `[...document.querySelectorAll('.xterm-rows')].pop()?.innerText.replace(/\\n/g, '') ?? ''`
+  const shownEnd = await cdp
+    .waitFor(`(${terminalText}).includes('"fakeClaude":true}')`, 60000)
     .catch(async (e) => {
       const shown = await cdp.evaluate(`[...document.querySelectorAll('.xterm-rows')].map((r) => r.innerText).join('\\n---\\n').slice(-1500)`).catch(() => '')
       throw new Error(`${e.message}\n--- terminal ---\n${shown || '(no terminal rows)'}`)
     })
+  check('the terminal shows Claude’s output', !!shownEnd)
+  const raw = appReport
+    ? await waitForSessionReport(appReport)
+    : await cdp.evaluate(`(() => { const m = (${terminalText}).match(/\\{"args".*"fakeClaude":true\\}/); return m && m[0] })()`)
   const report = JSON.parse(raw)
   const env = report.env
   // Same folder, not the same spelling: CI temp paths use 8.3 short names (C:\Users\RUNNER~1) that NEXUS stores in long form.

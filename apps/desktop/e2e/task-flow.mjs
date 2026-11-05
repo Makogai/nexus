@@ -9,7 +9,7 @@
 //
 // Windows only (WebView2 DevTools protocol). Synthetic fixtures in a temp dir; never touches real Claude profiles.
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -148,9 +148,11 @@ try {
   await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] footer .btn-primary')][0].click(), true`)
   const r1 = await waitForFile(report1)
   const brief = appended(r1)
-  check('Claude runs under the selected profile', r1.env.CLAUDE_CONFIG_DIR === cfg, r1.env.CLAUDE_CONFIG_DIR)
+  // Same folder, not the same spelling: CI temp paths use 8.3 short names (C:\Users\RUNNER~1) that NEXUS stores in long form.
+  const real = (p) => { try { return realpathSync.native(p).toLowerCase() } catch { return String(p).toLowerCase() } }
+  check('Claude runs under the selected profile', !!r1.env.CLAUDE_CONFIG_DIR && real(r1.env.CLAUDE_CONFIG_DIR) === real(cfg), r1.env.CLAUDE_CONFIG_DIR)
   check('…with the profile’s work profile', brief.startsWith('NEXUS work profile: BALANCED'))
-  check('…in the task’s project', r1.cwd.toLowerCase() === repo.toLowerCase(), r1.cwd)
+  check('…in the task’s project', real(r1.cwd) === real(repo), r1.cwd)
   check('…with a pointer to the task — and no task text — in the system prompt', brief.includes(`NEXUS task ${setup.task.id}`) && !brief.includes('Ship checkout') && !brief.includes('Cart summary'))
   check('…and never the task history', !brief.includes('## Log') && brief.length < 2500, `${brief.length} chars`)
   const sessions = await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)

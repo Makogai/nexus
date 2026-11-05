@@ -273,21 +273,30 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
 pub fn project_relative(cwd: &Path, file: &str) -> String {
     let p = Path::new(file);
     let joined = if p.is_absolute() { p.to_path_buf() } else { cwd.join(p) };
-    let rel = if cfg!(windows) {
-        let (f, c) = (joined.to_string_lossy().replace('/', "\\"), cwd.to_string_lossy().replace('/', "\\"));
-        f.to_lowercase()
-            .strip_prefix(&format!("{}\\", c.trim_end_matches('\\').to_lowercase()))
-            .map(|_| f[c.trim_end_matches('\\').len() + 1..].to_string())
-    } else {
-        joined.strip_prefix(cwd).ok().map(|r| r.to_string_lossy().into_owned())
-    };
+    // Claude may spell the folder differently from NEXUS (8.3 short names, resolved symlinks such as macOS
+    // /var → /private/var): when the spelling does not match, the canonical forms decide.
+    let rel = relative_within(cwd, &joined)
+        .or_else(|| relative_within(&crate::paths::canonical_or_given(cwd), &crate::paths::canonical_or_given(&joined)));
     match rel {
-        Some(r) if !r.is_empty() && !r.split(['/', '\\']).any(|part| part == "..") => clip(&r.replace('\\', "/"), 300),
-        _ => format!(
+        Some(r) => clip(&r.replace('\\', "/"), 300),
+        None => format!(
             "(outside project) {}",
             clip(&p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), 120)
         ),
     }
+}
+
+/// `file` relative to `cwd` by spelling (case-insensitive on Windows), or `None` when it is not inside it.
+fn relative_within(cwd: &Path, file: &Path) -> Option<String> {
+    let rel = if cfg!(windows) {
+        let (f, c) = (file.to_string_lossy().replace('/', "\\"), cwd.to_string_lossy().replace('/', "\\"));
+        f.to_lowercase()
+            .strip_prefix(&format!("{}\\", c.trim_end_matches('\\').to_lowercase()))
+            .map(|_| f[c.trim_end_matches('\\').len() + 1..].to_string())
+    } else {
+        file.strip_prefix(cwd).ok().map(|r| r.to_string_lossy().into_owned())
+    }?;
+    (!rel.is_empty() && !rel.split(['/', '\\']).any(|part| part == "..")).then_some(rel)
 }
 
 /// Deterministic category of a shell command, or `None` when it is not notable. The command text itself is never
@@ -623,6 +632,24 @@ mod tests {
 
     fn get(conn: &Connection, id: &str) -> Session {
         session::get(conn, id).unwrap()
+    }
+
+    #[test]
+    fn project_relative_paths_tolerate_another_spelling_of_the_project_folder() {
+        let t = tempfile::tempdir().unwrap();
+        let repo = t.path().join("repo");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        // The canonical spelling (on CI runners the temp folder itself is an 8.3 short name; on macOS a symlink).
+        let canonical = dunce::canonicalize(&repo).unwrap();
+        assert_eq!(project_relative(&repo, &canonical.join("src").join("lib.rs").to_string_lossy()), "src/lib.rs");
+        // A detour through `..` that stays inside the project.
+        let detour = repo.join("docs").join("..").join("src").join("main.rs");
+        assert_eq!(project_relative(&repo, &detour.to_string_lossy()), "src/main.rs");
+        // Leaving the project stays outside it, whatever the spelling.
+        let escape = repo.join("src").join("..").join("..").join("secret.txt");
+        assert_eq!(project_relative(&repo, &escape.to_string_lossy()), "(outside project) secret.txt");
+        assert_eq!(project_relative(&canonical, &escape.to_string_lossy()), "(outside project) secret.txt");
     }
 
     #[test]

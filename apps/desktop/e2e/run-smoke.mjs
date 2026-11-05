@@ -23,12 +23,15 @@ const port = process.env.CDP_PORT ?? '9333'
 const app =
   process.argv[2] ?? fileURLToPath(new URL('../../../target/debug/nexus-desktop.exe', import.meta.url))
 const dataDir = mkdtempSync(join(tmpdir(), 'nexus-e2e-data-'))
+// What fake Claude saw (arguments, environment) — the terminal shows only the end of it on a small screen.
+const appReport = join(mkdtempSync(join(tmpdir(), 'nexus-e2e-report-')), 'fake-claude.json')
 
 const child = spawn(app, [], {
   env: {
     ...process.env,
     NEXUS_DATA_DIR: dataDir,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+    FAKE_CLAUDE_REPORT: appReport,
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
@@ -45,7 +48,7 @@ child.on('exit', (code) => {
 let failures = 1
 try {
   await waitForPort(port, 180_000)
-  failures = await runSmoke()
+  failures = await runSmoke({ appReport })
 } catch (e) {
   console.error(`E2E error: ${e.message}`)
   // Diagnose a port that never opened: did WebView2 start, and with the debugging switch?

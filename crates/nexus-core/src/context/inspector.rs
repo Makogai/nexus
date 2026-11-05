@@ -225,6 +225,15 @@ fn same(a: &Path, b: &Path) -> bool {
     crate::paths::same_path(a, b)
 }
 
+/// Which predicted file `path` is. Claude may spell a folder differently from the prediction (8.3 short names,
+/// resolved symlinks such as macOS /var → /private/var): when no spelling matches, the canonical forms decide.
+fn predicted_index(at_start: &[PathBuf], at_start_canonical: &[PathBuf], path: &Path) -> Option<usize> {
+    at_start.iter().position(|p| same(p, path)).or_else(|| {
+        let canonical = crate::paths::canonical_or_given(path);
+        at_start_canonical.iter().position(|p| same(p, &canonical))
+    })
+}
+
 /// Retrieval metrics over the project's last `n` Claude sessions.
 pub fn metrics(conn: &Connection, project_id: &str, n: u32) -> Result<Metrics> {
     let list = session::list(conn, &Filter { project_id: Some(project_id.into()), kind: Some(Kind::Claude), limit: Some(n), include_archived: true, ..Default::default() })?;
@@ -285,8 +294,9 @@ pub fn inspect(r: Request<'_>) -> Result<Report> {
         let files = observed_files(r.conn, &s.id)?;
         observed.instructions_observed = !files.is_empty() || s.integrations.as_ref().is_some_and(|i| i["context"]["observeInstructions"] == json!(true));
         let mut seen: HashSet<usize> = HashSet::new();
+        let at_start_canonical: Vec<PathBuf> = at_start.iter().map(|p| crate::paths::canonical_or_given(p)).collect();
         for (path, memory_type, load_reason) in files {
-            let hit = at_start.iter().position(|p| same(p, &path));
+            let hit = predicted_index(&at_start, &at_start_canonical, &path);
             if let Some(i) = hit {
                 seen.insert(i);
             }
@@ -325,6 +335,22 @@ pub fn predicted_paths(i: &Inspection) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use crate::session::NewSession;
+
+    #[test]
+    fn an_observed_file_matches_its_prediction_in_any_spelling() {
+        let t = tempfile::tempdir().unwrap();
+        let repo = t.path().join("repo");
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        std::fs::write(repo.join("CLAUDE.md"), "x").unwrap();
+        let at_start = vec![repo.join("README.md"), repo.join("CLAUDE.md")];
+        let canonical: Vec<PathBuf> = at_start.iter().map(|p| crate::paths::canonical_or_given(p)).collect();
+        assert_eq!(predicted_index(&at_start, &canonical, &repo.join("CLAUDE.md")), Some(1));
+        // The canonical spelling (on CI runners the temp folder is an 8.3 short name; on macOS behind a symlink).
+        let real = dunce::canonicalize(&repo).unwrap();
+        assert_eq!(predicted_index(&at_start, &canonical, &real.join("CLAUDE.md")), Some(1));
+        assert_eq!(predicted_index(&at_start, &canonical, &repo.join("docs").join("..").join("CLAUDE.md")), Some(1));
+        assert_eq!(predicted_index(&at_start, &canonical, &repo.join("docs").join("CLAUDE.md")), None);
+    }
 
     #[test]
     fn retrievals_and_instructions_are_recorded_bounded_and_summarised() {
