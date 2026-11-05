@@ -26,6 +26,7 @@ jobs:
   windows:
     name: Windows (x64, NSIS)
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -66,6 +67,7 @@ jobs:
   macos:
     name: macOS (${{ matrix.arch }})
     runs-on: macos-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -108,13 +110,19 @@ jobs:
     name: Linux (x64, AppImage + deb)
     # The oldest supported Ubuntu LTS runner: an AppImage built against an older glibc runs on more distributions.
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: System dependencies (Tauri, WebKitGTK)
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
+          # A hanging package mirror fails fast (timeouts, retries) instead of holding the job for hours.
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          sudo apt-get $APT update
+          sudo apt-get $APT install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -140,6 +148,7 @@ jobs:
   draft-release:
     name: Draft release
     needs: [windows, macos, linux]
+    timeout-minutes: 20
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
