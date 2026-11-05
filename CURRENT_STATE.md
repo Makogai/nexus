@@ -25,10 +25,13 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
   `release.yml` builds and tests Windows (NSIS, T18, installed-app check), macOS Apple silicon + Intel (ad-hoc signed
   `.dmg`, not notarized) and Linux (AppImage + `.deb`, Ubuntu 22.04), then creates ONE **draft** release with the
   licences, notices, a combined `SHA256SUMS.txt` and build provenance. All four platform builds passed on the earlier
-  tag; the draft job needed a flat folder (`a99d74e`). The owner reviews and publishes the draft.
+  tag; the draft job needed a flat folder (`a99d74e`). **Published by the owner on 2026-11-05**
+  (`https://github.com/Makogai/nexus/releases/tag/v0.1.0`).
 * **README and website:** `README.md` (Codex-made hero and feature icons in `docs/assets/readme/`, real screenshots);
   GitHub Pages live at `https://makogai.github.io/nexus/` from `website/` via `pages.yml`, which writes `release.json`
-  from the latest *published* release — publishing the release redeploys the download page.
+  from the latest *published* release. The `github-pages` environment allows `main` and (since 2026-11-05) tags `v*`,
+  so publishing a release redeploys the download page; for v0.1.0 the site was redeployed by hand (the tag rule came
+  after).
 
 ## Project workbench — progress (session 10)
 
@@ -318,8 +321,7 @@ free.
 
 ## Next actions (in order)
 
-1. Owner: review the draft release `v0.1.0` on GitHub (installers, `SHA256SUMS.txt`, notes) and publish it; then
-   check the download page on the website.
+1. Owner: try the published v0.1.0 installers from the website's download page.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
    project from Git and try *Learn*; MANUAL_CHECKS 33 (with `docs/TEMPLATE_REVIEW.md`).
 3. Owner decisions still open: product name and `nexus://`, code signing (Windows SmartScreen, macOS notarization),
