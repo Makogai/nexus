@@ -302,7 +302,21 @@ mod tests {
         assert!(std::fs::read_to_string(ctx.join("architecture.md")).unwrap().contains("status: draft"));
         let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(ctx.join("project.json")).unwrap()).unwrap();
         assert_eq!((record["id"].as_str(), record["stacks"][0].as_str()), (Some(p.id.as_str()), Some("vue")));
-        assert!(!std::fs::read_to_string(ctx.join("project.json")).unwrap().contains(&*base.to_string_lossy()), "no machine paths in the portable record");
+        // No machine path in any value of the portable record. The remote URL is portable by design — in this test it is
+        // a file:// URL under the temp folder, so it is the one value allowed to mention it.
+        fn strings(v: &serde_json::Value, key: &str, out: &mut Vec<(String, String)>) {
+            match v {
+                serde_json::Value::String(s) => out.push((key.to_string(), s.clone())),
+                serde_json::Value::Array(a) => a.iter().for_each(|x| strings(x, key, out)),
+                serde_json::Value::Object(o) => o.iter().for_each(|(k, x)| strings(x, k, out)),
+                _ => {}
+            }
+        }
+        let mut values = Vec::new();
+        strings(&record, "", &mut values);
+        let (native, slashed) = (base.to_string_lossy().into_owned(), base.to_string_lossy().replace('\\', "/"));
+        let leaked: Vec<_> = values.iter().filter(|(k, s)| k != "remote" && k != "remoteUrl" && (s.contains(&native) || s.contains(&slashed))).collect();
+        assert!(leaked.is_empty(), "no machine paths in the portable record: {leaked:?}");
         // Project documents go into the context folder.
         let task = crate::knowledge::service::create(
             &conn,

@@ -90,7 +90,8 @@ impl Inventory {
 pub fn program_name(cmd: &str) -> String {
     let first = cmd.trim().trim_matches('"');
     let first = if cmd.trim().starts_with('"') { first.split('"').next().unwrap_or(first) } else { first.split_whitespace().next().unwrap_or("") };
-    Path::new(first).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    // Both separators on every platform: a manifest written on Windows and read on macOS must not leak its path.
+    first.rsplit(['/', '\\']).next().unwrap_or("").to_string()
 }
 
 /// `https://user:pw@mcp.example.com:8443/path?key=…` → `mcp.example.com`.
