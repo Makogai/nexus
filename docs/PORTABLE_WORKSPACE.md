@@ -89,6 +89,8 @@ ADR-0024), and document templates are compiled into NEXUS. Folders appear only w
 
 ## 5. Milestones
 
+Status after the stage: P0–P8 implemented and verified (ROADMAP, CURRENT_STATE).
+
 | # | Milestone | Verification |
 | --- | --- | --- |
 | P0 | Audit, gap analysis, ADR-0036 | this document |
