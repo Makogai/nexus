@@ -49,6 +49,10 @@ fn open_context() -> Result<AppCtx, Box<dyn std::error::Error>> {
     if interrupted > 0 {
         tracing::info!(interrupted, "sessions whose host is gone are no longer attached");
     }
+    // Sessions that ended without a development record (e.g. the previous host crashed) get one now (ADR-0038).
+    if let Err(e) = nexus_core::devrecord::finalize_pending(&conn, &data_dir) {
+        tracing::warn!(error = %e, "pending development records not written");
+    }
     let home = paths::home_dir()?;
     tracing::info!(data_dir = %data_dir.display(), "NEXUS data directory");
     Ok(AppCtx::new(conn, home, data_dir, db_path, me, recovery, restore))
@@ -65,6 +69,7 @@ fn spawn_heartbeat(ctx: Ctx) {
                 .and_then(|_| host::reconcile(&db, now_ms()))
                 .and_then(|_| nexus_core::workflow::run::reconcile(&db, now_ms()))
                 .and_then(|_| nexus_core::workspace_sync::history::reconcile(&db, now_ms()))
+                .and_then(|_| nexus_core::devrecord::finalize_pending(&db, &ctx.data_dir))
             {
                 tracing::warn!(error = %e, "host heartbeat failed");
             }
@@ -142,6 +147,7 @@ pub fn run() {
             commands::projects::project_clone,
             commands::projects::project_context_init,
             commands::projects::project_environment,
+            commands::projects::project_history,
             commands::claude::claude_setup_status,
             commands::workspaces::workspace_doctor,
             commands::workspaces::workspace_repair_plan,

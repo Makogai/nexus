@@ -164,6 +164,21 @@ export interface ClaudeSetupStatus {
   next: string[]
 }
 
+export interface DevHistory {
+  records: { id: string | null; title: string; path: string; created: string | null; branch: string | null; commit: string | null; sync: 'local' | 'committed' | 'synced' | 'no-repository' }[]
+  sessions: { id: string; title: string; startedAt: number; endedAt: number | null; state: string; record: string | null }[]
+  /** [id, title, status] */
+  tasks: [string, string, string][]
+  /** [title, status] */
+  decisions: [string, string][]
+  /** [oid, summary, timestamp] */
+  commits: [string, string, number][]
+  /** [gate, status, startedAt] */
+  gates: [string, string, number][]
+  /** [summary, createdAt] */
+  blockers: [string, number][]
+}
+
 export type DoctorStatus = 'ok' | 'info' | 'warn' | 'error'
 
 export interface DoctorFinding {

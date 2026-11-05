@@ -81,7 +81,7 @@ pub fn plan(root: &Path) -> Result<Plan> {
         path: MANIFEST_FILE.into(),
         action: "update",
         description: format!(
-            "schema {} → {MANIFEST_SCHEMA}: records migratedWith {NEXUS_VERSION} and minNexusVersion {NEXUS_VERSION}; keeps the clone folder `{}/` (layout.projects)",
+            "schema {} → {MANIFEST_SCHEMA}: records migratedWith {NEXUS_VERSION} and minNexusVersion {NEXUS_VERSION}, turns on project context and development records; keeps the clone folder `{}/` (layout.projects)",
             m.schema_version,
             m.projects_dir()
         ),
@@ -136,6 +136,11 @@ pub fn apply(conn: &Connection, data_dir: &Path, ws: &Workspace) -> Result<Migra
         m.schema_version = MANIFEST_SCHEMA;
         m.migrated_with = Some(NEXUS_VERSION.to_string());
         m.min_nexus_version = Some(NEXUS_VERSION.to_string());
+        for f in ["project-context", "development-records"] {
+            if !m.has_feature(f) {
+                m.features.push(f.into());
+            }
+        }
         let layout = m.layout.get_or_insert_with(Layout::default);
         layout.projects.get_or_insert(if projects_dir.is_empty() { LEGACY_PROJECTS_DIR.into() } else { projects_dir });
         super::write_manifest(root, &m)?;

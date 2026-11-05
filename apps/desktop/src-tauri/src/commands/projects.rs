@@ -77,6 +77,20 @@ pub async fn project_environment(ctx: State<'_, Ctx>, workspace_id: String, id: 
     .await
 }
 
+/// A project's development history (records with their sync state, sessions, tasks, decisions, commits, gate results,
+/// blockers). Records still owed for ended sessions are written first.
+#[tauri::command]
+pub async fn project_history(ctx: State<'_, Ctx>, workspace_id: String, id: String) -> IpcResult<nexus_core::devrecord::History> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = nexus_core::workspace::get(&c, &workspace_id)?;
+        let _ = nexus_core::devrecord::finalize_pending(&c, &ctx.data_dir);
+        Ok(nexus_core::devrecord::history(&c, &ctx.data_dir, &ws, &id)?)
+    })
+    .await
+}
+
 /// Create or refresh a project's portable context folder.
 #[tauri::command]
 pub async fn project_context_init(ctx: State<'_, Ctx>, workspace_id: String, id: String) -> IpcResult<project::context::Initialized> {

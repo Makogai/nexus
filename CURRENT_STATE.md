@@ -8,7 +8,7 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
   Nothing pushed.
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
-  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects: context, discovery, restoration) and P5 (environment, Claude Code setup) done and committed; P6 (development records, checkpoints, history) next. Not merged, not pushed, no release.
+  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup) and P6 (development records, history) done and committed; P7 (sync policies) next. Not merged, not pushed, no release.
 
 ## Portable Workspace — progress (session 10)
 
@@ -88,6 +88,18 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   *Claude Code setup* view (from Claude profiles and the Doctor) and the project page *Environment* card; Doctor
   `toolchains` finding. Threat model T44. Verified: core 211, CLI 37 + 6, vitest 86, desktop E2E `portable.mjs` 38/38
   (the install command typed into PowerShell, not executed), clippy clean.
+* **P6 — development records and history (ADR-0038)** (`devrecord`, migration 0017): sessions record their starting
+  commit (`head_start`); when a Claude session in a project ends — desktop PTY exit, `nexus launch` exit, or a dead
+  host found at start/heartbeat (`finalize_pending`) — NEXUS writes, once (`record_at`), a record for meaningful
+  sessions into `project-context/<slug>/development/`: Verified (branch/HEAD, commits since the start, gates run),
+  Observed (files edited, command categories — results not observed), Reported by Claude (checkpoints, unverified),
+  Next steps (last reported state, open blockers). No model call; missing facts are stated as missing; chat-only
+  sessions leave no record; the `development-records` feature (on for new and migrated workspaces) opts out when
+  removed. Compaction adds a NEXUS checkpoint of what changed so far. `current-state.md` follows each record.
+  `devrecord::history` / `nexus projects history` / IPC `project_history` / desktop **Development history** (project
+  page): records with sync state (not committed / committed, not pushed / synced / workspace not in Git), sessions,
+  open tasks, decisions, recent commits, gate results, blockers. Verified: core 214, CLI 37 + 6, vitest 87, desktop E2E
+  `portable.mjs` 43/43, `task-flow` 29, `attention` 27, `context` 9, clippy clean.
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 

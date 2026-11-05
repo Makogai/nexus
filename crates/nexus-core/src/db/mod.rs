@@ -109,6 +109,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0016_workspace_kits.sql"),
         disable_foreign_keys: false,
     },
+    Migration {
+        name: "0017_development_records",
+        sql: include_str!("migrations/0017_development_records.sql"),
+        disable_foreign_keys: false,
+    },
 ];
 
 /// Schema version this build understands.

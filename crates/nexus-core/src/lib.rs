@@ -9,6 +9,7 @@ pub mod checkpoint;
 pub mod claude;
 pub mod context;
 pub mod db;
+pub mod devrecord;
 pub mod doctor;
 pub mod env;
 pub mod error;

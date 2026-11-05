@@ -11,6 +11,9 @@
 //   P5 — environment requirements from the project's files (names of environment variables only, never `.env`) are
 //        recorded in the workspace; checking this computer reports a mismatch; an install command is only typed into a
 //        terminal; the Claude Code setup view reports the installation.
+//   P6 — a Claude session (fake CLI) in a project edits a file (real `nexus hook`) and records a decision (real
+//        `nexus mcp`); when it ends, its development record appears in the project's context and in the Development
+//        History view with separate Verified / Observed / Reported sections.
 //
 //   cargo build -p fake-claude -p nexus-cli
 //   npx tauri build --debug --no-bundle --features e2e-webview-debugging
@@ -30,6 +33,8 @@ if (process.platform !== 'win32') {
 }
 const port = process.env.CDP_PORT ?? '9341'
 const app = process.argv[2] ?? fileURLToPath(new URL('../../../target/debug/nexus-desktop.exe', import.meta.url))
+const fakeClaude = fileURLToPath(new URL('../../../target/debug/fake-claude.exe', import.meta.url))
+const nexusCli = fileURLToPath(new URL('../../../target/debug/nexus.exe', import.meta.url))
 const js = (v) => JSON.stringify(v)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -53,7 +58,7 @@ mkdirSync(fixtureRepo, { recursive: true })
 
 let log = ''
 const child = spawn(app, [], {
-  env: { ...process.env, NEXUS_DATA_DIR: dataDir, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
+  env: { ...process.env, NEXUS_DATA_DIR: dataDir, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, FAKE_CLAUDE_STAY: '1', FAKE_CLAUDE_REPORT: join(root, 'fake-report.json') },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 child.stdout.on('data', (d) => (log += d))
@@ -68,6 +73,16 @@ async function stopApp() {
     }
     await sleep(300)
   }
+}
+
+function cli(args, stdin) {
+  return new Promise((resolve) => {
+    const p = spawn(nexusCli, ['--data-dir', dataDir, ...args], { stdio: ['pipe', 'pipe', 'ignore'] })
+    let out = ''
+    p.stdout.on('data', (d) => (out += d))
+    p.on('exit', () => resolve(out))
+    p.stdin.end(stdin)
+  })
 }
 
 function git(dir, ...args) {
@@ -225,6 +240,36 @@ try {
   await cdp.evaluate(`location.hash = '#/setup'; true`)
   const setup = await cdp.waitFor(`document.querySelector('[data-setup-status]')?.innerText`, 30000).catch(() => '')
   check('the Claude Code setup view reports the installation and the next steps', setup.includes('Claude Code'), setup.slice(0, 120))
+
+  // ---- P6: development record and history ----
+  const cfg = join(root, 'cfg')
+  mkdirSync(cfg, { recursive: true })
+  const profile = await inv('profile_create', { input: { name: 'Fake', configDir: cfg, executable: fakeClaude } })
+  const repoDir = join(root, 'pro-ws', 'projects', 'invoices')
+  const s = await inv('session_start_claude', { args: { profileId: profile.id, projectId: inv1.id, title: 'Reminder emails', cols: 100, rows: 30 } })
+  for (let i = 0; i < 60 && !existsSync(join(root, 'fake-report.json')); i++) await sleep(250)
+  await cli(['hook', '--session', s.id, 'post-tool-use'], js({ session_id: s.claudeSessionId, tool_name: 'Edit', tool_input: { file_path: join(repoDir, 'src', 'reminders.ts') } }))
+  await cli(['mcp', '--session', s.id], [
+    js({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } } }),
+    js({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'checkpoint', arguments: { kind: 'decision', summary: 'Send reminders from a nightly job' } } }),
+  ].join('\n') + '\n')
+  await inv('session_terminate', { id: s.id })
+  const devDir = join(root, 'pro-ws', 'project-context', 'invoices', 'development')
+  let recordFile = ''
+  for (let i = 0; i < 80 && !recordFile; i++) {
+    recordFile = existsSync(devDir) ? (readdirSync(devDir).find((f) => f.endsWith('.md')) ?? '') : ''
+    if (!recordFile) await sleep(250)
+  }
+  const recordText = recordFile ? readFileSync(join(devDir, recordFile), 'utf8') : ''
+  check('the ended session leaves a development record in the project context', !!recordFile && recordText.includes('topic: development-record'), recordFile)
+  check('…with the observed edit and Claude\u2019s decision kept apart as unverified', recordText.includes('`src/reminders.ts`') && recordText.includes('## Reported by Claude (unverified)') && recordText.includes('Send reminders from a nightly job'), recordText.slice(0, 200))
+  await cdp.evaluate(`location.hash = '#/projects/${inv1.id}/history'; location.reload(); true`)
+  const rec = await cdp.waitFor(`document.querySelector('[data-history-records] [data-record]') ? document.querySelector('[data-history-records]').innerText : ''`, 20000).catch(() => '')
+  check('the Development History view lists the record and its sync state', rec.includes('Reminder emails') || rec.includes('invoices —'), rec.slice(0, 160))
+  check('…not yet in Git (the workspace is not a repository here)', !!(await cdp.evaluate(`!!document.querySelector('[data-record-sync="no-repository"]')`)))
+  await click('[data-history-records] .record-head')
+  const panels = await cdp.waitFor(`[...document.querySelectorAll('[data-record-body] .section h3')].map((e) => e.textContent).join('|')`, 10000).catch(() => '')
+  check('…and opens it as Verified / Observed / Reported sections', panels.includes('Verified') && panels.includes('Observed') && panels.includes('Reported by Claude (unverified)'), panels)
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

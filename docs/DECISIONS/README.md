@@ -42,3 +42,4 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0035](0035-licensing.md) | Licence | **Proposed** — owner decision |
 | [0036](0036-workspace-schema-2.md) | Workspace schema 2: portable layout, versioning, compatibility, migration | Accepted, implemented (P1) |
 | [0037](0037-workspace-templates-and-progressive-loading.md) | Workspace templates, the workspace AI Kit and progressive loading | Accepted, implemented (P2) |
+| [0038](0038-development-records-and-checkpoints.md) | Development records, durable checkpoints and project history | Accepted, implemented (P6) |

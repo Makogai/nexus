@@ -185,6 +185,9 @@ enum ProjectCmd {
     /// Create or refresh a project's portable context (project-context/<project>/): the overview and architecture
     /// you wrote are kept; project.json, environment.json and current-state.md are regenerated.
     Context { project: String },
+    /// A project's development history: records (verified / observed / reported, with their sync state), sessions,
+    /// tasks, decisions, recent commits, gate results and blockers.
+    History { project: String },
     /// A project's environment requirements (runtimes, package managers, containers, environment variable names) from
     /// its files; --check compares them with this computer (tools are only asked for their version).
     Env {
@@ -699,6 +702,30 @@ fn cmd_projects(ctx: &Ctx, cmd: ProjectCmd) -> nexus_core::Result<()> {
                 out::json(&p);
             } else {
                 println!("cloned {} into {}", p.name, p.local_path.as_ref().map(|x| x.display().to_string()).unwrap_or_default());
+            }
+        }
+        ProjectCmd::History { project: q } => {
+            let p = find(&q)?;
+            let _ = nexus_core::devrecord::finalize_pending(&conn, &ctx.data_dir);
+            let h = nexus_core::devrecord::history(&conn, &ctx.data_dir, &ws, &p.id)?;
+            if ctx.json {
+                out::json(&h);
+                return Ok(());
+            }
+            println!("{} — development history", p.name);
+            println!("records ({}):", h.records.len());
+            for r in &h.records {
+                println!("  {} [{}] {}", r.created.as_deref().unwrap_or(""), r.sync, r.title);
+            }
+            let open: Vec<String> = h.tasks.iter().filter(|t| t.2 != "done").map(|t| format!("[{}] {}", t.2, t.1)).collect();
+            if !open.is_empty() {
+                println!("open tasks: {}", open.join("; "));
+            }
+            for (b, at) in &h.blockers {
+                println!("blocker ({}): {b}", out::ago(Some(*at)));
+            }
+            for (oid, s, _) in h.commits.iter().take(5) {
+                println!("commit {} {s}", &oid[..oid.len().min(10)]);
             }
         }
         ProjectCmd::Env { project: q, check } => {

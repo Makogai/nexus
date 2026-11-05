@@ -155,6 +155,7 @@ async function unregister() {
         <button class="btn" :disabled="!project.available" @click="reveal"><FolderOpen /> Open folder</button>
         <button class="btn" :disabled="!project.available" @click="openShell"><SquareTerminal /> Shell</button>
         <button class="btn" data-resume-project @click="router.push(`/projects/${project.id}/resume`)"><History /> Resume project</button>
+        <button class="btn btn-ghost" data-open-history @click="router.push(`/projects/${project.id}/history`)"><NotebookPen /> Development history</button>
         <button class="btn" data-project-context @click="router.push({ name: 'context', query: { project: project.id } })"><Gauge /> Context</button>
         <button class="btn" data-project-workflow @click="router.push({ name: 'workflows', query: { start: '1', project: project.id } })"><Workflow /> Run workflow</button>
         <button class="btn btn-primary" :disabled="!project.available" @click="app.openLaunch(project.id)"><Sparkles /> Launch Claude</button>

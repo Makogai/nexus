@@ -333,7 +333,7 @@ pub fn new_manifest(name: &str, description: &str) -> Manifest {
         migrated_with: None,
         min_nexus_version: Some(NEXUS_VERSION.to_string()),
         template: None,
-        features: vec!["project-context".into()],
+        features: vec!["project-context".into(), "development-records".into()],
         layout: Some(Layout { projects: Some(PROJECTS_DIR.into()), extra: Default::default() }),
         projects: Vec::new(),
         extra: Default::default(),

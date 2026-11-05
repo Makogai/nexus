@@ -206,6 +206,9 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
 
     let code = status.ok().and_then(|s| s.code()).map(i64::from);
     nexus_core::notify::session_exited(&conn, &session.id, code, false)?;
+    if let Err(e) = nexus_core::devrecord::finalize(&conn, &ctx.data_dir, &session.id) {
+        eprintln!("nexus: the development record was not written: {e}");
+    }
     host::shutdown(&conn, &me.id)?;
     Ok(code.map(|c| c as i32).unwrap_or(1))
 }
