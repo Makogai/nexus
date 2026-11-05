@@ -1706,3 +1706,90 @@ export interface SyncCloned {
   workspace: Workspace
   restore: SyncRestore
 }
+
+// ---- Project explorer (W3): mirrors nexus_core::project::explorer and git::ChangedFile --------------------------------
+
+export interface ExplorerEntry {
+  name: string
+  /** Project-relative, forward slashes. */
+  path: string
+  dir: boolean
+  symlink: boolean
+  size: number | null
+  /** Git ignores it (build output, dependencies, local files). */
+  ignored: boolean
+}
+
+export interface ExplorerListing {
+  path: string
+  entries: ExplorerEntry[]
+  truncated: boolean
+}
+
+export interface ExplorerFile {
+  path: string
+  size: number
+  /** null when binary or hidden. */
+  text: string | null
+  binary: boolean
+  truncated: boolean
+  /** Why the content is not shown (a file that may hold secrets). */
+  hidden: string | null
+}
+
+export interface ChangedFile {
+  status: string
+  path: string
+  oldPath: string | null
+  additions: number | null
+  deletions: number | null
+}
+
+export interface CommitDiff {
+  path: string
+  text: string | null
+  truncated: boolean
+  hidden: string | null
+}
+
+// ---- Learn a project (W4): mirrors nexus_core::project::learn ---------------------------------------------------------
+
+export interface LearnCount {
+  name: string
+  files: number
+}
+
+export interface ProjectMap {
+  projectId: string
+  name: string
+  files: number
+  filesTruncated: boolean
+  languages: LearnCount[]
+  folders: LearnCount[]
+  docs: string[]
+  stacks: string[]
+  packageManagers: string[]
+  scripts: [string, string][]
+  history: { commits: number; firstMs: number | null; lastMs: number | null; contributors: number } | null
+  context: {
+    overviewId: string | null
+    /** Still the text NEXUS generated from the README. */
+    overviewGenerated: boolean
+    architectureId: string | null
+    architectureSummary: boolean
+    notes: number
+    decisions: number
+    openTasks: number
+  }
+  graph: { installed: boolean; built: boolean; report: string | null; builtMs: number | null; ignored: boolean; command: string }
+  task: { id: string; title: string; status: string | null } | null
+  drafts: number
+}
+
+export interface LearnDraft {
+  id: string
+  topic: 'overview' | 'architecture'
+  title: string
+  updated: string | null
+  body: string
+}

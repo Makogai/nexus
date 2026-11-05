@@ -21,6 +21,13 @@ export const useWorkspaceStore = defineStore('workspaces', () => {
     return active.value
   }
 
+  /** A new workspace in an empty repository the person prepared (cloned into `folder`). */
+  async function createFromRepository(url: string, folder: string, name: string, template?: string | null) {
+    active.value = await api.syncCloneNew(url, folder, name, template ?? null)
+    list.value = await api.workspaceList()
+    return active.value
+  }
+
   async function importExisting(path: string) {
     active.value = await api.workspaceImport(path)
     list.value = await api.workspaceList()
@@ -37,5 +44,5 @@ export const useWorkspaceStore = defineStore('workspaces', () => {
     await load()
   }
 
-  return { list, active, loaded, load, create, importExisting, activate, forget }
+  return { list, active, loaded, load, create, createFromRepository, importExisting, activate, forget }
 })

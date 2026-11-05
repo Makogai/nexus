@@ -66,6 +66,9 @@ fn files_under(root: &Path) -> Vec<PathBuf> {
                 if name.to_string_lossy().starts_with('.') || ft.is_symlink() {
                     continue; // hidden files, editor temp files, symlinks (could escape the root)
                 }
+                if ft.is_file() && name.to_string_lossy().eq_ignore_ascii_case("README.md") {
+                    continue; // a folder's notes for people (ADR-0036), not a knowledge document
+                }
                 if ft.is_dir() && depth < MAX_DEPTH {
                     stack.push((e.path(), depth + 1));
                 } else if ft.is_file() && e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("md")) {
@@ -84,7 +87,10 @@ fn mtime_ms(meta: &std::fs::Metadata) -> i64 {
 /// Bring the index in line with the files under `roots`. Unchanged files (same size and mtime) are not read.
 pub fn refresh(conn: &Connection, roots: &[Root]) -> Result<RefreshReport> {
     let mut report = RefreshReport::default();
-    let tx = conn.unchecked_transaction()?;
+    // IMMEDIATE: take the write lock up front. A deferred transaction that reads and then writes cannot be upgraded
+    // while another process (desktop, MCP server, hook) also refreshes — SQLite then fails at once with "database is
+    // locked" instead of waiting for the busy timeout.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     for root in roots {
         let root_key = root.dir.to_string_lossy().into_owned();
         let workspace_id = match &root.scope {

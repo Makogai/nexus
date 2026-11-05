@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onActivated, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, BookMarked, Boxes, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
+import { ArrowLeft, BookMarked, Boxes, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, GraduationCap, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
 import { relativeTime } from '../lib/format'
 import { api, toIpcError } from '../lib/ipc'
 import { useWorkspaceStore } from '../stores/workspaces'
@@ -16,13 +16,24 @@ import GitSummary from '../components/GitSummary.vue'
 import UsageSummary from '../components/UsageSummary.vue'
 import SessionRow from '../components/SessionRow.vue'
 import InstructionsPanel from '../components/InstructionsPanel.vue'
+import ProjectCommits from '../components/ProjectCommits.vue'
+import ProjectFiles from '../components/ProjectFiles.vue'
+import ProjectLearn from '../components/ProjectLearn.vue'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
 const projects = useProjectStore()
 const sessions = useSessionStore()
 const router = useRouter()
+const route = useRoute()
 const refreshing = ref(false)
+
+/** Overview (cards), Learn (knowledge base, W4), Files (read-only explorer) and Commits (Git history) — W3; kept in the URL (`?tab=`). */
+type Tab = 'overview' | 'learn' | 'files' | 'commits'
+const tab = computed<Tab>(() => (route.query.tab === 'learn' || route.query.tab === 'files' || route.query.tab === 'commits' ? route.query.tab : 'overview'))
+function setTab(t: Tab) {
+  router.replace({ query: { ...route.query, tab: t === 'overview' ? undefined : t } })
+}
 
 const project = computed(() => projects.byId[props.id] ?? null)
 const workspaces = useWorkspaceStore()
@@ -164,6 +175,17 @@ async function unregister() {
 
     <div v-if="!project.available" class="notice notice-warn"><TriangleAlert /> This project is registered in the workspace but has no folder on this machine. Use “Locate…” on the Projects page.</div>
 
+    <div class="tabs" role="tablist" aria-label="Project views">
+      <button role="tab" class="tab" :class="{ active: tab === 'overview' }" :aria-selected="tab === 'overview'" data-project-tab="overview" @click="setTab('overview')">Overview</button>
+      <button role="tab" class="tab" :class="{ active: tab === 'learn' }" :aria-selected="tab === 'learn'" :disabled="!project.available" data-project-tab="learn" @click="setTab('learn')"><GraduationCap class="tab-ic" /> Learn</button>
+      <button role="tab" class="tab" :class="{ active: tab === 'files' }" :aria-selected="tab === 'files'" :disabled="!project.available" data-project-tab="files" @click="setTab('files')"><FileText class="tab-ic" /> Files</button>
+      <button role="tab" class="tab" :class="{ active: tab === 'commits' }" :aria-selected="tab === 'commits'" :disabled="!project.available" data-project-tab="commits" @click="setTab('commits')"><GitCommitHorizontal class="tab-ic" /> Commits</button>
+    </div>
+
+    <ProjectLearn v-if="tab === 'learn' && project.available" :project-id="project.id" />
+    <ProjectFiles v-else-if="tab === 'files' && project.available && project.localPath" :project-id="project.id" :root="project.localPath" />
+    <ProjectCommits v-else-if="tab === 'commits' && project.available" :project-id="project.id" />
+    <template v-else>
     <UsageSummary :project-id="project.id" />
 
     <div class="grid grid-2 top">
@@ -311,6 +333,7 @@ async function unregister() {
       </div>
       <button class="btn btn-danger" @click="unregister"><Trash2 /> Remove</button>
     </div>
+    </template>
   </div>
   <div v-else class="page">
     <div class="empty"><p>Project not found in this workspace.</p></div>
@@ -318,6 +341,38 @@ async function unregister() {
 </template>
 
 <style scoped>
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 16px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tab:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tab.active {
+  background: var(--bg-active);
+  border-color: var(--border-strong);
+  font-weight: 600;
+}
+.tab-ic {
+  width: 14px;
+  height: 14px;
+}
 .row-actions {
   display: flex;
   gap: 8px;
@@ -354,11 +409,20 @@ async function unregister() {
 .instructions-card {
   margin-top: 22px;
 }
+/* Many actions: they wrap under the title instead of squeezing the path into a narrow column. */
+.page-header {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.page-header .page-actions {
+  flex-wrap: wrap;
+}
 .title-block {
   display: flex;
   align-items: center;
   gap: 14px;
   min-width: 0;
+  flex: 1 1 380px;
 }
 .avatar {
   width: 46px;

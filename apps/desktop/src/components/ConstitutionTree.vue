@@ -34,7 +34,7 @@ function visibleSection(rules: { id: string; title: string; text: string }[]) {
   <div class="tree" :class="{ readonly }">
     <div class="field">
       <label>Preamble <span class="faint">(purpose of this constitution)</span></label>
-      <textarea v-model="structure.preamble" class="textarea" rows="2" :readonly="readonly" @input="changed" />
+      <textarea v-model="structure.preamble" class="textarea prose" rows="2" :readonly="readonly" @input="changed" />
     </div>
 
     <section v-for="(a, ai) in structure.articles" :key="ai" class="article" :data-article="ai">
@@ -47,7 +47,7 @@ function visibleSection(rules: { id: string; title: string; text: string }[]) {
           <button class="btn btn-icon btn-sm btn-ghost" title="Delete article" @click="structure.articles.splice(ai, 1), changed()"><Trash2 /></button>
         </div>
       </header>
-      <textarea v-model="a.text" class="textarea" rows="1" placeholder="Why this article exists (optional)" :readonly="readonly" @input="changed" />
+      <textarea v-model="a.text" class="textarea prose" rows="1" placeholder="Why this article exists (optional)" :readonly="readonly" @input="changed" />
 
       <div v-for="(s, si) in a.sections" v-show="visibleSection(s.rules)" :key="si" class="section">
         <header class="row-head">
@@ -80,7 +80,7 @@ function visibleSection(rules: { id: string; title: string; text: string }[]) {
               <button class="btn btn-icon btn-sm btn-ghost" title="Delete rule" @click="s.rules.splice(ri, 1), changed()"><Trash2 /></button>
             </div>
           </header>
-          <textarea v-model="r.text" class="textarea" rows="2" placeholder="What Claude must / should do" aria-label="Rule text" :readonly="readonly" @input="changed" />
+          <textarea v-model="r.text" class="textarea prose" rows="2" placeholder="What Claude must / should do" aria-label="Rule text" :readonly="readonly" @input="changed" />
           <div class="rule-meta">
             <label class="checkbox"><input v-model="r.enabled" type="checkbox" :disabled="readonly" @change="changed" /><span>Enabled</span></label>
             <label class="check" title="A quality gate (Workflows → Gates) that verifies this rule. Without one the rule is an instruction only.">

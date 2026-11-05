@@ -368,7 +368,7 @@ fn failed_commits_roll_back_staging_and_remote_failures_are_explained() {
     let h = host(&conn);
     let dest = root.join("not-a-ws");
     let e = ops::clone_workspace(&conn, &root.join("x-data"), &h, &format!("file://{}", plain.display()).replace('\\', "/"), dest.to_str().unwrap()).unwrap_err().to_string();
-    assert!(e.contains("not a NEXUS workspace") || e.contains("Git reported"), "{e}");
+    assert!(e.contains("set up a new workspace in it") || e.contains("Git reported"), "{e}");
     assert!(!dest.exists(), "the folder NEXUS created is removed again");
     std::fs::create_dir_all(root.join("busy")).unwrap();
     std::fs::write(root.join("busy").join("x"), "").unwrap();
@@ -501,7 +501,10 @@ fn generated_layout_and_independent_repositories_never_enter_the_workspace_repos
     crate::templates::apply(&a.conn, &a.data, &a.ws, "ai-engineering-pro").unwrap();
     let mut top: Vec<String> = std::fs::read_dir(a.root()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n != ".git").collect();
     top.sort();
-    assert_eq!(top, [".gitignore", "README.md", "constitutions", "integrations", "nexus-workspace.json", "nexus.lock.json", "projects", "skills", "workflows"]);
+    assert_eq!(
+        top,
+        [".gitignore", "README.md", "constitutions", "integrations", "knowledge", "nexus-workspace.json", "nexus.lock.json", "project-context", "projects", "skills", "workflows"]
+    );
     fn empty_dirs(dir: &Path, out: &mut Vec<PathBuf>) {
         let entries: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().collect();
         if entries.is_empty() {
@@ -547,3 +550,111 @@ fn generated_layout_and_independent_repositories_never_enter_the_workspace_repos
     assert!(!git::changed_paths(a.root()).unwrap().iter().any(|(_, p)| p.starts_with("code/")));
 }
 
+
+/// The person prepared an empty private repository: opening it as a workspace explains that it is empty, setting up a
+/// new workspace in it works, and the first reviewed commit and push go to that repository.
+#[test]
+fn a_new_workspace_is_set_up_in_an_empty_repository_and_published_to_it() {
+    let t = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(t.path()).unwrap();
+    let conn = crate::db::open_in_memory().unwrap();
+    let data = root.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let h = host(&conn);
+    let remote = root.join("remote.git");
+    std::fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "-q", "--bare"]);
+    let url = format!("file://{}", remote.display()).replace('\\', "/");
+
+    // Opening it as an existing workspace: a distinct error that names the way forward, and nothing is left behind.
+    let dest = root.join("personal");
+    let e = ops::clone_workspace(&conn, &data, &h, &url, dest.to_str().unwrap()).unwrap_err();
+    assert_eq!(e.code(), "not_found");
+    assert!(e.to_string().contains("empty") && e.to_string().contains("set up a new workspace"), "{e}");
+    assert!(!dest.exists());
+
+    let new = ops::NewWorkspace { name: "Personal", description: "", template: Some("ai-engineering-pro") };
+    let ws = ops::clone_new_workspace(&conn, &data, &h, &url, dest.to_str().unwrap(), &new).unwrap();
+    assert_eq!(crate::workspace::active(&conn).unwrap().map(|w| w.id), Some(ws.id.clone()), "the new workspace is open");
+    let m = crate::workspace::read_manifest(&ws.root_path).unwrap();
+    assert_eq!(m.template.as_ref().map(|t| t.id.as_str()), Some("ai-engineering-pro"));
+    for (dir, _) in crate::workspace::STANDARD_FOLDERS {
+        assert!(ws.root_path.join(dir).join("README.md").is_file(), "{dir}/README.md");
+    }
+    let report = crate::knowledge::service::refresh(&conn, &data, &ws).unwrap();
+    assert_eq!(report.invalid, 0, "folder READMEs are not knowledge documents");
+
+    // The first commit and push go to the prepared repository.
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    set_identity(&ws.root_path);
+    let a = Machine { conn, data, home, host: h, ws };
+    a.commit_all("Workspace");
+    let review = ops::review_push(&a.sync()).unwrap();
+    assert!(review.first_push && !review.inspection.blocked, "{:?}", review.inspection.findings);
+    assert_eq!(a.push().commits, 1);
+    let published = std::process::Command::new("git").args(["ls-tree", "-r", "--name-only", "HEAD"]).current_dir(&remote).output().unwrap();
+    let published = String::from_utf8_lossy(&published.stdout).into_owned();
+    assert!(published.lines().any(|l| l == "nexus-workspace.json") && published.lines().any(|l| l == "knowledge/README.md"), "{published}");
+    assert_eq!(status(&a.conn, &a.ws, &a.data).unwrap().state, "up-to-date");
+    let h = history::list(&a.conn, &a.ws.id, 10).unwrap();
+    assert!(h.iter().any(|e| e.op == "clone" && e.status == "ok"), "{h:?}");
+}
+
+/// A repository from a Git host's "add README / .gitignore / licence" options is still empty enough: the files stay,
+/// the NEXUS ignore lines are added. A repository with anything else — a project — never becomes a workspace.
+#[test]
+fn host_scaffolding_is_kept_and_a_project_repository_never_becomes_a_workspace() {
+    let t = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(t.path()).unwrap();
+    let conn = crate::db::open_in_memory().unwrap();
+    let data = root.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let h = host(&conn);
+    let make = |name: &str, files: &[(&str, &str)]| {
+        let (work, bare) = (root.join(format!("{name}-src")), root.join(format!("{name}.git")));
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::create_dir_all(&bare).unwrap();
+        git(&bare, &["init", "-q", "--bare"]);
+        git(&work, &["init", "-q"]);
+        for (p, text) in files {
+            let f = work.join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, text).unwrap();
+        }
+        git(&work, &["add", "-A"]);
+        git(&work, &["commit", "-qm", "initial"]);
+        git(&work, &["push", "-q", &format!("file://{}", bare.display()).replace('\\', "/"), "HEAD:main"]);
+        format!("file://{}", bare.display()).replace('\\', "/")
+    };
+
+    let hosted = make("hosted", &[("README.md", "# personal\n"), ("LICENSE", "All rights reserved.\n"), (".gitignore", "node_modules/\n")]);
+    let new = ops::NewWorkspace { name: "Personal", description: "", template: Some("developer") };
+    let ws = ops::clone_new_workspace(&conn, &data, &h, &hosted, root.join("hosted-ws").to_str().unwrap(), &new).unwrap();
+    // (NEXUS's clone uses the machine's Git settings, so line endings may be converted on checkout.)
+    assert_eq!(std::fs::read_to_string(ws.root_path.join("README.md")).unwrap().trim_end(), "# personal", "the person's README stays");
+    let gi = std::fs::read_to_string(ws.root_path.join(".gitignore")).unwrap();
+    assert_eq!(gi.lines().next(), Some("node_modules/"), "{gi}");
+    for line in ["projects/", "repos/", ".nexus-local/", "*.db", ".env", ".env.*"] {
+        assert!(gi.lines().any(|l| l == line), "{line} added: {gi}");
+    }
+
+    let project = make("project", &[("README.md", "# app\n"), ("package.json", "{}\n"), ("src/main.ts", "export {}\n")]);
+    let dest = root.join("project-ws");
+    let e = ops::clone_new_workspace(&conn, &data, &h, &project, dest.to_str().unwrap(), &new).unwrap_err().to_string();
+    assert!(e.contains("not empty") && e.contains("package.json") && e.contains("src"), "{e}");
+    assert!(!dest.exists(), "the clone is removed");
+    // The same rule for a folder on disk, and an existing workspace is opened, not set up again.
+    let folder = root.join("code");
+    std::fs::create_dir_all(folder.join("src")).unwrap();
+    let e = crate::workspace::create(&conn, folder.to_str().unwrap(), "W", "").unwrap_err().to_string();
+    assert!(e.contains("already contains files (src)"), "{e}");
+    let e = crate::workspace::create(&conn, ws.root_path.to_str().unwrap(), "W", "").unwrap_err().to_string();
+    assert!(e.contains("open it instead"), "{e}");
+    // Opening a folder that is not a workspace yet: a distinct error the desktop turns into "set it up here".
+    let empty = root.join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    assert_eq!(crate::workspace::import(&conn, empty.to_str().unwrap()).unwrap_err().code(), "not_found");
+    let ws = crate::workspace::create(&conn, empty.to_str().unwrap(), "Here", "").unwrap();
+    assert!(ws.root_path.join("knowledge").join("README.md").is_file());
+}

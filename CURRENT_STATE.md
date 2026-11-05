@@ -1,7 +1,7 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, then `docs/ROADMAP.md` and
-`docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8).
+_Last updated: 2026-11-05 (session 10, Portable Workspace → Project workbench)._ Read this first, then `docs/ROADMAP.md`,
+`docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
 
@@ -10,8 +10,50 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
   P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup), P6 (development records, history), P7 (sync policies) and P8 (new-computer restoration) done and committed; the stage's full sequential verification is below. P9: a quality
   review of the template library and of the workspace's Git ignore rules before merging (`docs/TEMPLATE_REVIEW.md`).
-  The branch is merged into `main` with `--no-ff` after P9's checks passed (merge commit "Merge milestone: Portable
-  Workspace"). Not pushed, no release.
+  The branch is merged into `main` with `--no-ff` after P9's checks passed (merge commit `d9b08a9`). Not pushed, no
+  release.
+* Branch **`fix/workspace-setup`** (off `main` at `d9b08a9`): P10 — a new workspace in a prepared place (owner
+  feedback: an empty repository could not be used). Verified and committed on the branch; **not merged** — waits for
+  the owner's approval.
+* Branch **`milestone/project-workbench`** (off `fix/workspace-setup`, so it contains P10): stage *Project workbench*
+  (owner requests after the merge, ADR-0040) — W1 add a project from Git, W2 knowledge reading/editing and a calmer
+  UI, W3 project explorer (files, viewer, commits), W4 learn a project. All four verified and committed; **not merged**
+  — merging this branch brings P10 along.
+
+## Project workbench — progress (session 10)
+
+* **W1 — add a project from Git** (`1861d74`):
+  * **How:** *Clone from Git* in Add project and `nexus projects add <url> [--name] [--into FOLDER]`.
+    `project::discovery::clone_new` clones into `projects/<name>` (default) or an empty folder, then registers the
+    project with its context.
+  * **Refused, leaving nothing behind:** the same repository twice, bad URLs, occupied folders, failed clones.
+  * **Also:** clones get 20 minutes; the restore.mjs harness no longer hangs on an app that fails to start.
+* **W2 — knowledge reading and editing** (`80f1812`):
+  * **Reading:** documents open formatted (markdown-it, raw HTML escaped, no remote images, links only to the system
+    browser); constitutions open as rule cards.
+  * **Editing:** *Edit* (CodeMirror Markdown) goes through `knowledge::service::update_doc` (IPC `knowledge_update`):
+    optimistic, validated, approved on this machine.
+  * **Constitution Manager:** opens documents in Read mode.
+  * **Look:** the grey native button rows are fixed (`button.list-row`); an empty terminal panel is a one-line strip;
+    syntax tokens for both themes.
+* **W3 — project explorer** (`1de3f5d`):
+  * **Tabs:** the project page has Overview / Files / Commits.
+  * **Rules:** `project::explorer` is read-only, canonicalised inside the project, never shows secrets or `.git`, and
+    doesn't follow symlinks. History reads disable external diff, textconv and signature checks.
+* **W4 — learn a project** (this commit):
+  * **The tab:** *Learn* shows `project::learn::map` (NEXUS's own reading: files, languages, docs, stack, history
+    counts, context state, Graphify).
+  * **Learning session:** *Start a learning session* creates the learning task, whose brief carries the map, and opens
+    the launch for it.
+  * **Drafts:** Claude drafts through the new MCP tool `draft_project_document` (22 tools); the drafts are unverified
+    notes. *Use as overview* / *Use as architecture summary* / *Set aside* are the person's decision.
+  * **Graphify:** when it is on the PATH, NEXUS types `graphify extract . --code-only` (offline) into a project
+    terminal and keeps `graphify-out/` out of Git via `.git/info/exclude`.
+  * **After adding a project:** it opens on Learn.
+  * **Fix:** the knowledge index refresh takes SQLite's write lock up front (IMMEDIATE). A deferred read-then-write
+    upgrade failed at once with "database is locked" when the desktop and the MCP server refreshed together; it showed
+    up once in task-flow.
+* **Verified:** see the workbench log below.
 
 ## Portable Workspace — progress (session 10)
 
@@ -144,6 +186,24 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
       * Doctor finding `projects-ignored` with the repair `ignore-projects`;
       * `.gitignore` gains OS files.
   * **Verified:** see the P9 log below.
+* **P10 — new workspace in a prepared place** (branch `fix/workspace-setup`, ADR-0036 amendment). Owner feedback: an
+  empty private repository could not become the workspace — *Open from Git* refused it (no manifest), *Create* always
+  made a new folder, *Open existing* needed the manifest. Now:
+  * **Where:** *Create a workspace* (onboarding and Settings → *New workspace…*, one shared `NewWorkspaceForm`) offers
+    *New folder*, *Existing empty folder* and *Empty Git repository*. The repository option uses
+    `workspace_sync::clone_new_workspace` (IPC `sync_clone_new`): clone, check, create, template, open, then the Sync
+    Center for the first reviewed commit and push. *Open from Git* on an empty repository and *Open existing* on a
+    folder without a manifest return `not_found` and offer that setup.
+  * **Safety:** `workspace::check_new_root` allows only a new or empty folder or host scaffolding (`.git`, README,
+    licence, `.gitignore`, `.gitattributes`); a project folder or repository is refused, and the clone is removed. An
+    existing `.gitignore` keeps its lines (NEXUS lines appended); an existing README stays.
+  * **Structure:** every new workspace starts with `constitutions/`, `knowledge/`, `project-context/`, `workflows/`,
+    each with a README (Git cannot carry empty folders); the knowledge index skips `README.md`.
+  * **Verified:** core 220 (2 new tests with local bare repositories), workspace 288, clippy ×2, vitest 90, build;
+    desktop E2E `workspace-setup.mjs` 14/14 (new) and every other desktop suite again (sync 18, restore 12, portable 50,
+    smoke 27, constitutions 13, context 9, task-flow 29, workflows 24, profiles-kits 9, attention 27, usage 18, MCP 9),
+    real-Claude kits 19/19. Not rerun: installer suite, T18, hooks/instructions/security/context/workflow/usage
+    real-Claude suites (unaffected).
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 
@@ -231,10 +291,27 @@ data, connection strings — fixtures with credential shapes are built at runtim
 Not rerun (unaffected by P9): T18, the installer suite, the hooks, instructions, workflow and usage real-Claude
 suites. Memory: lowest 6.3 GB free.
 
+### Project workbench — verification (final code, sequential groups, `CARGO_BUILD_JOBS=2`)
+
+| # | Command | Result |
+| --- | --- | --- |
+| 1 | `cargo test --workspace` | passed — 293 tests, 0 failed (incl. explorer, learn, update_doc, clone_new, MCP `draft_project_document`) |
+| 2 | `cargo clippy` (workspace, all targets; desktop with `e2e-webview-debugging`) | passed ×2 |
+| 3 | `npm test` · `npm run build` | 95/95 vitest (markdown safety, Constitutions read mode) · build ok |
+| 4 | E2E build + `workbench` · `workspace-setup` · `mcp-interop` · `run-smoke` · `task-flow` · `constitutions` · `context` | 22/22 · 17/17 · 9/9 (22 tools) · 27/27 · 29/29 · 13/13 · 9/9 |
+| 5 | `workflows` · `profiles-kits` · `attention` · `usage` · `sync` · `portable` · `restore` | 24/24 · 9/9 · 27/27 · 18/18 · 18/18 · 50/50 · 12/12 |
+| 6 | real Claude (synthetic profiles): `security` · `kits` · `context` · `workflow` | 14/14 · 19/19 · 7/7 · 7/7 |
+
+Not rerun: T18, the installer suite (its MCP count was updated to 22), hooks/instructions/usage real-Claude suites
+(unaffected). task-flow failed once on "database is locked" before the index fix, then passed. Memory: lowest 4.5 GB
+free.
+
 ## Next actions (in order)
 
-1. Owner: create the first personal workspace (`docs/user/PORTABLE_WORKSPACE.md`) and do MANUAL_CHECKS 33 (your own
-   read of the template library, with `docs/TEMPLATE_REVIEW.md`).
+1. Owner: review `milestone/project-workbench` (contains P10). On approval merge it into `main` with `--no-ff`, then
+   rebuild the installer. Then create the first personal workspace from the empty repository
+   (`docs/user/PORTABLE_WORKSPACE.md`), add a project from Git and try *Learn*. Do MANUAL_CHECKS 33 (with
+   `docs/TEMPLATE_REVIEW.md`).
 2. Owner decisions still open from Beta readiness (B5): identifier + publisher (ADR-0034), product name and `nexus://`,
    licence (ADR-0035), code signing, updater.
 3. Owner manual checks: MANUAL_CHECKS 27 (notification look, lock screen, click after quitting), 28–32.

@@ -3,16 +3,20 @@ import { computed, onMounted, ref } from 'vue'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { Archive, Check, FolderInput, FolderOpen, FolderPlus, Monitor, Moon, RotateCcw, Sun, Trash2 } from '@lucide/vue'
-import { api } from '../lib/ipc'
+import { api, toIpcError } from '../lib/ipc'
 import type { BackupInfo, ShellInfo } from '../lib/types'
 import { relativeTime } from '../lib/format'
+import NewWorkspaceForm, { type WorkspaceSource } from '../components/NewWorkspaceForm.vue'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
 
 const app = useAppStore()
 const workspaces = useWorkspaceStore()
 const shells = ref<ShellInfo[]>([])
-const newName = ref('')
+/** The inline "new workspace" form, when open. */
+const newForm = ref<{ source: WorkspaceSource; folder?: string; key: number } | null>(null)
+/** A folder picked to open that is not a workspace yet. */
+const notYet = ref<string | null>(null)
 
 const backups = ref<BackupInfo[]>([])
 const backingUp = ref(false)
@@ -71,21 +75,23 @@ async function copyPathCommand() {
 
 const size = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
-async function createWorkspace() {
-  const parent = await openDialog({ directory: true, title: 'Choose where to create the workspace folder' })
-  if (typeof parent !== 'string' || !newName.value.trim()) return
-  const sep = app.info?.platform === 'windows' ? '\\' : '/'
-  const slug = newName.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'workspace'
-  const ws = await app.attempt(() => workspaces.create(`${parent}${sep}${slug}`, newName.value.trim()), 'Could not create workspace')
-  if (ws) {
-    newName.value = ''
-    app.toast('success', `Workspace “${ws.name}” created and opened`)
-  }
+function openNew(source: WorkspaceSource, folder?: string) {
+  newForm.value = { source, folder, key: (newForm.value?.key ?? 0) + 1 }
+  notYet.value = null
 }
 
 async function importWorkspace() {
   const dir = await openDialog({ directory: true, title: 'Choose a folder containing nexus-workspace.json' })
-  if (typeof dir === 'string') await app.attempt(() => workspaces.importExisting(dir), 'Could not open workspace')
+  if (typeof dir !== 'string') return
+  notYet.value = null
+  try {
+    await workspaces.importExisting(dir)
+  } catch (e) {
+    const err = toIpcError(e)
+    // Not a workspace yet: offer to set one up there (the core refuses folders with other content).
+    if (err.code === 'not_found') notYet.value = dir
+    else app.toast('error', `Could not open workspace: ${err.message}`)
+  }
 }
 
 async function forget(id: string, name: string) {
@@ -159,13 +165,17 @@ async function reveal(path: string) {
           <button class="btn btn-sm btn-ghost" @click="forget(w.id, w.name)">Forget</button>
         </div>
       </div>
-      <div class="ws-actions">
-        <div class="input-row">
-          <input v-model="newName" class="input" placeholder="New workspace name, e.g. Work" @keydown.enter="createWorkspace" />
-          <button class="btn" :disabled="!newName.trim()" @click="createWorkspace"><FolderPlus /> Create…</button>
-        </div>
+      <div v-if="newForm" class="ws-new" data-settings-new-ws>
+        <NewWorkspaceForm :key="newForm.key" :source="newForm.source" :folder="newForm.folder" back-label="Cancel" @created="newForm = null" @cancel="newForm = null" />
+      </div>
+      <div v-else class="ws-actions">
+        <button class="btn" data-settings-create-ws @click="openNew('new')"><FolderPlus /> New workspace…</button>
         <button class="btn" @click="importWorkspace"><FolderInput /> Open existing…</button>
       </div>
+      <p v-if="notYet && !newForm" class="notice selectable" data-settings-not-yet>
+        {{ notYet }} is not a NEXUS workspace yet.
+        <button class="btn btn-sm" @click="openNew('existing', notYet)">Set up a new workspace in this folder</button>
+      </p>
     </section>
 
     <section class="card">
@@ -320,8 +330,13 @@ async function reveal(path: string) {
   display: flex;
   gap: 8px;
 }
-.ws-actions .input-row {
-  flex: 1;
+.ws-new {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+.notice .btn {
+  margin-left: 8px;
 }
 .facts {
   display: grid;

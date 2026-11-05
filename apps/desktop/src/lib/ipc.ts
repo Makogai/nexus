@@ -94,6 +94,13 @@ import type {
   ShellInfo,
   StartClaude,
   Workspace,
+  ExplorerListing,
+  ExplorerFile,
+  ChangedFile,
+  CommitDiff,
+  GitLogEntry,
+  LearnDraft,
+  ProjectMap,
 } from './types'
 
 export class IpcError extends Error {
@@ -178,6 +185,23 @@ export const api = {
     call<PathInspection>('project_inspect_path', { workspaceId, path }),
   projectRegister: (workspaceId: string, path: string, name?: string) =>
     call<Project>('project_register', { workspaceId, path, name }),
+  /** Learn a project (W4): NEXUS's map, the learning task, Claude's drafts, Graphify's output kept out of Git. */
+  projectLearnMap: (workspaceId: string, projectId: string) => call<ProjectMap>('project_learn_map', { workspaceId, projectId }),
+  projectLearnStart: (workspaceId: string, projectId: string) =>
+    call<{ id: string; title: string; status: string | null }>('project_learn_start', { workspaceId, projectId }),
+  projectLearnDrafts: (workspaceId: string, projectId: string) => call<LearnDraft[]>('project_learn_drafts', { workspaceId, projectId }),
+  projectLearnDecide: (workspaceId: string, projectId: string, draftId: string, apply: boolean) =>
+    call<void>('project_learn_decide', { workspaceId, projectId, draftId, apply }),
+  projectLearnExcludeGraph: (projectId: string) => call<boolean>('project_learn_exclude_graph', { projectId }),
+  /** Project explorer (W3): read-only folders, files and Git history. */
+  projectTree: (projectId: string, dir: string) => call<ExplorerListing>('project_tree', { projectId, dir }),
+  projectFile: (projectId: string, path: string) => call<ExplorerFile>('project_file', { projectId, path }),
+  projectLog: (projectId: string, skip: number, limit: number) => call<GitLogEntry[]>('project_log', { projectId, skip, limit }),
+  projectCommit: (projectId: string, oid: string) => call<ChangedFile[]>('project_commit', { projectId, oid }),
+  projectCommitDiff: (projectId: string, oid: string, path: string) => call<CommitDiff>('project_commit_diff', { projectId, oid, path }),
+  /** A new project from Git: cloned into `projects/<name>` (or `folder`), registered with its context. */
+  projectCloneNew: (workspaceId: string, url: string, name: string | null, folder: string | null) =>
+    call<Project>('project_clone_new', { workspaceId, url, name, folder }),
   projectUnregister: (id: string) => call<void>('project_unregister', { id }),
   projectLocate: (id: string, path: string) => call<Project>('project_locate', { id, path }),
   projectRefresh: (id: string) => call<Project>('project_refresh', { id }),
@@ -251,6 +275,9 @@ export const api = {
   instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
+  /** The person's edit of a document (title + Markdown body); `expectedHash` = the version that was read. */
+  knowledgeUpdate: (workspaceId: string, id: string, body: string, expectedHash: string, title?: string | null) =>
+    call<KnowledgeEntry>('knowledge_update', { workspaceId, id, title: title ?? null, body, expectedHash }),
 
   workflowTemplates: () => call<WorkflowTemplate[]>('workflow_templates'),
   workflowList: (workspaceId: string) => call<WorkflowSummary[]>('workflow_list', { workspaceId }),
@@ -286,6 +313,9 @@ export const api = {
   syncReviewPush: (workspaceId: string) => call<SyncPushReview>('sync_review_push', { workspaceId }),
   syncPush: (workspaceId: string, token: string) => call<{ remote: string; branch: string; commits: number }>('sync_push', { workspaceId, token }),
   syncClone: (url: string, folder: string) => call<SyncCloned>('sync_clone', { url, folder }),
+  /** Set up a new workspace in an empty repository (clone, create, template, open). */
+  syncCloneNew: (url: string, folder: string, name: string, template: string | null) =>
+    call<Workspace>('sync_clone_new', { url, folder, name, description: null, template }),
   syncRestore: (workspaceId: string) => call<SyncRestore>('sync_restore', { workspaceId }),
   gateRemove: (projectId: string, name: string) => call<boolean>('gate_remove', { projectId, name }),
   gateSuggest: (projectId: string) => call<GateInput[]>('gate_suggest', { projectId }),

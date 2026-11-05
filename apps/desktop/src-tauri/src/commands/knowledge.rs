@@ -265,6 +265,25 @@ pub async fn instructions_inspect(
     .await
 }
 
+/// The person's edit of a document's title and body (W2): optimistic (`expected_hash`), validated; a constitution goes
+/// through its parser; the saved version is approved on this machine because the person wrote it here.
+#[tauri::command]
+pub async fn knowledge_update(
+    ctx: State<'_, Ctx>,
+    workspace_id: String,
+    id: String,
+    title: Option<String>,
+    body: String,
+    expected_hash: Option<String>,
+) -> IpcResult<Item> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let ws = available(&ctx, &workspace_id)?;
+        Ok(knowledge::update_doc(&ctx.db(), &ctx.data_dir, &ws, &id, title.as_deref(), &body, expected_hash.as_deref())?)
+    })
+    .await
+}
+
 /// Approve the current version of an always-on rule on this machine (threat T19).
 #[tauri::command]
 pub async fn knowledge_approve(ctx: State<'_, Ctx>, workspace_id: String, id: String) -> IpcResult<Item> {

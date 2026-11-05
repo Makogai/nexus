@@ -130,6 +130,29 @@ pub async fn sync_clone(app: AppHandle, ctx: State<'_, Ctx>, url: String, folder
     r
 }
 
+/// Set up a new workspace in an empty repository the person prepared (clone, check it holds only host scaffolding,
+/// create, install the template, open). Its first reviewed commit and push go to that repository.
+#[tauri::command]
+pub async fn sync_clone_new(
+    app: AppHandle,
+    ctx: State<'_, Ctx>,
+    url: String,
+    folder: String,
+    name: String,
+    description: Option<String>,
+    template: Option<String>,
+) -> IpcResult<Workspace> {
+    let ctx = ctx.inner().clone();
+    let r = blocking(move || {
+        let c = conn(&ctx)?;
+        let new = ops::NewWorkspace { name: &name, description: description.as_deref().unwrap_or(""), template: template.as_deref() };
+        Ok(ops::clone_new_workspace(&c, &ctx.data_dir, &ctx.host.id, &url, &folder, &new)?)
+    })
+    .await;
+    let _ = app.emit(SYNC_EVENT, ());
+    r
+}
+
 #[tauri::command]
 pub async fn sync_restore(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResult<ops::Restore> {
     let ctx = ctx.inner().clone();

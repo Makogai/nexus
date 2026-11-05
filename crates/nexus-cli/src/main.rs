@@ -168,11 +168,16 @@ enum ProjectCmd {
         #[arg(long)]
         git: bool,
     },
-    /// Register FOLDER as a project of the active workspace (read-only inspection, nothing is executed).
+    /// Register FOLDER as a project of the active workspace (read-only inspection, nothing is executed). Given a Git URL
+    /// (https://, ssh://, git@host:path, file://) instead, clone it first — into the workspace's projects/ folder or
+    /// --into an empty folder of your choice.
     Add {
+        #[arg(value_name = "FOLDER_OR_URL")]
         folder: String,
         #[arg(long)]
         name: Option<String>,
+        #[arg(long, value_name = "FOLDER")]
+        into: Option<String>,
     },
     /// Bind a project that is not on this machine to FOLDER.
     Locate { project: String, folder: String },
@@ -699,10 +704,20 @@ fn cmd_projects(ctx: &Ctx, cmd: ProjectCmd) -> nexus_core::Result<()> {
             let headers: &[&str] = if with_git { &["NAME", "STACK", "GIT", "PATH"] } else { &["NAME", "STACK", "PATH"] };
             out::table(headers, &table);
         }
-        ProjectCmd::Add { folder, name } => {
-            let p = project::register_with_context(&conn, &ctx.data_dir, &ws.id, &folder, name.as_deref())?;
+        ProjectCmd::Add { folder, name, into } => {
+            let is_url = ["https://", "ssh://", "file://", "git@"].iter().any(|s| folder.trim().starts_with(s));
+            if into.is_some() && !is_url {
+                return Err(CoreError::invalid("--into is for cloning a Git URL; to register a folder, pass the folder itself"));
+            }
+            let p = if is_url {
+                project::discovery::clone_new(&conn, &ctx.data_dir, &ws, &folder, name.as_deref(), into.as_deref())?
+            } else {
+                project::register_with_context(&conn, &ctx.data_dir, &ws.id, &folder, name.as_deref())?
+            };
             if ctx.json {
                 out::json(&p);
+            } else if is_url {
+                println!("cloned and added {} [{}] to {} — {}", p.name, p.stack.stacks.join(", "), ws.name, p.local_path.as_ref().map(|x| x.display().to_string()).unwrap_or_default());
             } else {
                 println!("added {} [{}] to {}", p.name, p.stack.stacks.join(", "), ws.name);
             }

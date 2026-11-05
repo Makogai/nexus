@@ -9,7 +9,9 @@ import type { SyncCloned } from '../lib/types'
 import { useWorkspaceStore } from '../stores/workspaces'
 import { useProjectStore } from '../stores/projects'
 
-const emit = defineEmits<{ cloned: [SyncCloned]; cancel: [] }>()
+/** `offerSetup`: when the repository turns out to be empty, offer to set up a new workspace in it (onboarding). */
+const props = defineProps<{ offerSetup?: boolean }>()
+const emit = defineEmits<{ cloned: [SyncCloned]; setup: [string]; cancel: [] }>()
 const workspaces = useWorkspaceStore()
 const projects = useProjectStore()
 const url = ref('')
@@ -17,6 +19,8 @@ const parent = ref('')
 const name = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
+/** The repository has no workspace yet (an empty repository): it can become a new one. */
+const empty = ref(false)
 
 const suggested = computed(() => {
   const base = url.value.trim().replace(/[\\/]+$/, '').split(/[\\/:]/).pop() ?? ''
@@ -37,6 +41,7 @@ async function pick() {
 async function start() {
   busy.value = true
   error.value = null
+  empty.value = false
   try {
     const r = await api.syncClone(url.value.trim(), folder.value)
     // Tell the parent first: loading the stores makes the onboarding screen give way to the app, which would unmount
@@ -45,7 +50,9 @@ async function start() {
     await workspaces.load()
     await projects.load(r.workspace.id)
   } catch (e) {
-    error.value = toIpcError(e).message
+    const err = toIpcError(e)
+    error.value = err.message
+    empty.value = err.code === 'not_found' // only an empty repository (core: clone_workspace)
   } finally {
     busy.value = false
   }
@@ -69,6 +76,10 @@ async function start() {
       <span v-if="folder" class="hint mono">{{ folder }} (must be new or empty)</span>
     </div>
     <p v-if="error" class="notice notice-error selectable" data-sync-clone-error>{{ error }}</p>
+    <div v-if="empty && props.offerSetup" class="notice" data-sync-clone-empty>
+      <span>This repository is empty, so it can hold a <strong>new</strong> workspace: NEXUS clones it, sets the workspace up, and your first reviewed commit and push go to it.</span>
+      <button class="btn btn-primary btn-sm" data-sync-clone-setup @click="emit('setup', url.trim())">Set up a new workspace in it</button>
+    </div>
     <div class="row">
       <button class="btn btn-ghost" @click="emit('cancel')">Back</button>
       <span class="spacer" />

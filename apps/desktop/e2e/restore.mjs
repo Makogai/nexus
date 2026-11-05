@@ -49,9 +49,19 @@ async function start(dataDir, port) {
   })
   child.stdout.on('data', (d) => (log += d))
   child.stderr.on('data', (d) => (log += d))
-  await waitForPort(String(port), 120_000)
-  const cdp = await connect(String(port))
-  await cdp.waitFor(`document.querySelector('.onboarding') || document.querySelector('.shell')`, 30000)
+  let cdp
+  try {
+    await waitForPort(String(port), 120_000)
+    cdp = await connect(String(port))
+    await cdp.waitFor(`document.querySelector('.onboarding') || document.querySelector('.shell')`, 60000)
+  } catch (e) {
+    // Never leave the app running (its pipes would keep this script alive): stop it, then report.
+    cdp?.close()
+    try {
+      execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+    } catch {}
+    throw new Error(`${e.message}\n--- app log ---\n${log.slice(-2000)}`)
+  }
   const inv = (cmd, args = {}) => cdp.evaluate(`window.__TAURI_INTERNALS__.invoke(${js(cmd)}, ${js(args)})`)
   const click = (sel) => cdp.evaluate(`(() => { const el = document.querySelector(${js(sel)}); if (!el || el.disabled) return false; el.click(); return true })()`)
   const setValue = (sel, value) => cdp.evaluate(`(() => { const el = document.querySelector(${js(sel)}); if (!el) return false; el.value = ${js(value)}; el.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)

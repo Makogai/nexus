@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 21);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 22);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -933,7 +933,7 @@ fn templates_install_a_progressive_library_scoped_to_its_workspace() {
     let dry = e.run(&["templates", "apply", "ai-engineering-pro"]);
     assert_eq!(dry.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&dry.stdout).contains("Repeat with --yes"));
-    assert!(!ws_dir(&e).join("constitutions").exists(), "nothing written before --yes");
+    assert!(!ws_dir(&e).join("constitutions").join("core.md").exists(), "nothing written before --yes");
     let done = e.json(&["templates", "apply", "ai-engineering-pro", "--yes"]);
     assert!(done["written"].as_array().unwrap().len() > 40, "{done}");
     assert!(e.ok(&["templates", "apply", "ai-engineering-pro"]).contains("nothing to change"));
@@ -1022,6 +1022,33 @@ fn projects_get_a_portable_context_and_scanning_registers_nothing() {
     assert!(r["kept"].as_array().unwrap().iter().any(|k| k.as_str().unwrap().ends_with("overview.md")), "{r}");
     assert!(std::fs::read_to_string(ctx.join("overview.md")).unwrap().contains("My notes."));
     assert!(!e.run(&["projects", "clone", "repo"]).status.success(), "an available project is not cloned again");
+
+    // `projects add <git url>`: a new project is cloned into the clone folder, registered and given its context; the same
+    // repository is not added twice, and --into needs a URL.
+    let git = |dir: &Path, args: &[&str]| {
+        let ok = Command::new("git")
+            .args(["-c", "user.name=T", "-c", "user.email=t@example.invalid", "-c", "core.autocrlf=false"])
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(ok.success(), "git {args:?}");
+    };
+    let root = e.repo.parent().unwrap().to_path_buf();
+    let bare = root.join("billing.git");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "-b", "main"]);
+    git(&e.repo, &["add", "-A"]);
+    git(&e.repo, &["commit", "-qm", "init"]);
+    let url = format!("file:///{}", bare.to_string_lossy().replace('\\', "/").trim_start_matches('/'));
+    git(&e.repo, &["push", "-q", &url, "HEAD:main"]);
+    let p = e.json(&["projects", "add", &url, "--json"]);
+    assert_eq!(p["name"], "billing", "{p}");
+    assert!(ws_dir(&e).join("projects").join("billing").join("Cargo.toml").is_file());
+    assert!(ws_dir(&e).join("project-context").join("billing").join("overview.md").is_file());
+    let twice = e.run(&["projects", "add", &url]);
+    assert!(!twice.status.success() && String::from_utf8_lossy(&twice.stderr).contains("already in the workspace"), "{}", String::from_utf8_lossy(&twice.stderr));
+    assert!(!e.run(&["projects", "add", e.repo.to_str().unwrap(), "--into", "x"]).status.success());
 }
 
 /// Portable Workspace P5: environment requirements come from the project's files and are recorded in the workspace;
@@ -1766,4 +1793,28 @@ fn git_kits_are_cloned_by_nexus_and_updates_need_a_new_review() {
     let updated = e.json(&["kits", "update", "probe-kit"]);
     assert_eq!(updated["status"], "changed", "{updated:#}");
     assert_eq!(e.run(&["kits", "add", "--git", "ext::sh -c id"]).status.code(), Some(1), "command-running transports are refused");
+}
+
+/// W4: Claude drafts a project document only through `draft_project_document` — an unverified note labelled for the
+/// person's review, never a direct write into the project context; unknown topics are refused.
+#[test]
+fn claude_drafts_project_documents_for_review() {
+    let e = Env::new();
+    e.setup();
+    let report = e.data.parent().unwrap().join("learn.json");
+    let out = e.cmd(&["launch", "--profile", "fake", "--project", "repo", "-q"]).env("FAKE_CLAUDE_REPORT", &report).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let sid = e.json(&["sessions"])[0]["id"].as_str().unwrap().to_string();
+    let r = mcp_calls(&e, &sid, &[
+        ("draft_project_document", serde_json::json!({ "topic": "architecture", "body": "## Architecture summary\n\nOne crate (verified: Cargo.toml)." })),
+        ("draft_project_document", json(r#"{"topic":"security","body":"x"}"#)),
+    ]);
+    assert_eq!(r[0]["isError"], false, "{}", r[0]);
+    assert_eq!(r[0]["structuredContent"]["drafted"]["topic"], "architecture");
+    assert_eq!(r[1]["isError"], true, "only overview or architecture");
+    let ctx = ws_dir(&e).join("project-context").join("repo");
+    let arch = std::fs::read_to_string(ctx.join("architecture.md")).unwrap();
+    assert!(arch.contains("_Not written yet._"), "the draft does not touch the architecture document");
+    let notes: Vec<String> = std::fs::read_dir(ctx.join("memory")).into_iter().chain(std::fs::read_dir(ctx.join("notes"))).flatten().flatten().map(|f| std::fs::read_to_string(f.path()).unwrap_or_default()).collect();
+    assert!(notes.iter().any(|n| n.contains("One crate (verified: Cargo.toml).") && n.contains("draft") && n.contains("architecture")), "a labelled draft note: {notes:?}");
 }

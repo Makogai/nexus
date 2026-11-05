@@ -143,6 +143,7 @@ impl Server {
                 "create_task" => self.create_task(b, &args),
                 "update_task" => self.update_task(b, &args),
                 "record_memory" => self.record_memory(b, &args),
+                "draft_project_document" => self.draft_project_document(b, &args),
                 "request_attention" => self.request_attention(b, &args),
                 "get_constitution" => self.get_constitution(b, &args),
                 "get_workflow_run" => self.get_workflow_run(b),
@@ -785,6 +786,16 @@ impl Server {
         let item = knowledge::create(&self.conn, &self.data_dir, &b.workspace, &input, Author::Claude).map_err(|e| e.to_string())?;
         Ok(json!({ "recorded": { "id": item.id, "kind": item.kind, "title": item.title, "status": item.status, "branch": item.branch, "commit": item.commit } }))
     }
+
+    /// A draft of the session project's overview or architecture summary (W4): an unverified note for the person to
+    /// accept or set aside in the desktop — never written into the project context directly.
+    fn draft_project_document(&self, b: &Binding, args: &Value) -> Result<Value, String> {
+        let project_id = b.session.project_id.clone().ok_or("this session has no project — drafts belong to a project")?;
+        let topic = args.get("topic").and_then(Value::as_str).ok_or("`topic` is required (overview or architecture)")?;
+        let body = args.get("body").and_then(Value::as_str).ok_or("`body` is required")?;
+        let item = nexus_core::project::learn::record_draft(&self.conn, &self.data_dir, &b.workspace, &project_id, topic, body).map_err(|e| e.to_string())?;
+        Ok(json!({ "drafted": { "id": item.id, "title": item.title, "topic": topic }, "next": "The person reviews the draft in NEXUS (project → Learn) and decides whether to use it." }))
+    }
 }
 
 fn kinds_arg(args: &Value) -> Result<Vec<Kind>, String> {
@@ -1018,6 +1029,15 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
         }),
         json!({
+            "name": "draft_project_document", "title": "Draft a project document",
+            "description": "Propose a draft of this project's overview or architecture summary for the person to review (for example in a learning session). The draft is saved as an unverified note; the person decides whether it becomes the overview or the architecture summary. Write Markdown and say which parts you verified in the code and which you inferred.",
+            "inputSchema": { "type": "object", "properties": {
+                "topic": { "type": "string", "enum": ["overview", "architecture"] },
+                "body": { "type": "string", "minLength": 1, "maxLength": 30000 }
+            }, "required": ["topic", "body"], "additionalProperties": false },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
+        }),
+        json!({
             "name": "get_constitution", "title": "Constitution rules",
             "description": "The effective constitution rules for this session (workspace, stack, project and task scopes applied; mandatory policies cannot be overridden): ids, enforcement (mandatory, rule, guideline) and text. Use it to read the rules of a document listed for on-demand reading (ids such as \"TST-*\" select all rules with that prefix), or to check a rule before acting.",
             "inputSchema": { "type": "object", "properties": {
@@ -1130,7 +1150,7 @@ mod tests {
         assert_eq!(names, [
             "get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint",
             "get_session_activity", "get_context_index", "search_knowledge", "get_document", "list_tasks", "create_task",
-            "get_resume_summary", "get_task", "update_task", "record_memory", "get_constitution", "get_workflow_run", "report_step",
+            "get_resume_summary", "get_task", "update_task", "record_memory", "draft_project_document", "get_constitution", "get_workflow_run", "report_step",
             "request_attention", "get_checkpoints",
         ]);
         assert!(names.iter().all(|n| !n.starts_with("nexus_")), "Claude already prefixes mcp__nexus__");

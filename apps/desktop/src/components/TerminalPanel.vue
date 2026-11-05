@@ -62,8 +62,9 @@ function tone(id: string) {
 </script>
 
 <template>
-  <section class="panel" :class="{ open, fill }" :style="open ? { height } : undefined" aria-label="Terminals">
-    <div v-if="open && !fill" class="drag" title="Drag to resize" @mousedown="startDrag" />
+  <!-- With no terminal open the panel is a compact strip, so it does not take half of every view. -->
+  <section class="panel" :class="{ open, fill, 'no-tabs': sessions.tabs.length === 0 }" :style="open && sessions.tabs.length ? { height } : undefined" aria-label="Terminals">
+    <div v-if="open && !fill && sessions.tabs.length" class="drag" title="Drag to resize" @mousedown="startDrag" />
     <div class="bar">
       <div class="tabs" role="tablist">
         <button
@@ -283,5 +284,13 @@ function tone(id: string) {
 }
 .placeholder p {
   margin: 0;
+}
+/* Empty and open: one line under the bar instead of a tall empty area. */
+.panel.open.no-tabs:not(.fill) .placeholder {
+  height: auto;
+  flex-direction: row;
+  justify-content: flex-start;
+  padding: 8px 14px 10px;
+  font-size: 12.5px;
 }
 </style>

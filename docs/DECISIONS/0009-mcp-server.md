@@ -40,3 +40,9 @@ Status: Accepted; implemented 2026-11-04 (M12) — see "Implementation notes"
   `allowManagedMcpServersOnly` or `strictPluginOnlyCustomization` (`claude::mcp::blocked_by`).
 * **Desktop updates**: the desktop polls `PRAGMA data_version` every 2 s while visible; the baseline is taken before
   the initial data load (a race found by the E2E smoke test and covered by a regression test).
+
+## Implementation notes (2026-11-05, ADR-0040)
+
+`draft_project_document` (topic overview or architecture) lets a session propose a draft of its project's overview or
+architecture summary. It writes an unverified, labelled note through `knowledge::service` — still only a knowledge
+record — and the person decides in the desktop whether it becomes the document. 22 tools.

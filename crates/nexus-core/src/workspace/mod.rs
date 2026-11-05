@@ -225,12 +225,98 @@ pub(crate) fn workspace_readme(name: &str) -> String {
     format!(
         "# {name}\n\nThis folder is a NEXUS workspace.\n\n\
          * `{MANIFEST_FILE}` — portable workspace manifest (identity, schema, template, projects).\n\
-         * `constitutions/`, `rules/`, `skills/`, `workflows/` — how Claude works here.\n\
+         * `constitutions/`, `skills/`, `workflows/`, `integrations/` — how Claude works here.\n\
          * `knowledge/`, `project-context/` — decisions, notes, specs and per-project knowledge.\n\
          * `projects/` — default location for cloned project repositories (ignored by Git).\n\n\
          The workspace can be a Git repository so it follows you to other machines. It never contains\n\
          credentials, session transcripts or the NEXUS database.\n"
     )
+}
+
+/// The folders every new workspace starts with, each with a short `README.md` for people (the knowledge index skips
+/// READMEs). Git cannot carry an empty folder, so the README is what makes the layout travel with the repository.
+pub(crate) const STANDARD_FOLDERS: &[(&str, &str)] = &[
+    (
+        "constitutions",
+        "# Constitutions\n\nRule documents that tell Claude how to work here: stable rule ids, a scope (workspace, stack, \
+         project or task) and an enforcement level. Only documents marked `applies: always` reach every session; the \
+         others are listed by title and read when relevant. Create and edit them in NEXUS → Constitutions. A new or \
+         changed version — including one that arrives through Git — applies only after you approve it.\n",
+    ),
+    (
+        "knowledge",
+        "# Knowledge\n\nWorkspace-wide decisions, notes and specs: Markdown files with a NEXUS header, written in NEXUS → \
+         Knowledge or by Claude through the NEXUS tools. Knowledge about one project belongs in \
+         `project-context/<project>/`.\n",
+    ),
+    (
+        "project-context",
+        "# Project context\n\nOne folder per project, created when you add the project in NEXUS: `project.json`, \
+         overview, architecture, current state, environment requirements, and the project's tasks, decisions, memory \
+         and development records. The project's code stays in its own repository (clones go to `projects/`, which Git \
+         ignores here).\n",
+    ),
+    (
+        "workflows",
+        "# Workflows\n\nStep-by-step processes NEXUS runs on tasks: Claude reports each step, NEXUS verifies the quality \
+         gates. A new or changed workflow — including one that arrives through Git — runs only after you approve it.\n",
+    ),
+];
+
+/// Whether a top-level entry is something a Git host puts into a new repository (Git metadata, a README, a licence,
+/// ignore and attribute files): a workspace can be set up next to these.
+fn is_repository_scaffold(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    matches!(n.as_str(), ".git" | ".gitignore" | ".gitattributes")
+        || ["readme", "license", "licence", "copying"].iter().any(|p| n == *p || n.starts_with(&format!("{p}.")))
+}
+
+/// Whether a new workspace may be set up in `root`: a missing or empty folder, or one that holds only repository
+/// scaffolding (a clone of an empty repository). Anything else is refused — a project is added to a workspace, it
+/// never becomes one, and existing files are never mixed into a workspace by accident.
+pub fn check_new_root(root: &Path) -> Result<()> {
+    if root.join(MANIFEST_FILE).exists() {
+        return Err(CoreError::Conflict(format!("{} already contains a NEXUS workspace — open it instead", root.display())));
+    }
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return Ok(()); // created by `create`
+    };
+    let mut other: Vec<String> = rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !is_repository_scaffold(n)).collect();
+    if other.is_empty() {
+        return Ok(());
+    }
+    other.sort();
+    let shown = other.iter().take(4).cloned().collect::<Vec<_>>().join(", ") + if other.len() > 4 { ", …" } else { "" };
+    Err(CoreError::invalid(format!(
+        "{} already contains files ({shown}) — set up a workspace in a new or empty folder, or in a clone of an empty \
+         repository (a README, licence or .gitignore from your Git host is fine). Projects are added to a workspace; they \
+         never become one",
+        root.display()
+    )))
+}
+
+/// Write the workspace `.gitignore`, or add the lines NEXUS relies on to one that already exists (for example a Git
+/// host's template). The person's own lines stay untouched.
+fn merge_gitignore(root: &Path) -> Result<()> {
+    let path = root.join(".gitignore");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return write_if_missing(&path, WORKSPACE_GITIGNORE);
+    };
+    let have: std::collections::HashSet<&str> = text.lines().map(str::trim).collect();
+    let missing: Vec<&str> = WORKSPACE_GITIGNORE.lines().filter(|l| !l.is_empty() && !l.starts_with('#') && !have.contains(l)).collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let mut out = text.clone();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("\n# NEXUS workspace: project repositories, local-only knowledge and machine-local data stay out of Git.\n");
+    for l in missing {
+        out.push_str(l);
+        out.push('\n');
+    }
+    write_atomic(&path, out.as_bytes())
 }
 
 pub fn read_manifest(root: &Path) -> Result<Manifest> {
@@ -305,20 +391,20 @@ pub fn validate_name(name: &str) -> Result<()> {
 pub fn create(conn: &Connection, root_raw: &str, name: &str, description: &str) -> Result<Workspace> {
     validate_name(name)?;
     let root = paths::validate_user_path(root_raw, Expect::DirOrCreatable)?;
-    if root.join(MANIFEST_FILE).exists() {
-        return Err(CoreError::Conflict(format!(
-            "{} already contains a NEXUS workspace — import it instead",
-            root.display()
-        )));
-    }
+    check_new_root(&root)?;
     ensure_not_registered(conn, &root)?;
     std::fs::create_dir_all(&root).map_err(|e| CoreError::io("cannot create", &root, e))?;
     let root = dunce::canonicalize(&root).map_err(|e| CoreError::io("cannot access", &root, e))?;
 
     let manifest = new_manifest(name, description);
     write_manifest(&root, &manifest)?;
-    write_if_missing(&root.join(".gitignore"), WORKSPACE_GITIGNORE)?;
+    merge_gitignore(&root)?;
     write_if_missing(&root.join("README.md"), &workspace_readme(&manifest.name))?;
+    for (dir, readme) in STANDARD_FOLDERS {
+        let d = root.join(dir);
+        std::fs::create_dir_all(&d).map_err(|e| CoreError::io("cannot create", &d, e))?;
+        write_if_missing(&d.join("README.md"), readme)?;
+    }
     let projects = root.join(manifest.projects_dir());
     std::fs::create_dir_all(&projects).map_err(|e| CoreError::io("cannot create", &projects, e))?;
 
@@ -375,6 +461,10 @@ pub fn new_manifest(name: &str, description: &str) -> Manifest {
 /// If the same workspace id is already registered at another path, the binding is moved.
 pub fn import(conn: &Connection, root_raw: &str) -> Result<Workspace> {
     let root = paths::validate_user_path(root_raw, Expect::ExistingDir)?;
+    if !root.join(MANIFEST_FILE).exists() {
+        // A distinct error: the desktop offers to set up a new workspace in such a folder.
+        return Err(CoreError::not_found(format!("{} has no {MANIFEST_FILE} — it is not a NEXUS workspace yet", root.display())));
+    }
     let manifest = read_manifest(&root)?;
     let existing: Option<String> = conn
         .query_row("SELECT root_path FROM workspaces WHERE id = ?1", [&manifest.id], |r| r.get(0))
