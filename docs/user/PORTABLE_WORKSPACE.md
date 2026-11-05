@@ -8,23 +8,33 @@ computer from their recorded remotes.
 
 ## Create your first workspace
 
-1. Start NEXUS → **Create a workspace** → choose a name and a parent folder → pick a **starter template**:
-   *Minimal*, *Developer*, or *AI Engineering Pro* (27 constitutions, 13 technology rule sets, 11 skills, 7
-   workflows). Only a small core agreement is always in Claude's context; everything else is read when relevant, and
-   technology rules apply only to projects that use the technology.
-2. **Claude profiles** → add your profile(s); **Claude Code setup** helps if Claude Code is not installed yet.
-3. **Projects → Add project** for each repository. NEXUS creates its portable context under
+1. Create an **empty private repository** for the workspace on your Git host (a README, licence or `.gitignore` it
+   adds is fine).
+2. Start NEXUS → **Create a workspace** → *Empty Git repository* → paste its URL, choose where to clone it and a name
+   → pick a **starter template**: *Minimal*, *Developer*, or *AI Engineering Pro* (27 constitutions, 13 technology
+   rule sets, 11 skills, 7 workflows). Only a small core agreement is always in Claude's context; everything else is
+   read when relevant, and technology rules apply only to projects that use the technology. (Without a repository:
+   *New folder*; for a clone you already made: *Existing empty folder*. A folder with other content — a project —
+   never becomes a workspace. Settings → Workspaces → *New workspace…* offers the same choices later.)
+3. NEXUS opens the **Sync** view: **Review & commit → Push**. NEXUS inspects every commit and push for credentials and
+   private data; the first push publishes the workspace to your repository. (Git needs your `user.name` and
+   `user.email` to commit.)
+4. **Claude profiles** → add your profile(s); **Claude Code setup** helps if Claude Code is not installed yet.
+5. **Projects → Add project** for each repository. NEXUS creates its portable context under
    `project-context/<project>/` from the project's own files (nothing is invented). Clones you keep inside the
    workspace go to `projects/` (ignored by Git). A project you register from another folder inside the workspace is
    added to `.gitignore` too, and NEXUS refuses to commit any other repository nested in the workspace.
-4. Make the workspace a Git repository with a **private** remote (in your Git tool: `git init`, add the remote), then
-   **Sync → Review & commit → Push**. NEXUS inspects every commit and push for credentials and private data.
-5. Work as usual. When a Claude session that changed something ends, NEXUS writes a **development record** into the
+6. Work as usual. When a Claude session that changed something ends, NEXUS writes a **development record** into the
    project's context — verified Git facts, what Claude Code's hooks observed, and what Claude reported (marked
    unverified). See it in the project's **Development history**.
-6. Optional: **Sync → Sync policy**. *Manual* (default) publishes nothing on its own; *Automatic with review* asks
+7. Optional: **Sync → Sync policy**. *Manual* (default) publishes nothing on its own; *Automatic with review* asks
    when records are ready; *Trusted automatic* publishes only NEXUS's own records to the remote you approve, after the
    same inspection, and never force-pushes. Tasks, decisions, memories and constitutions always wait for your review.
+
+The workspace starts with `constitutions/`, `knowledge/`, `project-context/` and `workflows/` (each with a short README
+saying what belongs there), `skills/` and `integrations/` from the template, and `projects/` for clones (ignored by
+Git). A workspace created without a repository can be published later: in its folder `git init` and
+`git remote add origin <your private repository>`, then **Sync → Review & commit → Push**.
 
 ## Restore it on another computer
 

@@ -44,3 +44,17 @@ portable *project* knowledge. The specification proposes `nexus.yaml`, `nexus.lo
 * Write paths call `workspace::ensure_writable` (knowledge store for workspace roots, manifest writes, migration,
   templates); the global root in the data folder is unaffected.
 * The spec's YAML file names map to JSON files; if a later stage needs YAML, the schema version is the switch.
+
+## Amendment (2026-11-05): where a new workspace may live, and its standard folders
+* A workspace is created in a new folder, an empty folder, or a clone of an **empty repository** the person
+  prepared (`workspace::check_new_root`: only Git metadata, README, licence, `.gitignore` and `.gitattributes` may
+  already be there). Anything else is refused: a project is added to a workspace, it never becomes one.
+  `workspace_sync::clone_new_workspace` clones the empty repository, creates the workspace and installs the
+  template in one step; the remote stays configured, so the first reviewed commit and push go there. Opening an
+  empty repository as a workspace returns `not_found`, which the desktop turns into that offer; opening a folder
+  without a manifest does the same.
+* An existing `.gitignore` keeps its lines; the lines NEXUS relies on are appended.
+* Every new workspace starts with `constitutions/`, `knowledge/`, `project-context/` and `workflows/`, each with a
+  short `README.md` for people. Git cannot carry empty folders, so without them the layout existed only on the
+  first computer. The knowledge index skips `README.md` files. `skills/` is created by templates (its contents are
+  the workspace AI Kit and are hash-approved), and legacy `rules/`, `tasks/` and `repos/` are not created.

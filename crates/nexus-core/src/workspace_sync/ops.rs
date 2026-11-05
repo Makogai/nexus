@@ -590,8 +590,15 @@ pub fn clone_workspace(conn: &Connection, data_dir: &Path, host_id: &str, url: &
         return Err(refused(conn, &id, "unsafe-incoming", format!("the repository cannot be checked out safely ({} finding(s)) — {}: {}", unsafe_files.len(), f.path, f.message)));
     }
     if !dest.join(workspace::MANIFEST_FILE).is_file() {
+        let empty = workspace::check_new_root(&dest).is_ok();
         cleanup(&dest);
-        return Err(refused(conn, &id, "not-a-workspace", format!("the repository has no {} — it is not a NEXUS workspace", workspace::MANIFEST_FILE)));
+        if !empty {
+            return Err(refused(conn, &id, "not-a-workspace", format!("the repository has no {} — it is not a NEXUS workspace", workspace::MANIFEST_FILE)));
+        }
+        let message = format!("the repository is empty (no {}) — set up a new workspace in it instead", workspace::MANIFEST_FILE);
+        let _ = history::finish(conn, &id, "refused", None, 0, 0, Some("empty-repository"), Some(&message));
+        // A distinct error (not_found): the desktop offers to set up a new workspace in this empty repository.
+        return Err(CoreError::not_found(message));
     }
     // The same workspace already open here: never move its registration silently (restoring a missing folder is fine).
     if let Ok(m) = workspace::read_manifest(&dest)
@@ -618,6 +625,86 @@ pub fn clone_workspace(conn: &Connection, data_dir: &Path, host_id: &str, url: &
     let r = restore(conn, data_dir, &ws)?;
     history::finish(conn, &id, "ok", git::head(&ws.root_path).as_deref(), 0, tree.len(), None, Some(&format!("cloned {} file(s) from {}", tree.len(), git::redact_url(url))))?;
     Ok((ws, r))
+}
+
+/// A new workspace to set up in a cloned repository.
+#[derive(Debug, Clone, Default)]
+pub struct NewWorkspace<'a> {
+    pub name: &'a str,
+    pub description: &'a str,
+    /// Starter template id (ADR-0037); `None` = an empty workspace.
+    pub template: Option<&'a str>,
+}
+
+/// Set up a **new** workspace in an empty repository the person prepared (for example a private repository just
+/// created on their Git host): clone it into a new or empty folder, check that it holds nothing but repository
+/// scaffolding (a README, licence, .gitignore), create the workspace there, install the template and open it. The
+/// remote stays configured, so the first reviewed commit and push (M29) go to it. Anything else in the repository —
+/// a workspace, a project — is refused and the clone removed.
+pub fn clone_new_workspace(conn: &Connection, data_dir: &Path, host_id: &str, url: &str, dest_raw: &str, new: &NewWorkspace<'_>) -> Result<Workspace> {
+    let url = url.trim();
+    if !git::clone_url_allowed(url) {
+        return Err(CoreError::invalid("only https://, ssh://, git@host:path and file:// Git URLs are supported"));
+    }
+    if let Some(t) = new.template {
+        crate::templates::info(t)?; // an unknown template fails before anything is cloned
+    }
+    let dest = crate::paths::validate_user_path(dest_raw, crate::paths::Expect::DirOrCreatable)?;
+    let existed = dest.exists();
+    if existed && std::fs::read_dir(&dest).map(|mut d| d.next().is_some()).unwrap_or(true) {
+        return Err(CoreError::invalid("choose a new or empty folder for the workspace"));
+    }
+    let id = history::begin(conn, "", "clone", host_id, None, None)?;
+    let cleanup = |dest: &Path| {
+        if existed {
+            if let Ok(rd) = std::fs::read_dir(dest) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+                }
+            }
+        } else {
+            let _ = std::fs::remove_dir_all(dest);
+        }
+    };
+    if let Err(e) = git::clone_full(url, &dest) {
+        cleanup(&dest);
+        let kind = serde_json::to_value(e.kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "other".into());
+        return Err(failed(conn, &id, &kind, e.explain()));
+    }
+    let tree = git::ls_tree(&dest, "HEAD").unwrap_or_default();
+    if let Some(f) = tree.iter().flat_map(|(mode, p)| inspect::path_findings(p, mode, Direction::Incoming)).find(|f| f.severity == Severity::Block) {
+        cleanup(&dest);
+        return Err(refused(conn, &id, "unsafe-incoming", format!("the repository cannot be checked out safely — {}: {}", f.path, f.message)));
+    }
+    if dest.join(workspace::MANIFEST_FILE).is_file() {
+        cleanup(&dest);
+        return Err(refused(conn, &id, "already-a-workspace", "the repository already holds a NEXUS workspace — open it from Git instead".into()));
+    }
+    if let Err(e) = workspace::check_new_root(&dest) {
+        cleanup(&dest);
+        return Err(refused(conn, &id, "not-empty", format!("the repository is not empty, so NEXUS does not turn it into a workspace: {e}")));
+    }
+    let set_up = || -> Result<Workspace> {
+        let ws = workspace::create(conn, &dest.to_string_lossy(), new.name, new.description)?;
+        if let Some(t) = new.template
+            && let Err(e) = crate::templates::apply(conn, data_dir, &ws, t)
+        {
+            let _ = workspace::forget(conn, &ws.id);
+            return Err(e);
+        }
+        workspace::activate(conn, &ws.id)
+    };
+    let ws = match set_up() {
+        Ok(ws) => ws,
+        Err(e) => {
+            cleanup(&dest);
+            return Err(refused(conn, &id, "setup", e.to_string()));
+        }
+    };
+    history::set_workspace(conn, &id, &ws.id)?;
+    history::finish(conn, &id, "ok", git::head(&ws.root_path).as_deref(), 0, tree.len(), None, Some(&format!("set up a new workspace in an empty repository from {}", git::redact_url(url))))?;
+    Ok(ws)
 }
 
 // ---- file diffs for review -----------------------------------------------------------------------------------------

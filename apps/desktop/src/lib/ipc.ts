@@ -286,6 +286,9 @@ export const api = {
   syncReviewPush: (workspaceId: string) => call<SyncPushReview>('sync_review_push', { workspaceId }),
   syncPush: (workspaceId: string, token: string) => call<{ remote: string; branch: string; commits: number }>('sync_push', { workspaceId, token }),
   syncClone: (url: string, folder: string) => call<SyncCloned>('sync_clone', { url, folder }),
+  /** Set up a new workspace in an empty repository (clone, create, template, open). */
+  syncCloneNew: (url: string, folder: string, name: string, template: string | null) =>
+    call<Workspace>('sync_clone_new', { url, folder, name, description: null, template }),
   syncRestore: (workspaceId: string) => call<SyncRestore>('sync_restore', { workspaceId }),
   gateRemove: (projectId: string, name: string) => call<boolean>('gate_remove', { projectId, name }),
   gateSuggest: (projectId: string) => call<GateInput[]>('gate_suggest', { projectId }),

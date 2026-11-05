@@ -73,7 +73,12 @@ project repositories stay independent.
 ```
 
 `hooks/` and `templates/` are not created: hook definitions run code (they stay with AI Kits, opt-in per profile,
-ADR-0024), and document templates are compiled into NEXUS. Folders appear only when content is written to them.
+ADR-0024), and document templates are compiled into NEXUS. Every new workspace starts with `constitutions/`,
+`knowledge/`, `project-context/` and `workflows/`, each with a short `README.md` for people (Git cannot carry empty
+folders; the knowledge index skips READMEs), plus `projects/`; the folders inside a project's context appear when
+content is written to them. A workspace can be set up in a new folder, an empty folder, or an empty Git repository the
+person prepared (only host scaffolding such as a README, licence or `.gitignore` is allowed; a folder with other
+content, such as a project, never becomes a workspace).
 
 ## 4. Migration strategy
 

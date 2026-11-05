@@ -933,7 +933,7 @@ fn templates_install_a_progressive_library_scoped_to_its_workspace() {
     let dry = e.run(&["templates", "apply", "ai-engineering-pro"]);
     assert_eq!(dry.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&dry.stdout).contains("Repeat with --yes"));
-    assert!(!ws_dir(&e).join("constitutions").exists(), "nothing written before --yes");
+    assert!(!ws_dir(&e).join("constitutions").join("core.md").exists(), "nothing written before --yes");
     let done = e.json(&["templates", "apply", "ai-engineering-pro", "--yes"]);
     assert!(done["written"].as_array().unwrap().len() > 40, "{done}");
     assert!(e.ok(&["templates", "apply", "ai-engineering-pro"]).contains("nothing to change"));

@@ -238,6 +238,7 @@ pub fn run() {
             commands::sync::sync_review_push,
             commands::sync::sync_push,
             commands::sync::sync_clone,
+            commands::sync::sync_clone_new,
             commands::sync::sync_restore,
             commands::app::backup_list,
             commands::app::backup_create,

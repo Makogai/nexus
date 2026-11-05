@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { ArrowRight, FolderInput, FolderPlus, GitBranch, ShieldCheck, Sparkles, TriangleAlert } from '@lucide/vue'
+import { onMounted, ref } from 'vue'
+import { ArrowRight, FolderInput, FolderPlus, GitBranch, ShieldCheck, TriangleAlert } from '@lucide/vue'
 import CloneWorkspaceForm from '../components/CloneWorkspaceForm.vue'
-import type { SyncCloned, TemplateSummary } from '../lib/types'
+import NewWorkspaceForm, { type WorkspaceSource } from '../components/NewWorkspaceForm.vue'
+import type { SyncCloned } from '../lib/types'
 import { router } from '../router'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { api, toIpcError } from '../lib/ipc'
+import { toIpcError } from '../lib/ipc'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
 import { useProjectStore } from '../stores/projects'
@@ -17,41 +18,22 @@ const profiles = useProfileStore()
 const projects = useProjectStore()
 
 const mode = ref<'choose' | 'create' | 'clone'>('choose')
-const name = ref('Personal')
-const parentDir = ref<string | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
-const templates = ref<TemplateSummary[]>([])
-/** Starter template (ADR-0037); null = an empty workspace. */
-const template = ref<string | null>('developer')
-
-const sep = computed(() => (app.info?.platform === 'windows' ? '\\' : '/'))
-const slug = computed(() => name.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'workspace')
-const targetPath = computed(() => (parentDir.value ? `${parentDir.value}${sep.value}${slug.value}` : null))
+/** A folder picked to open that is not a workspace yet: offered as the place to set one up. */
+const notYet = ref<string | null>(null)
+/** How the create form starts (a fresh form per choice). */
+const start = ref<{ source: WorkspaceSource; folder?: string; url?: string; key: number }>({ source: 'new', key: 0 })
 
 onMounted(() => {
   profiles.detect().catch(() => undefined)
-  api.templateList().then((t) => (templates.value = t)).catch(() => undefined)
 })
 
-async function pickParent() {
-  const dir = await openDialog({ directory: true, title: 'Where should the workspace folder be created?' })
-  if (typeof dir === 'string') parentDir.value = dir
-}
-
-async function create() {
-  if (!targetPath.value) return
-  busy.value = true
+function createWith(source: WorkspaceSource, more: { folder?: string; url?: string } = {}) {
+  start.value = { source, ...more, key: start.value.key + 1 }
   error.value = null
-  try {
-    const ws = await workspaces.create(targetPath.value, name.value.trim(), undefined, template.value)
-    await projects.load(ws.id)
-    app.toast('success', `Workspace “${ws.name}” created`)
-  } catch (e) {
-    error.value = toIpcError(e).message
-  } finally {
-    busy.value = false
-  }
+  notYet.value = null
+  mode.value = 'create'
 }
 
 async function cloned(r: SyncCloned) {
@@ -64,12 +46,15 @@ async function importExisting() {
   if (typeof dir !== 'string') return
   busy.value = true
   error.value = null
+  notYet.value = null
   try {
     const ws = await workspaces.importExisting(dir)
     await projects.load(ws.id)
     app.toast('success', `Workspace “${ws.name}” connected`)
   } catch (e) {
-    error.value = toIpcError(e).message
+    const err = toIpcError(e)
+    error.value = err.message
+    if (err.code === 'not_found') notYet.value = dir
   } finally {
     busy.value = false
   }
@@ -99,11 +84,11 @@ async function importExisting() {
       </div>
 
       <div v-if="mode === 'choose'" class="choices">
-        <button class="choice" :disabled="busy" @click="mode = 'create'">
+        <button class="choice" :disabled="busy" data-onboarding-create @click="createWith('new')">
           <FolderPlus />
           <div>
             <h3>Create a workspace</h3>
-            <p>A new folder you can later turn into a Git repository to sync between machines.</p>
+            <p>In a new folder, an empty folder, or an empty Git repository you already created for it.</p>
           </div>
           <ArrowRight class="arrow" />
         </button>
@@ -126,59 +111,20 @@ async function importExisting() {
       </div>
 
       <div v-else-if="mode === 'clone'" class="card create">
-        <CloneWorkspaceForm @cloned="cloned" @cancel="mode = 'choose'" />
+        <CloneWorkspaceForm offer-setup @cloned="cloned" @setup="(url) => createWith('git', { url })" @cancel="mode = 'choose'" />
       </div>
 
       <div v-else class="card create">
-        <div class="field">
-          <label for="ws-name">Workspace name</label>
-          <input id="ws-name" v-model="name" class="input" autofocus @keydown.enter="create" />
-          <span class="hint">Keep work and personal projects in separate workspaces.</span>
-        </div>
-        <div class="field">
-          <label>Location</label>
-          <div class="input-row">
-            <input class="input mono" :value="targetPath ?? ''" placeholder="Choose a parent folder…" readonly @click="pickParent" />
-            <button class="btn" @click="pickParent">Browse…</button>
-          </div>
-        </div>
-        <div v-if="templates.length" class="field">
-          <label>Starter template</label>
-          <div class="templates" role="radiogroup" aria-label="Starter template">
-            <button
-              v-for="t in templates"
-              :key="t.id"
-              class="template"
-              :class="{ selected: template === t.id }"
-              role="radio"
-              :aria-checked="template === t.id"
-              :data-template="t.id"
-              @click="template = t.id"
-            >
-              <strong>{{ t.title }}</strong>
-              <span class="muted">{{ t.summary }}</span>
-              <span class="counts">
-                {{ t.constitutions }} constitutions<template v-if="t.stackRuleSets"> · {{ t.stackRuleSets }} stack rule sets</template
-                ><template v-if="t.skills"> · {{ t.skills }} skills</template><template v-if="t.workflows"> · {{ t.workflows }} workflows</template>
-              </span>
-            </button>
-            <button class="template" :class="{ selected: template === null }" role="radio" :aria-checked="template === null" data-template="none" @click="template = null">
-              <strong>Empty</strong>
-              <span class="muted">Only the workspace manifest — add constitutions, skills and workflows yourself.</span>
-            </button>
-          </div>
-          <span class="hint">Only a small core agreement is always in Claude's context; the rest is read when relevant. You can add or update a template later.</span>
-        </div>
-        <div class="row">
-          <button class="btn btn-ghost" @click="mode = 'choose'">Back</button>
-          <span class="spacer" />
-          <button class="btn btn-primary" :disabled="!targetPath || !name.trim() || busy" @click="create">
-            <Sparkles /> Create workspace
-          </button>
-        </div>
+        <NewWorkspaceForm :key="start.key" :source="start.source" :folder="start.folder" :url="start.url" @cancel="mode = 'choose'" />
       </div>
 
-      <div v-if="error" class="notice notice-error selectable"><TriangleAlert /> {{ error }}</div>
+      <div v-if="error" class="notice notice-error selectable" data-onboarding-error>
+        <TriangleAlert />
+        <span>
+          {{ error }}
+          <button v-if="notYet" class="btn btn-sm" data-onboarding-setup-here @click="createWith('existing', { folder: notYet })">Set up a new workspace in this folder</button>
+        </span>
+      </div>
 
       <div v-if="profiles.detected.length" class="found">
         <ShieldCheck />
@@ -192,38 +138,8 @@ async function importExisting() {
 </template>
 
 <style scoped>
-.templates {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.template {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  text-align: left;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-}
-.template:hover {
-  border-color: var(--border-strong);
-}
-.template.selected {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-.template .muted {
-  font-size: 12px;
-  line-height: 1.45;
-}
-.template .counts {
-  font-size: 11px;
-  color: var(--text-faint);
+.notice .btn {
+  margin-left: 8px;
 }
 .onboarding {
   height: 100%;

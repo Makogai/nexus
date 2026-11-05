@@ -66,6 +66,9 @@ fn files_under(root: &Path) -> Vec<PathBuf> {
                 if name.to_string_lossy().starts_with('.') || ft.is_symlink() {
                     continue; // hidden files, editor temp files, symlinks (could escape the root)
                 }
+                if ft.is_file() && name.to_string_lossy().eq_ignore_ascii_case("README.md") {
+                    continue; // a folder's notes for people (ADR-0036), not a knowledge document
+                }
                 if ft.is_dir() && depth < MAX_DEPTH {
                     stack.push((e.path(), depth + 1));
                 } else if ft.is_file() && e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("md")) {

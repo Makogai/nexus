@@ -12,7 +12,9 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 
 ## 2. Create or open a workspace
 On the welcome screen choose one:
-* **Create a workspace** — a new folder for your projects and the knowledge that should travel with them.
+* **Create a workspace** — for your projects and the knowledge that should travel with them: in a new folder, in an
+  empty folder, or in an **empty Git repository** you already created for it (a README, licence or `.gitignore` from
+  your Git host is fine). From an empty repository, NEXUS clones it and your first *Sync* push goes there.
 * **Open an existing workspace** — a folder that already contains `nexus-workspace.json`.
 * **Open a workspace from Git** — clone your workspace repository (see [Data and sync](DATA_AND_SYNC.md)); NEXUS
   then lists what this machine still needs (projects to locate, rules to approve, profiles to add).

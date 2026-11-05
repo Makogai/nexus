@@ -31,5 +31,8 @@ workspace.
 * NEXUS never force-pushes, merges or rebases; it never asks for or stores Git credentials.
 
 ## Putting a workspace under Git
-In the workspace folder: `git init`, commit, `git remote add origin <your private repository>`, then use *Sync*.
+Easiest: create an **empty private repository** on your Git host first, then *Create a workspace → Empty Git
+repository* — NEXUS clones it, sets the workspace up, and *Sync → Review & commit → Push* publishes it there. For a
+workspace that already exists: in its folder `git init`, `git remote add origin <your private repository>`, then use
+*Sync* (the first push sets the upstream).
 NEXUS creates a `.gitignore` that keeps machine-local files out.

@@ -191,6 +191,7 @@ fn updates_never_overwrite_changes_and_failed_installs_change_nothing() {
 
     // A write that fails half-way leaves everything as it was.
     let (_t2, conn2, ws2, data2) = workspace_fixture();
+    std::fs::remove_dir_all(ws2.root_path.join("workflows")).unwrap();
     std::fs::write(ws2.root_path.join("workflows"), "a file where the workflows folder must go").unwrap();
     let before = std::fs::read_to_string(ws2.root_path.join(workspace::MANIFEST_FILE)).unwrap();
     let err = apply(&conn2, &data2, &ws2, "developer").unwrap_err();

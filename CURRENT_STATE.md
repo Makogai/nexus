@@ -10,8 +10,11 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
   P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup), P6 (development records, history), P7 (sync policies) and P8 (new-computer restoration) done and committed; the stage's full sequential verification is below. P9: a quality
   review of the template library and of the workspace's Git ignore rules before merging (`docs/TEMPLATE_REVIEW.md`).
-  The branch is merged into `main` with `--no-ff` after P9's checks passed (merge commit "Merge milestone: Portable
-  Workspace"). Not pushed, no release.
+  The branch is merged into `main` with `--no-ff` after P9's checks passed (merge commit `d9b08a9`). Not pushed, no
+  release.
+* Branch **`fix/workspace-setup`** (off `main` at `d9b08a9`): P10 — a new workspace in a prepared place (owner
+  feedback: an empty repository could not be used). Verified and committed on the branch; **not merged** — waits for
+  the owner's approval.
 
 ## Portable Workspace — progress (session 10)
 
@@ -144,6 +147,24 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
       * Doctor finding `projects-ignored` with the repair `ignore-projects`;
       * `.gitignore` gains OS files.
   * **Verified:** see the P9 log below.
+* **P10 — new workspace in a prepared place** (branch `fix/workspace-setup`, ADR-0036 amendment). Owner feedback: an
+  empty private repository could not become the workspace — *Open from Git* refused it (no manifest), *Create* always
+  made a new folder, *Open existing* needed the manifest. Now:
+  * **Where:** *Create a workspace* (onboarding and Settings → *New workspace…*, one shared `NewWorkspaceForm`) offers
+    *New folder*, *Existing empty folder* and *Empty Git repository*. The repository option uses
+    `workspace_sync::clone_new_workspace` (IPC `sync_clone_new`): clone, check, create, template, open, then the Sync
+    Center for the first reviewed commit and push. *Open from Git* on an empty repository and *Open existing* on a
+    folder without a manifest return `not_found` and offer that setup.
+  * **Safety:** `workspace::check_new_root` allows only a new or empty folder or host scaffolding (`.git`, README,
+    licence, `.gitignore`, `.gitattributes`); a project folder or repository is refused, and the clone is removed. An
+    existing `.gitignore` keeps its lines (NEXUS lines appended); an existing README stays.
+  * **Structure:** every new workspace starts with `constitutions/`, `knowledge/`, `project-context/`, `workflows/`,
+    each with a README (Git cannot carry empty folders); the knowledge index skips `README.md`.
+  * **Verified:** core 220 (2 new tests with local bare repositories), workspace 288, clippy ×2, vitest 90, build;
+    desktop E2E `workspace-setup.mjs` 14/14 (new) and every other desktop suite again (sync 18, restore 12, portable 50,
+    smoke 27, constitutions 13, context 9, task-flow 29, workflows 24, profiles-kits 9, attention 27, usage 18, MCP 9),
+    real-Claude kits 19/19. Not rerun: installer suite, T18, hooks/instructions/security/context/workflow/usage
+    real-Claude suites (unaffected).
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 
@@ -233,8 +254,9 @@ suites. Memory: lowest 6.3 GB free.
 
 ## Next actions (in order)
 
-1. Owner: create the first personal workspace (`docs/user/PORTABLE_WORKSPACE.md`) and do MANUAL_CHECKS 33 (your own
-   read of the template library, with `docs/TEMPLATE_REVIEW.md`).
+1. Owner: review and approve `fix/workspace-setup` (P10) → merge `--no-ff`; then create the first personal workspace
+   from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`) and do MANUAL_CHECKS 33 (with
+   `docs/TEMPLATE_REVIEW.md`).
 2. Owner decisions still open from Beta readiness (B5): identifier + publisher (ADR-0034), product name and `nexus://`,
    licence (ADR-0035), code signing, updater.
 3. Owner manual checks: MANUAL_CHECKS 27 (notification look, lock screen, click after quitting), 28–32.
