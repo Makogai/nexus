@@ -83,50 +83,66 @@ jobs:
         working-directory: apps/desktop
         run: npx tauri build --debug --no-bundle --features e2e-webview-debugging
       - name: End-to-end smoke test
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/run-smoke.mjs
       - name: End-to-end task flow with a NEXUS restart
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/task-flow.mjs
       - name: End-to-end profile diagnostics and AI Kits
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/profiles-kits.mjs
       - name: End-to-end notifications and session attention
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/attention.mjs
       - name: End-to-end Constitution Manager
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/constitutions.mjs
       - name: End-to-end Context Manager
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/context.mjs
       - name: End-to-end Workflow Engine
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/workflows.mjs
       - name: End-to-end Usage dashboard
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/usage.mjs
       - name: End-to-end Sync Center
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/sync.mjs
       - name: MCP interoperability (official TypeScript SDK client)
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/mcp-interop.mjs
       - name: End-to-end Portable Workspace (schema, templates, Doctor, projects, records, sync policy)
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/portable.mjs
       - name: End-to-end new-computer restoration (two app instances)
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/restore.mjs
       - name: End-to-end new workspace in a prepared place, project from Git
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/workspace-setup.mjs
       - name: End-to-end project workbench (knowledge editing, explorer, learning)
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/workbench.mjs
       - name: Installer (debug profile, production configuration, CLI as sidecar)
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: npx tauri build --debug --config src-tauri/tauri.installer.conf.json
       - name: Installed-app verification (install, CLI/MCP/self-check/notifications, uninstall keeps data)
+        if: ${{ !cancelled() }}
         working-directory: apps/desktop
         run: node e2e/installed.mjs

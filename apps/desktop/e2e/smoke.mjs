@@ -97,10 +97,16 @@ try {
   )
   check('launch dialog applies the profile default rigor', selected === 'Prototype', selected)
   await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] footer .btn-primary')][0].click(), true`)
-  const raw = await cdp.waitFor(
-    `(() => { const r = [...document.querySelectorAll('.xterm-rows')].pop(); const t = r?.innerText.replace(/\\n/g, '') ?? ''; const m = t.match(/\\{"args".*"fakeClaude":true\\}/); return m && m[0] })()`,
-    20000,
-  )
+  // A first launch on a cold CI runner can take a while (the session host, `nexus mcp`, fake Claude starting up).
+  const raw = await cdp
+    .waitFor(
+      `(() => { const r = [...document.querySelectorAll('.xterm-rows')].pop(); const t = r?.innerText.replace(/\\n/g, '') ?? ''; const m = t.match(/\\{"args".*"fakeClaude":true\\}/); return m && m[0] })()`,
+      60000,
+    )
+    .catch(async (e) => {
+      const shown = await cdp.evaluate(`[...document.querySelectorAll('.xterm-rows')].map((r) => r.innerText).join('\\n---\\n').slice(-1500)`).catch(() => '')
+      throw new Error(`${e.message}\n--- terminal ---\n${shown || '(no terminal rows)'}`)
+    })
   const report = JSON.parse(raw)
   const env = report.env
   // Same folder, not the same spelling: CI temp paths use 8.3 short names (C:\Users\RUNNER~1) that NEXUS stores in long form.
