@@ -1,6 +1,11 @@
 //! NEXUS Desktop: Tauri shell around `nexus-core` with an integrated PTY terminal.
 
+// The test-only WebView2 debugging feature can never be part of a release build (threat T18, ADR-0015).
+#[cfg(all(feature = "e2e-webview-debugging", not(debug_assertions)))]
+compile_error!("the `e2e-webview-debugging` feature is for debug test builds only and cannot be compiled into a release build");
+
 pub mod commands;
+pub mod self_check;
 pub mod error;
 pub mod notifier;
 pub mod pty;
@@ -26,7 +31,13 @@ fn init_tracing() {
 fn open_context() -> Result<AppCtx, Box<dyn std::error::Error>> {
     let data_dir = paths::data_dir()?;
     let db_path = data_dir.join(db::DB_FILE);
+    // A restore scheduled in Settings is applied before the database is opened (ADR-0032).
+    let restore = db::backup::apply_pending(&data_dir).map(|r| r.map(|x| x.restored).map_err(|e| e.to_string()));
     let (conn, recovery) = db::open_or_recover(&db_path)?;
+    // At most one automatic backup a day (the newest 7 are kept).
+    if let Err(e) = db::backup::automatic_if_due(&conn, &data_dir) {
+        tracing::warn!(error = %e, "automatic backup failed");
+    }
     // Single instance: any earlier desktop host is dead; its live sessions become interrupted (ADR-0014).
     let me = host::register(&conn, HostKind::Desktop)?;
     host::stop_others(&conn, HostKind::Desktop, &me.id)?;
@@ -40,7 +51,7 @@ fn open_context() -> Result<AppCtx, Box<dyn std::error::Error>> {
     }
     let home = paths::home_dir()?;
     tracing::info!(data_dir = %data_dir.display(), "NEXUS data directory");
-    Ok(AppCtx::new(conn, home, data_dir, db_path, me, recovery))
+    Ok(AppCtx::new(conn, home, data_dir, db_path, me, recovery, restore))
 }
 
 /// Keep this host's lease fresh and reconcile sessions of hosts that died (e.g. a crashed `nexus launch`).
@@ -92,7 +103,18 @@ pub fn run() {
     let app = app.plugin(tauri_plugin_notification::init());
     let app = app
         .setup(|app| {
-            let ctx: Ctx = Arc::new(open_context()?);
+            let ctx: Ctx = match open_context() {
+                Ok(c) => Arc::new(c),
+                // Never start with an empty database instead: explain, keep everything, stop.
+                Err(e) => {
+                    let data = paths::data_dir().map(|d| d.display().to_string()).unwrap_or_default();
+                    webview_guard::refuse_to_start(&format!(
+                        "NEXUS could not open its database:\n\n{e}\n\nNothing was deleted. Your data is in {data} \
+                         (backups in its \"backups\" folder). See the troubleshooting guide, or restore a backup with \
+                         `nexus backup list` / `nexus backup restore <id>`."
+                    ));
+                }
+            };
             if let Some(id) = std::env::args().find_map(|a| notifier::parse_activation(&a)) {
                 ctx.attention.set_activation(id);
             }
@@ -194,6 +216,12 @@ pub fn run() {
             commands::sync::sync_push,
             commands::sync::sync_clone,
             commands::sync::sync_restore,
+            commands::app::backup_list,
+            commands::app::backup_create,
+            commands::app::backup_schedule_restore,
+            commands::app::backup_cancel_restore,
+            commands::app::backup_delete,
+            commands::app::app_restart,
             commands::usage::usage_report,
             commands::usage::usage_sessions,
             commands::usage::usage_scan,

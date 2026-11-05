@@ -1,6 +1,7 @@
 //! `nexus` — the NEXUS command-line interface. Every command is a thin layer over `nexus-core`; nothing here
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
+mod backup;
 mod constitution;
 mod context;
 mod diagnose;
@@ -81,6 +82,9 @@ enum Command {
     /// Workspace synchronisation through Git: status, fetch, fast-forward pull, reviewed commit and push, clone (ADR-0031).
     #[command(subcommand)]
     Sync(sync::SyncCmd),
+    /// Backups of NEXUS's machine-local state (database, global knowledge) and a safe restore (ADR-0032).
+    #[command(subcommand)]
+    Backup(backup::BackupCmd),
     /// Constitutions: structured rules (articles, sections, rules with ids and enforcement) by scope.
     #[command(subcommand)]
     Constitution(constitution::ConstitutionCmd),
@@ -255,6 +259,7 @@ fn main() -> ExitCode {
         Command::Context(c) => context::run(&ctx, c).map(|_| 0),
         Command::Usage(a) => usage::run(&ctx, a),
         Command::Sync(c) => sync::run(&ctx, c),
+        Command::Backup(c) => backup::run(&ctx, c),
         Command::Workflow(c) => workflow::run_workflow(&ctx, c),
         Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),

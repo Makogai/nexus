@@ -36,10 +36,14 @@ async function boot() {
       app.toast(
         'error',
         `NEXUS's database could not be read and was kept as ${app.info.recovery.quarantinedTo}. A fresh database was ` +
-          'created — reopen your workspaces from Settings (their projects and portable data live in the workspace folders).',
+          (app.info.recovery.latestBackup
+            ? `created — you can restore the latest backup (${app.info.recovery.latestBackup}) under Settings → Backups.`
+            : 'created — reopen your workspaces from Settings (their projects and portable data live in the workspace folders).'),
         60_000,
       )
     }
+    if (app.info?.restored) app.toast('success', `Backup ${app.info.restored} restored. The previous state was backed up and kept.`, 15_000)
+    if (app.info?.restoreError) app.toast('error', `The scheduled restore did not happen — your data is unchanged: ${app.info.restoreError}`, 60_000)
     await app.markDataBaseline()
     await Promise.all([workspaces.load(), profiles.load(), sessions.subscribe()])
     await sessions.load()

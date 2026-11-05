@@ -86,11 +86,13 @@
     add `test` for the test project → project page → *Run workflow* (balanced) → Claude reads `get_workflow_run`, works
     and calls `report_step`; the run shows *AI-reported* for steps without gates and *Verified by gates* once NEXUS ran
     `test`. Nothing is published or pushed by the workflow.
-27. **Installed build notifications** (release candidate only): install the NSIS build → *Notifications → Send a test
-    notification* → the sender is **NEXUS** (not Windows PowerShell) → lock the screen (Win+L) while a session raises a
-    permission prompt → the lock screen shows only "NEXUS — A Claude session asks for a permission" → unlock, quit NEXUS,
-    click the notification in the Action Center → NEXUS starts and opens that session (resumable). Uninstall →
-    `HKCU\Software\Classes\AppUserModelId\dev.nexus.desktop` and `HKCU\Software\Classes\nexus` are gone.
+27. **Installed build notifications** (release candidate only). *Automated by `e2e/installed.mjs`:* the toast is filed
+    under the NEXUS sender (AppUserModelID registered with display name NEXUS), its text has no paths or ids, the
+    `nexus://` activation reaches the running app, uninstall removes the registrations. *Still manual — what only eyes
+    and a lock screen show:* install the NSIS build → *Notifications → Send a test notification* → the toast shows
+    **NEXUS** and its icon (not "Windows PowerShell") → lock the screen (Win+L) while a session raises a permission
+    prompt → the lock screen shows only "NEXUS — A Claude session asks for a permission" → unlock, **quit** NEXUS,
+    click the notification in the Action Center → NEXUS starts and opens that session.
 
 28. **Usage with a signed-in profile** (Personal profile, a short real session): run one prompt → *Usage* (or
     `nexus usage --days 1`) → the session shows *Parsed* tokens and requests; compare with Claude's `/cost` (or
@@ -108,6 +110,12 @@
     commit → push (your credential manager signs in; NEXUS never asks) → on a second machine or folder: welcome screen
     → *Open a workspace from Git* → the restore checklist → change a rule on one side, pull on the other → the rule is
     inactive until approved. Try a wrong URL and going offline: the history explains both.
+
+32. **Installer, by hand** (release candidate): double-click the installer → it installs without administrator rights
+    into `%LOCALAPPDATA%\Programs\NEXUS` (SmartScreen warns while unsigned) → Start Menu *NEXUS* → the welcome screen →
+    create a workspace, add a profile, launch Claude, open a shell → *Settings → Command-line tool* shows `nexus.exe` →
+    *Settings → Backups → Back up now* → *Restore…* restarts and restores → uninstall from Windows Settings → your data
+    in `%LOCALAPPDATA%\NEXUS` is still there; reinstall → everything is back.
 
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.
