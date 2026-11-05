@@ -96,7 +96,16 @@ pub fn create(conn: &Connection, data_dir: &Path, ws: &Workspace, input: &Create
         source: if author == Author::Claude { "claude" } else { "human" },
         fields,
     };
-    let written = if input.global { store::create_in(&global_root(data_dir).dir, new)? } else { store::create(&ws.root_path, new)? };
+    // Shared documents of a project with a context folder live there (schema 2, Portable Workspace P4).
+    let folder = match (&input.project_id, new.privacy) {
+        (Some(pid), Privacy::Shared) if !input.global => crate::project::context::doc_folder(&ws.root_path, pid, kind),
+        _ => None,
+    };
+    let written = match folder {
+        _ if input.global => store::create_in(&global_root(data_dir).dir, new)?,
+        Some(f) => store::create_in_folder(&ws.root_path, &f, new)?,
+        None => store::create(&ws.root_path, new)?,
+    };
     refresh(conn, data_dir, ws)?;
     let item = index::get(conn, &ws.id, &written.id)?;
     // A person creating an always-on rule in NEXUS has reviewed it by definition.

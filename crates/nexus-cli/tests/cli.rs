@@ -377,7 +377,11 @@ fn hook_handler_records_activity_and_never_fails_claude() {
 
     let out = hook(&e, sid, "session-start", &format!(r#"{{"session_id":"{csid}","source":"startup","cwd":"{repo}"}}"#));
     assert!(out.status.success());
-    assert!(out.stdout.is_empty(), "nothing to recover on a first start: no injection");
+    let first = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        first.is_empty() || (first.contains("\"additionalContext\":\"NEXUS knowledge:") && first.len() < 400),
+        "nothing to recover on a first start — at most the one-line knowledge pointer: {first}"
+    );
     for _ in 0..2 {
         assert!(hook(&e, sid, "stop", "{}").status.success());
     }
@@ -534,7 +538,9 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     let task = e.json(&["tasks", "add", "Ship login", "--priority", "high", "--project", "repo"]);
     let id = task["id"].as_str().unwrap().to_string();
     let path = PathBuf::from(task["path"].as_str().unwrap());
-    assert!(path.starts_with(ws_dir(&e).join("tasks")) && path.ends_with(format!("{id}.md")), "file name = id");
+    // A project's tasks live in its portable context folder (schema 2, Portable Workspace P4).
+    let tasks_dir = ws_dir(&e).join("project-context").join("repo").join("tasks");
+    assert!(path.starts_with(&tasks_dir) && path.ends_with(format!("{id}.md")), "file name = id: {}", path.display());
 
     let moved = e.ok(&["tasks", "move", &id[id.len() - 8..], "in-progress", "--log", "Started on the form"]);
     assert!(moved.contains("in-progress"), "{moved}");
@@ -560,13 +566,13 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     assert_eq!(leaked.status.code(), Some(1));
 
     // Index health: a broken file and a duplicated id are reported, not hidden or guessed.
-    std::fs::write(ws_dir(&e).join("tasks").join("broken.md"), "---\nnexus: 1\nkind: task\n---\n").unwrap();
-    std::fs::copy(&path, ws_dir(&e).join("tasks").join("copy-of-task.md")).unwrap();
+    std::fs::write(tasks_dir.join("broken.md"), "---\nnexus: 1\nkind: task\n---\n").unwrap();
+    std::fs::copy(&path, tasks_dir.join("copy-of-task.md")).unwrap();
     let all = e.json(&["knowledge", "list", "--invalid"]);
     let problems = all.as_array().unwrap().iter().filter(|i| i["valid"] == false || !i["conflict"].is_null()).count();
     assert_eq!(problems, 3, "the broken file and both copies of the duplicated id: {all:#}");
     assert_eq!(e.run(&["tasks", "move", &id, "done"]).status.code(), Some(1), "a duplicated id is a conflict");
-    std::fs::remove_file(ws_dir(&e).join("tasks").join("copy-of-task.md")).unwrap();
+    std::fs::remove_file(tasks_dir.join("copy-of-task.md")).unwrap();
 
     // Index recovery: the index is rebuilt from the files alone.
     let before = e.json(&["knowledge", "list"]).as_array().unwrap().len();
@@ -992,6 +998,32 @@ fn workspace_doctor_reports_and_repairs_after_review() {
     assert!(!e.run(&["workspaces", "doctor", "--repair", "format-disk", "--yes"]).status.success(), "only known repairs");
 }
 
+/// Portable Workspace P4: `projects add` gives a project its portable context; `projects scan` reports projects outside
+/// the workspace and repositories in the clone folder without registering them; `projects context` keeps the person's
+/// documents.
+#[test]
+fn projects_get_a_portable_context_and_scanning_registers_nothing() {
+    let e = Env::new();
+    e.setup(); // the repo lives outside the workspace folder
+    let ctx = ws_dir(&e).join("project-context").join("repo");
+    for f in ["project.json", "overview.md", "architecture.md", "current-state.md"] {
+        assert!(ctx.join(f).is_file(), "{f}");
+    }
+    let stray = ws_dir(&e).join("projects").join("stray");
+    std::fs::create_dir_all(&stray).unwrap();
+    assert!(Command::new("git").args(["init", "-q"]).current_dir(&stray).status().unwrap().success());
+    let scan = e.json(&["projects", "scan"]);
+    assert_eq!(scan["external"], serde_json::json!(["repo"]));
+    assert_eq!(scan["found"][0]["rel"], "projects/stray");
+    assert_eq!(scan["found"][0]["status"], "new");
+    assert_eq!(e.json(&["projects", "list"]).as_array().unwrap().len(), 1, "scanning registers nothing");
+    std::fs::write(ctx.join("overview.md"), std::fs::read_to_string(ctx.join("overview.md")).unwrap() + "\nMy notes.\n").unwrap();
+    let r = e.json(&["projects", "context", "repo"]);
+    assert!(r["kept"].as_array().unwrap().iter().any(|k| k.as_str().unwrap().ends_with("overview.md")), "{r}");
+    assert!(std::fs::read_to_string(ctx.join("overview.md")).unwrap().contains("My notes."));
+    assert!(!e.run(&["projects", "clone", "repo"]).status.success(), "an available project is not cloned again");
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {
@@ -1204,7 +1236,7 @@ fn mcp_knowledge_is_scoped_to_the_sessions_workspace() {
     assert_eq!(r[2]["isError"], true);
     assert_eq!(r[3]["isError"], true);
     let created = &r[4]["structuredContent"]["created"];
-    let file = ws_dir(&e).join("tasks").join(format!("{}.md", created["id"].as_str().unwrap()));
+    let file = ws_dir(&e).join("project-context").join("repo").join("tasks").join(format!("{}.md", created["id"].as_str().unwrap()));
     let text = std::fs::read_to_string(file).unwrap();
     assert!(text.contains("source: claude") && text.contains("project: "), "Claude's task is attributed and bound to the session project");
     assert_eq!(r[5]["structuredContent"]["summary"]["openTasks"], 2);
@@ -1542,7 +1574,8 @@ fn session_end_proposes_memories_and_only_approval_makes_knowledge() {
     let csid = session["claudeSessionId"].as_str().unwrap();
     hook(&e, &sid, "session-end", &format!(r#"{{"hook_event_name":"SessionEnd","reason":"prompt_input_exit","session_id":"{csid}"}}"#));
 
-    assert!(e.json(&["knowledge", "list"]).as_array().unwrap().is_empty(), "nothing becomes knowledge on its own");
+    let memory: Vec<Value> = e.json(&["knowledge", "list"]).as_array().unwrap().iter().filter(|i| i["kind"] == "note" || i["kind"] == "decision").cloned().collect();
+    assert!(memory.is_empty(), "nothing becomes knowledge on its own: {memory:?}");
     let pending = e.json(&["knowledge", "proposals", "list"]);
     let pending = pending.as_array().unwrap();
     assert_eq!(pending.len(), 2, "decision + blocker; routine progress is not memory: {pending:#?}");

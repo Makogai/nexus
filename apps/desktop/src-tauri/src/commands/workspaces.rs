@@ -3,7 +3,7 @@ use tauri::State;
 use nexus_core::{templates, workspace_doctor};
 use nexus_core::workspace::{self, Workspace, migrate};
 
-use crate::error::IpcResult;
+use crate::error::{IpcResult, blocking};
 use crate::state::Ctx;
 
 #[tauri::command]
@@ -29,28 +29,45 @@ pub fn workspace_create(ctx: State<'_, Ctx>, path: String, name: String, descrip
     Ok(workspace::activate(&db, &ws.id)?)
 }
 
-/// Workspace Doctor: health of the workspace with recommendations and repairs (Portable Workspace P3).
+fn own_conn(ctx: &Ctx) -> IpcResult<nexus_core::db::Connection> {
+    Ok(nexus_core::db::open(&ctx.data_dir.join(nexus_core::db::DB_FILE))?)
+}
+
+/// Workspace Doctor: health of the workspace with recommendations and repairs (Portable Workspace P3). Probing
+/// tools and scanning take a moment, so it runs on its own connection.
 #[tauri::command]
-pub fn workspace_doctor(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResult<workspace_doctor::Report> {
-    let db = ctx.db();
-    let ws = workspace::get(&db, &workspace_id)?;
-    Ok(workspace_doctor::run(&db, &ctx.data_dir, &ws, &workspace_doctor::Options { home: &ctx.home, probe_tools: true })?)
+pub async fn workspace_doctor(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResult<workspace_doctor::Report> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = workspace::get(&c, &workspace_id)?;
+        Ok(workspace_doctor::run(&c, &ctx.data_dir, &ws, &workspace_doctor::Options { home: &ctx.home, probe_tools: true })?)
+    })
+    .await
 }
 
 /// What a repair would change. Read-only.
 #[tauri::command]
-pub fn workspace_repair_plan(ctx: State<'_, Ctx>, workspace_id: String, repair: String) -> IpcResult<workspace_doctor::RepairPlan> {
-    let db = ctx.db();
-    let ws = workspace::get(&db, &workspace_id)?;
-    Ok(workspace_doctor::repair_plan(&db, &ctx.data_dir, &ws, &repair)?)
+pub async fn workspace_repair_plan(ctx: State<'_, Ctx>, workspace_id: String, repair: String) -> IpcResult<workspace_doctor::RepairPlan> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = workspace::get(&c, &workspace_id)?;
+        Ok(workspace_doctor::repair_plan(&c, &ctx.data_dir, &ws, &repair)?)
+    })
+    .await
 }
 
-/// Apply a repair the person reviewed.
+/// Apply a repair the person reviewed (cloning uses the network: own connection).
 #[tauri::command]
-pub fn workspace_repair(ctx: State<'_, Ctx>, workspace_id: String, repair: String) -> IpcResult<workspace_doctor::Repaired> {
-    let db = ctx.db();
-    let ws = workspace::get(&db, &workspace_id)?;
-    Ok(workspace_doctor::repair(&db, &ctx.data_dir, &ws, &repair)?)
+pub async fn workspace_repair(ctx: State<'_, Ctx>, workspace_id: String, repair: String) -> IpcResult<workspace_doctor::Repaired> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = workspace::get(&c, &workspace_id)?;
+        Ok(workspace_doctor::repair(&c, &ctx.data_dir, &ws, &repair)?)
+    })
+    .await
 }
 
 /// The built-in workspace templates (ADR-0037).

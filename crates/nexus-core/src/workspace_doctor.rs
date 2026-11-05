@@ -250,11 +250,36 @@ pub fn run(conn: &Connection, data_dir: &Path, ws: &Workspace, opts: &Options<'_
 
     // ---- projects ----
     let projects = project::list(conn, &ws.id)?;
+    let scan = project::discovery::scan(conn, ws).ok();
     let missing: Vec<String> = projects.iter().filter(|p| !p.available).map(|p| p.name.clone()).collect();
     if !missing.is_empty() {
-        out.push(f("projects-missing", "projects", Status::Warn, format!("{} project(s) are not on this computer", missing.len())).detail(missing).recommend("Clone them into the workspace's projects folder or locate an existing copy.").go("projects"));
+        let cloneable = scan.as_ref().map(|s| s.missing.iter().filter(|m| m.can_clone).count()).unwrap_or(0);
+        let mut finding = f("projects-missing", "projects", Status::Warn, format!("{} project(s) are not on this computer", missing.len()))
+            .detail(missing)
+            .recommend("Clone them from their recorded remotes into the workspace's clone folder, or locate an existing copy.")
+            .go("projects");
+        if cloneable > 0 {
+            finding = finding.repair("clone-missing", format!("Clone {cloneable} project(s) from their remotes"));
+        }
+        out.push(finding);
     } else if !projects.is_empty() {
         out.push(f("projects", "projects", Status::Ok, format!("{} project(s) available", projects.len())));
+    }
+    if let Some(s) = &scan {
+        let known: Vec<String> = s.found.iter().filter(|x| x.status == "known").map(|x| x.rel.clone()).collect();
+        if !known.is_empty() {
+            out.push(f("projects-known", "projects", Status::Info, "clones in the workspace belong to projects that are not linked on this computer").detail(known).repair("link-known", "Link the clones to their projects"));
+        }
+        let new: Vec<String> = s.found.iter().filter(|x| x.status == "new").map(|x| x.rel.clone()).collect();
+        if !new.is_empty() {
+            out.push(f("projects-unregistered", "projects", Status::Info, format!("{} repository(ies) in the clone folder are not registered", new.len())).detail(new).recommend("Review and register them in Projects — nothing in them is run.").go("projects"));
+        }
+    }
+    if manifest.schema_version >= 2 {
+        let without: Vec<String> = projects.iter().filter(|p| project::context::context_rel(root, &p.id).is_none()).map(|p| p.name.clone()).collect();
+        if !without.is_empty() {
+            out.push(f("project-context", "projects", Status::Info, format!("{} project(s) have no portable context yet", without.len())).detail(without).recommend("Project context keeps an overview, architecture notes, the current state and the project's knowledge in the workspace.").repair("init-context", "Create the project context"));
+        }
     }
 
     // ---- tools ----
@@ -384,7 +409,7 @@ pub struct Repaired {
 }
 
 /// What repair `id` would change. Read-only.
-pub fn repair_plan(_conn: &Connection, _data_dir: &Path, ws: &Workspace, id: &str) -> Result<RepairPlan> {
+pub fn repair_plan(conn: &Connection, _data_dir: &Path, ws: &Workspace, id: &str) -> Result<RepairPlan> {
     let root = &ws.root_path;
     let plan = |title: &str, changes: Vec<String>, notes: Vec<String>| RepairPlan { id: id.to_string(), title: title.to_string(), changes, notes };
     Ok(match id {
@@ -399,6 +424,26 @@ pub fn repair_plan(_conn: &Connection, _data_dir: &Path, ws: &Workspace, id: &st
             plan("Create the clone folder", vec![format!("create {}/ (ignored by Git)", m.projects_dir())], vec![])
         }
         "rebuild-index" => plan("Rebuild the knowledge index", vec!["re-read every knowledge document into this machine's index".into()], vec!["No workspace file changes.".into()]),
+        "clone-missing" => {
+            let s = project::discovery::scan(conn, ws)?;
+            plan(
+                "Clone missing projects",
+                s.missing.iter().filter(|m| m.can_clone).map(|m| format!("git clone {} → {}", m.remote_url.as_deref().unwrap_or(""), m.clone_to.as_deref().unwrap_or(""))).collect(),
+                vec!["Uses your Git credentials; nothing in the repositories is run. Projects without a remote are located by hand.".into()],
+            )
+        }
+        "link-known" => {
+            let s = project::discovery::scan(conn, ws)?;
+            plan("Link clones to their projects", s.found.iter().filter(|x| x.status == "known").map(|x| format!("link {} (same remote)", x.rel)).collect(), vec![])
+        }
+        "init-context" => {
+            let ps = project::list(conn, &ws.id)?;
+            plan(
+                "Create the project context",
+                ps.iter().filter(|p| project::context::context_rel(root, &p.id).is_none()).map(|p| format!("create {}/{}/ (project.json, overview, architecture, current state)", project::context::CONTEXT_DIR, project::context::slug(&p.name))).collect(),
+                vec!["Facts come from the projects' files and Git and name their source; nothing is invented.".into()],
+            )
+        }
         "register-workspace-skills" => plan(
             "Register the workspace skills for review",
             vec![format!("register {}/skills as the workspace AI Kit (not approved yet)", root.display())],
@@ -469,6 +514,37 @@ pub fn repair(conn: &Connection, data_dir: &Path, ws: &Workspace, id: &str) -> R
         "rebuild-index" => {
             let r = knowledge::service::rebuild(conn, data_dir, ws)?;
             done(format!("{} document(s) indexed, {} invalid", r.scanned, r.invalid))
+        }
+        "clone-missing" => {
+            let s = project::discovery::scan(conn, ws)?;
+            let mut cloned = 0;
+            let mut failed = Vec::new();
+            for m in s.missing.iter().filter(|m| m.can_clone) {
+                match project::discovery::clone_missing(conn, data_dir, ws, &m.id, m.clone_to.as_deref()) {
+                    Ok(_) => cloned += 1,
+                    Err(e) => failed.push(format!("{}: {e}", m.name)),
+                }
+            }
+            if failed.is_empty() { done(format!("cloned {cloned} project(s)")) } else { Err(CoreError::invalid(format!("cloned {cloned}; failed: {}", failed.join("; ")))) }
+        }
+        "link-known" => {
+            let s = project::discovery::scan(conn, ws)?;
+            let mut n = 0;
+            for x in s.found.iter().filter(|x| x.status == "known") {
+                if let Some(id) = &x.project_id {
+                    project::locate(conn, id, &x.path.to_string_lossy())?;
+                    n += 1;
+                }
+            }
+            done(format!("linked {n} clone(s)"))
+        }
+        "init-context" => {
+            let mut n = 0;
+            for p in project::list(conn, &ws.id)?.iter().filter(|p| project::context::context_rel(root, &p.id).is_none()) {
+                project::context::init(conn, data_dir, ws, &p.id)?;
+                n += 1;
+            }
+            done(format!("created the context of {n} project(s)"))
         }
         "register-workspace-skills" => {
             let k = kits::register_workspace(conn, data_dir, ws, false)?;

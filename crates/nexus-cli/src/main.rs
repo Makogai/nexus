@@ -170,6 +170,18 @@ enum ProjectCmd {
     },
     /// Bind a project that is not on this machine to FOLDER.
     Locate { project: String, folder: String },
+    /// Repositories in the workspace's clone folder (registered, belonging to a missing project, or new) and projects
+    /// missing on this computer. Read-only.
+    Scan,
+    /// Clone a missing project from its recorded remote into the clone folder (or --to, relative to the workspace).
+    Clone {
+        project: String,
+        #[arg(long, value_name = "FOLDER")]
+        to: Option<String>,
+    },
+    /// Create or refresh a project's portable context (project-context/<project>/): the overview and architecture
+    /// you wrote are kept; project.json and current-state.md are regenerated.
+    Context { project: String },
     /// Unregister a project (its folder and repository are not touched).
     Remove { project: String },
     /// Where a project stands: verified Git state, saved history (tasks, notes, checkpoints, sessions) and the next
@@ -611,11 +623,53 @@ fn cmd_projects(ctx: &Ctx, cmd: ProjectCmd) -> nexus_core::Result<()> {
             out::table(headers, &table);
         }
         ProjectCmd::Add { folder, name } => {
-            let p = project::register(&conn, &ws.id, &folder, name.as_deref())?;
+            let p = project::register_with_context(&conn, &ctx.data_dir, &ws.id, &folder, name.as_deref())?;
             if ctx.json {
                 out::json(&p);
             } else {
                 println!("added {} [{}] to {}", p.name, p.stack.stacks.join(", "), ws.name);
+            }
+        }
+        ProjectCmd::Scan => {
+            let s = project::discovery::scan(&conn, &ws)?;
+            if ctx.json {
+                out::json(&s);
+                return Ok(());
+            }
+            println!("clone folder: {}/", s.projects_dir);
+            for f in &s.found {
+                let what = match f.status {
+                    "registered" => "registered".to_string(),
+                    "known" => "belongs to a project missing here — `nexus projects locate` it".to_string(),
+                    _ => "new — review it and `nexus projects add` it".to_string(),
+                };
+                println!("  {} [{}] {}", f.rel, f.stacks.join(", "), what);
+            }
+            for m in &s.missing {
+                match (&m.clone_to, &m.reason) {
+                    (Some(to), _) => println!("  missing: {} — `nexus projects clone \"{}\"` → {to}", m.name, m.name),
+                    (None, Some(r)) => println!("  missing: {} — {r}", m.name),
+                    _ => println!("  missing: {}", m.name),
+                }
+            }
+            if !s.external.is_empty() {
+                println!("  outside the workspace: {}", s.external.join(", "));
+            }
+        }
+        ProjectCmd::Clone { project: q, to } => {
+            let p = project::discovery::clone_missing(&conn, &ctx.data_dir, &ws, &find(&q)?.id, to.as_deref())?;
+            if ctx.json {
+                out::json(&p);
+            } else {
+                println!("cloned {} into {}", p.name, p.local_path.as_ref().map(|x| x.display().to_string()).unwrap_or_default());
+            }
+        }
+        ProjectCmd::Context { project: q } => {
+            let r = project::context::init(&conn, &ctx.data_dir, &ws, &find(&q)?.id)?;
+            if ctx.json {
+                out::json(&r);
+            } else {
+                println!("{}: {} created, {} updated, {} kept", r.dir, r.created.len(), r.updated.len(), r.kept.len());
             }
         }
         ProjectCmd::Locate { project: q, folder } => {

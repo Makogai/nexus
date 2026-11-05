@@ -99,6 +99,20 @@ export interface TemplateApplied {
   kitId: string | null
 }
 
+export interface ProjectScan {
+  projectsDir: string
+  found: { path: string; rel: string; name: string; remoteUrl: string | null; stacks: string[]; status: 'registered' | 'known' | 'new'; projectId: string | null }[]
+  missing: { id: string; name: string; remoteUrl: string | null; cloneTo: string | null; canClone: boolean; reason: string | null }[]
+  external: string[]
+}
+
+export interface ContextInitialized {
+  dir: string
+  created: string[]
+  updated: string[]
+  kept: string[]
+}
+
 export type DoctorStatus = 'ok' | 'info' | 'warn' | 'error'
 
 export interface DoctorFinding {

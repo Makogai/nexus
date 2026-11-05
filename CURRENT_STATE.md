@@ -8,7 +8,7 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
   Nothing pushed.
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
-  P1 (workspace schema 2), P2 (templates) and P3 (Workspace Doctor) done and committed; P4 (project discovery and context) next. Not merged, not pushed, no release.
+  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) and P4 (projects: context, discovery, restoration) done and committed; P5 (environment and Claude Code setup) next. Not merged, not pushed, no release.
 
 ## Portable Workspace — progress (session 10)
 
@@ -53,6 +53,24 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   [--repair ID [--yes]]` (exit 1 on errors), IPC `workspace_doctor/repair_plan/repair`, desktop **Workspace** view
   (sidebar) with the Doctor and the template card (install, switch, check for updates with the per-file plan).
   Verified: core doctor 3/3, CLI E2E, vitest 81, desktop E2E `portable.mjs` 24/24, clippy clean.
+* **P4 — projects** (`project::context`, `project::discovery`): registering a project in a schema 2 workspace
+  (`register_with_context`, CLI and desktop) creates `project-context/<slug>/` — `project.json` (portable record: id,
+  name, remote, stacks, package managers, commands with their source file; no machine paths), `overview.md` (README
+  excerpt quoted with its source, repository, detected technology and commands), `architecture.md` (`status: draft`,
+  structure read from the file system, an empty summary slot for a reviewed draft), `current-state.md` (generated:
+  verified Git state + open tasks). Overview/architecture are created once and never overwritten; project.json and the
+  current state are regenerated. New project tasks/decisions/memory/specs/constitutions are written into the context
+  folder (`context::doc_folder`, used by `knowledge::service::create`). Discovery scans the clone folder (and `repos/`)
+  for Git repositories: *registered*, *known* (same normalised remote as a missing project → link) or *new* (review →
+  register; nothing registered or run automatically); missing projects with a supported remote can be cloned into
+  `projects/<slug>` (`git clone --no-recurse-submodules`, no prompts) and keep their stable id. `nexus projects
+  scan|clone|context`; IPC `project_scan/clone/context_init` on their own connection; Projects view discovery panel
+  (clone selected, link, register after confirmation); project page *Portable context* card. Doctor: missing projects
+  (repair: clone), known clones (repair: link), unregistered repositories, projects without context (repair: create).
+  The on-demand constitution listing names a document's rules when it has at most three. File-system watching is not
+  implemented (scan on view load + Rescan). Verified: core 205, CLI 36 (4 tests updated for the new folders), vitest
+  84, desktop E2E `portable.mjs` 33/33, `run-smoke` 27, `task-flow` 29 (decision path updated), `context` 9,
+  `attention` 27, `constitutions` 13, `workflows` 24, `usage` 18, `sync` 18, `profiles-kits` 9, `mcp-interop` 9.
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 

@@ -1046,6 +1046,8 @@ pub fn delivery(e: &Effective, budget: usize, tools: bool, level: crate::context
             .map(|(title, rs)| {
                 let prefix = rs[0].id.rsplit_once('-').map(|(p, _)| p).filter(|p| !p.is_empty() && rs.iter().all(|r| r.id.starts_with(&format!("{p}-"))));
                 let what = match prefix {
+                    // A few rules are named outright; a larger document by its id pattern.
+                    _ if rs.len() <= 3 => rs.iter().map(|r| r.id.as_str()).collect::<Vec<_>>().join(", "),
                     Some(p) => {
                         example.get_or_insert_with(|| format!("{p}-*"));
                         format!("{p}-*")

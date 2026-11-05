@@ -2,11 +2,12 @@
 import { computed, onActivated, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
+import { ArrowLeft, BookMarked, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
 import { relativeTime } from '../lib/format'
-import { api } from '../lib/ipc'
+import { api, toIpcError } from '../lib/ipc'
+import { useWorkspaceStore } from '../stores/workspaces'
 import { STATUS_LABELS } from '../lib/knowledge'
-import type { Checkpoint, KnowledgeItem, ProjectKnowledge, TaskStatus } from '../lib/types'
+import type { Checkpoint, ContextInitialized, KnowledgeItem, ProjectKnowledge, TaskStatus } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
@@ -23,6 +24,22 @@ const router = useRouter()
 const refreshing = ref(false)
 
 const project = computed(() => projects.byId[props.id] ?? null)
+const workspaces = useWorkspaceStore()
+const contextResult = ref<ContextInitialized | null>(null)
+const contextBusy = ref(false)
+/** Create or refresh the project's portable context in the workspace (Portable Workspace P4). */
+async function initContext() {
+  const ws = workspaces.active
+  if (!ws) return
+  contextBusy.value = true
+  try {
+    contextResult.value = await api.projectContextInit(ws.id, props.id)
+  } catch (e) {
+    app.toast('error', `Could not write the project context: ${toIpcError(e).message}`)
+  } finally {
+    contextBusy.value = false
+  }
+}
 const git = computed(() => projects.git[props.id])
 const projectSessions = computed(() => sessions.list.filter((s) => s.projectId === props.id && !s.archivedAt))
 const checkpoints = ref<Checkpoint[]>([])
@@ -169,6 +186,15 @@ async function unregister() {
             </li>
           </ul>
         </template>
+      </section>
+
+      <section class="card" data-project-context-card>
+        <h2 class="card-title"><BookMarked /> Portable context</h2>
+        <p class="faint">An overview, architecture notes, the current state and this project's tasks, decisions and memory live in the workspace repository (<span class="mono">project-context/</span>), so they travel with the workspace. Facts are read from the project's files and Git; nothing is invented, and documents you edit are never overwritten.</p>
+        <button class="btn btn-sm" :disabled="contextBusy || !workspaces.active?.compat?.writable" data-project-context-init @click="initContext">Create or refresh</button>
+        <p v-if="contextResult" class="faint" data-project-context-result>
+          <span class="mono">{{ contextResult.dir }}/</span> — {{ contextResult.created.length }} created, {{ contextResult.updated.length }} updated, {{ contextResult.kept.length }} kept
+        </p>
       </section>
     </div>
 

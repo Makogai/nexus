@@ -5,13 +5,16 @@
 //        workspace skills as an approved kit → the Constitutions view shows it → applying again changes nothing.
 //   P3 — Workspace Doctor: a missing README is reported with a repair → the repair shows its plan → applying it
 //        writes the file and the finding disappears; healthy checks (approved skills, template) are listed.
+//   P4 — registering a project (local bare remote) creates its portable context; its task lands there; the clone
+//        goes missing → Projects offers to clone it from the remote → cloned under projects/ with the same id; a new
+//        repository in projects/ is registered only after the confirmation.
 //
 //   cargo build -p fake-claude -p nexus-cli
 //   npx tauri build --debug --no-bundle --features e2e-webview-debugging
 //   node e2e/portable.mjs [path/to/nexus-desktop(.exe)]
 //
 // Windows only (WebView2 DevTools protocol). Synthetic fixtures in a temp dir; never touches real Claude profiles.
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -62,6 +65,11 @@ async function stopApp() {
     }
     await sleep(300)
   }
+}
+
+function git(dir, ...args) {
+  const r = spawnSync('git', ['-c', 'user.name=E2E', '-c', 'user.email=e2e@example.invalid', '-c', 'init.defaultBranch=main', '-c', 'core.autocrlf=false', ...args], { cwd: dir, encoding: 'utf8' })
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`)
 }
 
 let cdp
@@ -144,6 +152,47 @@ try {
   await click('[data-repair-apply]')
   await cdp.waitFor(`!document.querySelector('[data-finding="readme"]')`, 20000).catch(() => undefined)
   check('applying it writes the file and the finding disappears', existsSync(join(root, 'pro-ws', 'README.md')) && !(await cdp.evaluate(`!!document.querySelector('[data-finding="readme"]')`)))
+
+  // ---- P4: project context, discovery, restoration ----
+  const bare = join(root, 'remotes', 'invoices.git')
+  mkdirSync(bare, { recursive: true })
+  git(bare, 'init', '-q', '--bare')
+  const work = join(root, 'invoices')
+  mkdirSync(work, { recursive: true })
+  writeFileSync(join(work, 'README.md'), '# Invoices\n\nSends invoices and reminders.\n')
+  writeFileSync(join(work, 'package.json'), js({ dependencies: { vue: '^3' }, scripts: { test: 'vitest' } }))
+  git(work, 'init', '-q')
+  git(work, 'add', '-A')
+  git(work, 'commit', '-q', '-m', 'init')
+  git(work, 'remote', 'add', 'origin', `file:///${bare.replace(/\\/g, '/')}`)
+  git(work, 'push', '-q', 'origin', 'main')
+  const inv1 = await inv('project_register', { workspaceId: proWs.id, path: work, name: null })
+  const ctxDir = join(root, 'pro-ws', 'project-context', 'invoices')
+  check('registering a project creates its portable context', ['project.json', 'overview.md', 'architecture.md', 'current-state.md'].every((f) => existsSync(join(ctxDir, f))))
+  check('…the overview quotes the README with its source', readFileSync(join(ctxDir, 'overview.md'), 'utf8').includes('Sends invoices and reminders.'))
+  const task = await inv('knowledge_create', { workspaceId: proWs.id, input: { kind: 'task', title: 'Send reminders', projectId: inv1.id, body: '' } })
+  check('…and the project\u2019s task is stored there', task.path.includes(join('project-context', 'invoices', 'tasks')), task.path)
+  // The clone goes missing (another computer); a stray repository sits in projects/.
+  execFileSync('cmd', ['/c', 'move', work, join(root, 'invoices-elsewhere')], { stdio: 'ignore' })
+  const scratch = join(root, 'pro-ws', 'projects', 'scratch')
+  mkdirSync(scratch, { recursive: true })
+  git(scratch, 'init', '-q')
+  await cdp.evaluate(`location.hash = '#/projects'; location.reload(); true`)
+  const missingRow = await cdp.waitFor(`document.querySelector('[data-missing="invoices"]')?.innerText`, 20000).catch(() => '')
+  check('Projects offers to clone the missing project from its remote', missingRow.includes('projects/invoices'), missingRow)
+  await click('[data-discovery-clone]')
+  const restored = await cdp.waitFor(`(async () => { const p = await window.__TAURI_INTERNALS__.invoke('project_get', { id: ${js(inv1.id)} }); return p.available ? p.localPath : '' })()`, 60000).catch(() => '')
+  check('…cloning restores it under projects/ with the same id', restored.endsWith(join('projects', 'invoices')) && existsSync(join(root, 'pro-ws', 'projects', 'invoices', 'README.md')), restored)
+  const newRow = await cdp.waitFor(`(() => { const b = document.querySelector('[data-register="projects/scratch"]'); return b && !b.disabled ? 'yes' : '' })()`, 20000).catch(() => '')
+  check('a new repository in projects/ is offered for review', newRow === 'yes')
+  const before = (await inv('project_list', { workspaceId: proWs.id })).length
+  await click('[data-register="projects/scratch"]')
+  const msg = await cdp.waitFor(`document.querySelector('[data-confirm-message]')?.innerText`, 10000).catch(() => '')
+  check('…registering asks first and says nothing is run', msg.includes('nothing in the repository is run'), msg)
+  check('…nothing is registered before the confirmation', (await inv('project_list', { workspaceId: proWs.id })).length === before)
+  await click('[data-confirm-ok]')
+  const after = await cdp.waitFor(`(async () => (await window.__TAURI_INTERNALS__.invoke('project_list', { workspaceId: ${js(proWs.id)} })).length)()`, 20000).then(async () => (await inv('project_list', { workspaceId: proWs.id })).length)
+  check('…and registered after it', after === before + 1, `${before} → ${after}`)
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)
