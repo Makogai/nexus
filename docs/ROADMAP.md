@@ -182,7 +182,7 @@ read-only, a guided Claude session whose drafts they approve, and Graphify used 
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
 | M29 | Workspace Git sync: Sync Center + `nexus sync` (fetch, fast-forward pull, reviewed commit/push, inspection, onboarding/restore) — ADR-0031 | core + CLI E2E + desktop E2E `sync.mjs` 18/18 | ✅ (2026-11-05) |
-| M30 | Packaging + GitHub Releases CI + updater signing (stable/prerelease channels) — packaging and draft-release CI done in beta readiness; signing and updater pending owner decisions | artifacts verified on clean VMs |
+| M30 | Packaging + GitHub Releases CI + updater signing (stable/prerelease channels) — packaging done in beta readiness; release CI for Windows, macOS (Apple silicon + Intel) and Linux with one draft release, CI on all three platforms, GitHub Pages site (2026-11-05); signing and updater pending owner decisions | artifacts verified on clean VMs |
 | M31 | Backup/restore ✅ and user documentation ✅ (beta readiness); performance budget open | Scenario A on a clean machine |
 
 ### Gates before the first public release (owner decision, 2026-11-04)
@@ -190,8 +190,9 @@ read-only, a guided Claude session whose drafts they approve, and Graphify used 
 These are deliberately open and must be closed before anything is published:
 
 1. ~~**Application identifier**~~ — decided 2026-11-05: `io.github.makogai.nexus`, publisher `Makogai` (ADR-0034).
-2. **License** — none yet; no LICENSE file is added until the owner decides.
-3. **Code signing** — Windows Authenticode / macOS notarization certificates (Tauri updater key is separate).
+2. ~~**License**~~ — decided 2026-11-05: MIT OR Apache-2.0 (ADR-0035), with `THIRD_PARTY_NOTICES.md`.
+3. **Code signing** — Windows Authenticode / macOS notarization certificates (Tauri updater key is separate). Still
+   open: v0.1.0 is built unsigned — SmartScreen and Gatekeeper warn on first start.
 4. ~~Release builds must not honour WebView2 remote debugging~~ — done (ADR-0015, `e2e/t18-check.mjs`); remaining:
    make sure no distributed build enables the `e2e-webview-debugging` feature (release CI check).
 5. Manual check with a real profile (`docs/MANUAL_CHECKS.md`) passed on the release candidate.
