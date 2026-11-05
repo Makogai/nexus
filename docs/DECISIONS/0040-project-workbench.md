@@ -57,9 +57,15 @@ The owner made three choices (2026-11-05):
    * Durable facts go through `record_memory`: notes are unverified, and decisions start as proposals.
    * The person decides. `apply_draft` writes a draft into `overview.md`, or into the architecture document's summary
      section (the verified structure section stays). `discard_draft` keeps the note, labelled `discarded`.
-   * Graphify: NEXUS types the offline, code-only build (`graphify extract . --code-only`, from the Graphify README) into
-     a terminal in the project, and the person presses Enter. `graphify-out/` is kept out of Git through the clone's
-     local `.git/info/exclude`, never a committed file. Installing Graphify stays the person's action.
+   * Graphify: NEXUS types the offline build into a terminal in the project, and the person presses Enter:
+     `graphify extract . --code-only; graphify cluster-only . --no-label`. The first step builds `graph.json` from the
+     code alone; the second writes `GRAPH_REPORT.md` (Graphify 0.9.93 split the two — owner feedback 2026-11-05), and
+     `--no-label` keeps it offline (without it Graphify asks a model to name the communities). `graphify-out/` is kept
+     out of Git through the clone's local `.git/info/exclude`, never a committed file. Installing Graphify stays the
+     person's action. A graph built after the learning task was created joins the task's checklist.
+   * Starting the session: the launch opened from *Learn* preselects *Start right away*, so NEXUS sends Claude a fixed
+     first message (`tasks::KICKOFF`, shown verbatim in the dialog; a `'static` constant by type, never task text —
+     threat T22) after `--`, because `--mcp-config` takes several values. New conversations only, never on resume.
 
 ## Consequences
 

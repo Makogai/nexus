@@ -99,7 +99,9 @@ import type {
   ChangedFile,
   CommitDiff,
   GitLogEntry,
+  LearnDepth,
   LearnDraft,
+  LearnTask,
   ProjectMap,
 } from './types'
 
@@ -187,8 +189,8 @@ export const api = {
     call<Project>('project_register', { workspaceId, path, name }),
   /** Learn a project (W4): NEXUS's map, the learning task, Claude's drafts, Graphify's output kept out of Git. */
   projectLearnMap: (workspaceId: string, projectId: string) => call<ProjectMap>('project_learn_map', { workspaceId, projectId }),
-  projectLearnStart: (workspaceId: string, projectId: string) =>
-    call<{ id: string; title: string; status: string | null }>('project_learn_start', { workspaceId, projectId }),
+  projectLearnStart: (workspaceId: string, projectId: string, depth: LearnDepth) =>
+    call<LearnTask>('project_learn_start', { workspaceId, projectId, depth }),
   projectLearnDrafts: (workspaceId: string, projectId: string) => call<LearnDraft[]>('project_learn_drafts', { workspaceId, projectId }),
   projectLearnDecide: (workspaceId: string, projectId: string, draftId: string, apply: boolean) =>
     call<void>('project_learn_decide', { workspaceId, projectId, draftId, apply }),

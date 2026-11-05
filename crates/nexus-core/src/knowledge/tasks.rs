@@ -185,6 +185,11 @@ pub fn pointer(task_id: &str, delivery: &str) -> String {
     s
 }
 
+/// The first message of a task session the person asked to start right away (launch option): NEXUS-authored and
+/// fixed — it names no task text, it only asks Claude to begin the work the session's task pointer describes.
+pub const KICKOFF: &str =
+    "Please start on this session's NEXUS task now: work through its checklist step by step and record your progress with the NEXUS update_task tool.";
+
 /// Untrusted text made inert for a data block: one line, no control characters, no angle brackets (so it cannot
 /// close the block or open a tag), bounded.
 pub fn escape_untrusted(s: &str, max: usize) -> String {

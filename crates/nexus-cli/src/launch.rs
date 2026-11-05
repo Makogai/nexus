@@ -121,6 +121,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             settings: settings_path.as_deref(),
             context_prompt: prepared.prompt.as_deref(),
             plugin_dirs: &plugin_dirs,
+            first_prompt: None,
         },
         &base_env,
     )?;

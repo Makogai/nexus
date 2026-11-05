@@ -28,6 +28,7 @@ const title = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
 const startTask = ref(true)
+const kickoff = ref(false)
 const task = computed(() => app.launchDialog.task ?? null)
 
 const isOpen = computed(() => app.launchDialog.open)
@@ -44,6 +45,7 @@ watch(isOpen, (open) => {
   model.value = ''
   customDir.value = null
   startTask.value = true
+  kickoff.value = !!app.launchDialog.kickoff
   projectId.value = app.launchDialog.projectId ?? availableProjects.value[0]?.id ?? ''
   const sel = initialLaunchSelection(
     profiles.list,
@@ -89,6 +91,7 @@ async function launch() {
       title: title.value.trim() || null,
       taskId: task.value?.id ?? null,
       startTask: task.value ? startTask.value : undefined,
+      kickoff: task.value ? kickoff.value : undefined,
     })
     app.prefs.lastLaunch = { profileId: profileId.value, workProfile: workProfile.value, effort: effort.value || null }
     close()
@@ -123,6 +126,11 @@ function goToProfiles() {
             <input v-model="startTask" type="checkbox" />
             <span>Move it to <em>In progress</em> if it is in Backlog or Ready</span>
           </label>
+          <label class="checkbox" data-launch-kickoff>
+            <input v-model="kickoff" type="checkbox" />
+            <span>Start right away — NEXUS sends Claude the first message</span>
+          </label>
+          <div v-if="kickoff && options?.taskKickoff" class="hint kickoff-text">“{{ options.taskKickoff }}”</div>
           <div class="hint">Claude gets a short brief of the task (not its history) and records progress with the NEXUS task tools.</div>
         </div>
       </div>
@@ -233,6 +241,10 @@ function goToProfiles() {
 }
 .task-notice .checkbox {
   margin-top: 6px;
+}
+.kickoff-text {
+  font-style: italic;
+  margin: 2px 0 4px 24px;
 }
 .two {
   display: grid;

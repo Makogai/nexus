@@ -9,7 +9,7 @@ import { BookOpenCheck, Check, FileSearch, GraduationCap, Lightbulb, Network, Re
 import { api, toIpcError } from '../lib/ipc'
 import { relativeTime } from '../lib/format'
 import { typeIntoTerminal } from '../lib/terminal'
-import type { LearnDraft, ProjectMap } from '../lib/types'
+import type { LearnDepth, LearnDraft, ProjectMap } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
 import MarkdownView from './MarkdownView.vue'
@@ -24,6 +24,11 @@ const drafts = ref<LearnDraft[]>([])
 const open = ref<string | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
+/** How much the learning session may spend (ADR-0041); follows the open learning task's depth. */
+const depth = ref<LearnDepth>('standard')
+const showRules = ref(false)
+const depthInfo = computed(() => map.value?.depths.find((d) => d.id === depth.value) ?? null)
+const depthNames: Record<LearnDepth, string> = { quick: 'Quick', standard: 'Standard', deep: 'Deep' }
 
 async function load() {
   const ws = workspaces.active
@@ -32,6 +37,7 @@ async function load() {
   error.value = null
   try {
     ;[map.value, drafts.value] = await Promise.all([api.projectLearnMap(ws.id, props.projectId), api.projectLearnDrafts(ws.id, props.projectId)])
+    if (map.value.task) depth.value = map.value.task.depth
     open.value = drafts.value[0]?.id ?? null
   } catch (e) {
     error.value = toIpcError(e).message
@@ -44,8 +50,8 @@ async function startSession() {
   const ws = workspaces.active
   if (!ws) return
   try {
-    const task = await api.projectLearnStart(ws.id, props.projectId)
-    app.openLaunch(props.projectId, null, { id: task.id, title: task.title, projectId: props.projectId })
+    const task = await api.projectLearnStart(ws.id, props.projectId, depth.value)
+    app.openLaunch(props.projectId, null, { id: task.id, title: task.title, projectId: props.projectId }, { kickoff: true })
     await load()
   } catch (e) {
     app.toast('error', `Could not prepare the learning session: ${toIpcError(e).message}`)
@@ -164,10 +170,33 @@ watch(() => props.projectId, load)
       <section class="card session" data-learn-session>
         <h2 class="card-title"><GraduationCap /> Learn with Claude</h2>
         <p class="small">
-          Starts a Claude session on a task that carries this map. Claude reads the code and documents <strong>without changing them</strong>, drafts the overview and the
-          architecture summary, and records durable memories (notes are marked unverified, decisions start as proposals). You decide below what enters the knowledge base. It
-          runs on your Claude plan.
+          Starts one Claude session on a task that carries this map. Claude follows NEXUS's <code>{{ map.skill }}</code> skill: it reads a few chosen files <strong>without
+          changing them</strong>, drafts the overview and the architecture summary, and records durable memories (notes are marked unverified, decisions start as proposals).
+          No subagents. You decide below what enters the knowledge base. It runs on your Claude plan.
         </p>
+        <div class="field depth">
+          <label>Depth</label>
+          <div class="segments" role="radiogroup" aria-label="Depth" data-learn-depth>
+            <button
+              v-for="d in map.depths"
+              :key="d.id"
+              class="segment"
+              role="radio"
+              :data-depth="d.id"
+              :aria-checked="depth === d.id"
+              :class="{ selected: depth === d.id }"
+              @click="depth = d.id"
+            >
+              {{ depthNames[d.id] }}
+            </button>
+          </div>
+          <span v-if="depthInfo" class="hint" data-learn-budget>
+            {{ depthInfo.files ? `Reads at most ${depthInfo.files} files` : 'No file limit (still selective)' }} · overview ≤ {{ depthInfo.overviewWords }} words ·
+            architecture ≤ {{ depthInfo.architectureWords }} words · {{ depthInfo.memories[0] }}–{{ depthInfo.memories[1] }} memories.
+            <button class="link" data-learn-rules-toggle @click="showRules = !showRules">{{ showRules ? 'Hide' : 'Show' }} the rules Claude gets</button>
+          </span>
+          <pre v-if="showRules && depthInfo" class="rules" data-learn-rules>{{ depthInfo.rules }}</pre>
+        </div>
         <div class="row">
           <button class="btn btn-primary" data-learn-start @click="startSession"><Sparkles /> {{ map.task ? 'Continue the learning session' : 'Start a learning session' }}</button>
           <span v-if="map.task" class="faint small">Task: {{ map.task.title }} · {{ map.task.status }}</span>
@@ -350,6 +379,29 @@ watch(() => props.projectId, load)
 .title-ic {
   width: 16px;
   height: 16px;
+}
+.depth {
+  margin: 4px 0 10px;
+}
+.link {
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 4px;
+  font: inherit;
+  text-decoration: underline;
+}
+.rules {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 @media (max-width: 1100px) {
   .grid {

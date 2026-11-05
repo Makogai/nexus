@@ -60,8 +60,23 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
     the launch for it.
   * **Drafts:** Claude drafts through the new MCP tool `draft_project_document` (22 tools); the drafts are unverified
     notes. *Use as overview* / *Use as architecture summary* / *Set aside* are the person's decision.
-  * **Graphify:** when it is on the PATH, NEXUS types `graphify extract . --code-only` (offline) into a project
-    terminal and keeps `graphify-out/` out of Git via `.git/info/exclude`.
+  * **Graphify:** when it is on the PATH, NEXUS types `graphify extract . --code-only; graphify cluster-only .
+    --no-label` (both offline; the second writes `GRAPH_REPORT.md`) into a project terminal and keeps `graphify-out/`
+    out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
+  * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
+    first message so the session starts working; any task launch can tick it.
+* **Built-in learning skill (ADR-0041, branch `milestone/learn-skill`, off `fix/learn-session`)** — owner feedback:
+  a learning session fanned out into a multi-agent plan and burned tokens.
+  * **Skill:** NEXUS ships a plugin `nexus` with the skill `learn-project` (`crates/nexus-core/builtin/`, written to
+    `<data>/builtin/<hash>/nexus/`), given with `--plugin-dir` to learning sessions only. The plugin name is reserved for
+    kits; policy that forbids `--plugin-dir` withholds it.
+  * **Rules:** LEARN-1 to LEARN-7 in the system prompt of learning sessions — one session, no subagents unless the
+    person asks, read only, a budget.
+  * **Depth:** Quick / Standard / Deep in the Learn tab (label on the task), with the budget and the exact rules shown.
+  * **Checks:** `claude plugin validate` passes on the built-in plugin (throwaway config folder). CI on the branch
+    (run 42122452334 at `c54e2b2`) is green on all platforms, including `workbench.mjs` (depth, rules, skill folder,
+    first message, session record) and `task-flow.mjs`. Not run locally: the owner's installed NEXUS was open (same app
+    identity, single instance). **Waits for the owner's approval to merge** (with `fix/learn-session`).
   * **After adding a project:** it opens on Learn.
   * **Fix:** the knowledge index refresh takes SQLite's write lock up front (IMMEDIATE). A deferred read-then-write
     upgrade failed at once with "database is locked" when the desktop and the MCP server refreshed together; it showed

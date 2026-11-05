@@ -46,6 +46,9 @@ pub struct Integrations {
     /// The workflow run this session works on (ADR-0029).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<super::prepare::WorkflowLaunch>,
+    /// A learning session's depth and built-in skill (ADR-0041).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learn: Option<super::prepare::LearnLaunch>,
     /// Characters NEXUS appended to the system prompt after the work profile (rules, pointers) — for usage
     /// estimates (ADR-0030); the work profile's own text is known from its id.
     #[serde(default, skip_serializing_if = "Option::is_none")]

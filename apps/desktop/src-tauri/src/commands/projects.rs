@@ -56,13 +56,17 @@ pub async fn project_learn_map(ctx: State<'_, Ctx>, workspace_id: String, projec
     .await
 }
 
-/// Create (or reuse) the learning task; the desktop launches Claude on it.
+/// Create (or reuse) the learning task at the chosen depth (ADR-0041); the desktop launches Claude on it.
 #[tauri::command]
-pub async fn project_learn_start(ctx: State<'_, Ctx>, workspace_id: String, project_id: String) -> IpcResult<project::learn::LearnTask> {
+pub async fn project_learn_start(ctx: State<'_, Ctx>, workspace_id: String, project_id: String, depth: Option<String>) -> IpcResult<project::learn::LearnTask> {
     let ctx = ctx.inner().clone();
     blocking(move || {
+        let depth = match depth.as_deref() {
+            None => project::learn::Depth::default(),
+            Some(d) => project::learn::Depth::parse(d).ok_or_else(|| IpcError::invalid(format!("unknown depth “{d}”")))?,
+        };
         let c = own_conn(&ctx)?;
-        Ok(project::learn::start(&c, &ctx.data_dir, &learn_ws(&c, &workspace_id)?, &project_id)?)
+        Ok(project::learn::start(&c, &ctx.data_dir, &learn_ws(&c, &workspace_id)?, &project_id, depth)?)
     })
     .await
 }
