@@ -25,6 +25,15 @@ import type {
   MemoryProposal,
   ApprovalImpact,
   SessionUsage,
+  SyncCloned,
+  SyncCommitReview,
+  SyncFetched,
+  SyncFileDiff,
+  SyncPulled,
+  SyncPushReview,
+  SyncRestore,
+  SyncSide,
+  SyncStatus,
   UsageDimension,
   UsageFilter,
   UsageView,
@@ -107,6 +116,8 @@ export const NOTIFICATION_ACTIVATED_EVENT = 'nexus://notification-activated'
 export const WORKFLOW_EVENT = 'nexus://workflows'
 /** New usage data was read from transcripts (ADR-0030). */
 export const USAGE_EVENT = 'nexus://usage'
+/** A sync operation finished (or was refused) — the Sync Center refreshes (ADR-0031). */
+export const SYNC_EVENT = 'nexus://sync'
 
 export const api = {
   appInfo: () => call<AppInfo>('app_info'),
@@ -225,6 +236,17 @@ export const api = {
   usageReport: (filter: UsageFilter, by: UsageDimension) => call<UsageView>('usage_report', { filter, by }),
   usageSessions: (filter: UsageFilter, limit?: number) => call<SessionUsage[]>('usage_sessions', { filter, limit: limit ?? null }),
   usageScan: () => call<number>('usage_scan'),
+  syncStatus: (workspaceId: string) => call<SyncStatus>('sync_status', { workspaceId }),
+  syncFetch: (workspaceId: string) => call<SyncFetched>('sync_fetch', { workspaceId }),
+  syncPull: (workspaceId: string) => call<SyncPulled>('sync_pull', { workspaceId }),
+  syncDiff: (workspaceId: string, side: SyncSide, path: string) => call<SyncFileDiff>('sync_diff', { workspaceId, side, path }),
+  syncReviewCommit: (workspaceId: string, paths: string[] | null) => call<SyncCommitReview>('sync_review_commit', { workspaceId, paths }),
+  syncCommit: (workspaceId: string, message: string, paths: string[] | null, token: string) =>
+    call<{ oid: string; files: number }>('sync_commit', { workspaceId, message, paths, token }),
+  syncReviewPush: (workspaceId: string) => call<SyncPushReview>('sync_review_push', { workspaceId }),
+  syncPush: (workspaceId: string, token: string) => call<{ remote: string; branch: string; commits: number }>('sync_push', { workspaceId, token }),
+  syncClone: (url: string, folder: string) => call<SyncCloned>('sync_clone', { url, folder }),
+  syncRestore: (workspaceId: string) => call<SyncRestore>('sync_restore', { workspaceId }),
   gateRemove: (projectId: string, name: string) => call<boolean>('gate_remove', { projectId, name }),
   gateSuggest: (projectId: string) => call<GateInput[]>('gate_suggest', { projectId }),
   gateRun: (projectId: string, name: string) => call<GateResult>('gate_run', { projectId, name }),

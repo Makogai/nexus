@@ -286,7 +286,7 @@ export interface AppNotification {
   sessionId: string | null
   taskId: string | null
   workflowId: string | null
-  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | 'workflow' | null
+  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | 'workflow' | 'sync' | null
   targetId: string | null
   dedupeKey: string | null
   occurrences: number
@@ -1308,4 +1308,168 @@ export interface SessionUsage {
   tokens: UsageTokens
   cost: UsageCost
   contextEstimate: number | null
+}
+
+// ---- Workspace sync (ADR-0031, M29) ---------------------------------------------------------------------------
+
+export type SyncState = 'not-repo' | 'conflicts' | 'in-progress' | 'no-remote' | 'no-upstream' | 'diverged' | 'behind' | 'ahead' | 'up-to-date'
+
+export interface SyncIssue {
+  severity: 'error' | 'warning' | 'info'
+  message: string
+}
+
+export interface SensitiveFile {
+  path: string
+  tracked: boolean
+  reason: string
+}
+
+export interface SyncReadiness {
+  workspaceId: string
+  repo: boolean
+  branch: string | null
+  upstream: string | null
+  remote: string | null
+  ahead: number
+  behind: number
+  changed: string[]
+  conflicted: number
+  sensitive: SensitiveFile[]
+  dataDirInside: boolean
+  pendingApprovals: number
+  ready: boolean
+  issues: SyncIssue[]
+}
+
+/** A finding of the security inspection — names the file, line and kind, never the matched value. */
+export interface SyncFinding {
+  path: string
+  line: number | null
+  kind: string
+  severity: 'block' | 'warn'
+  message: string
+}
+
+export interface SyncInspection {
+  findings: SyncFinding[]
+  blocked: boolean
+  files: number
+  scannedBytes: number
+  truncated: boolean
+}
+
+export interface GitLogEntry {
+  oid: string
+  timestampMs: number
+  author: string
+  summary: string
+}
+
+export interface GitDiffEntry {
+  status: string
+  mode: string
+  path: string
+}
+
+export interface SyncWorkingFile {
+  path: string
+  status: 'added' | 'modified' | 'deleted' | 'conflicted'
+  findings: SyncFinding[]
+}
+
+export interface SyncHistoryEntry {
+  id: string
+  workspaceId: string
+  op: 'fetch' | 'pull' | 'commit' | 'push' | 'clone'
+  status: 'running' | 'ok' | 'refused' | 'failed' | 'interrupted'
+  branch: string | null
+  headBefore: string | null
+  headAfter: string | null
+  commits: number
+  files: number
+  errorKind: string | null
+  message: string | null
+  startedAt: number
+  endedAt: number | null
+}
+
+export interface SyncStatus {
+  readiness: SyncReadiness
+  state: SyncState
+  remoteName: string | null
+  lastFetchAt: number | null
+  incoming: GitLogEntry[]
+  outgoing: GitLogEntry[]
+  incomingFiles: GitDiffEntry[]
+  outgoingFiles: GitDiffEntry[]
+  working: SyncWorkingFile[]
+  inProgress: string | null
+  identity: boolean
+  history: SyncHistoryEntry[]
+}
+
+export interface SyncFetched {
+  remote: string
+  incoming: number
+  outgoing: number
+}
+
+export interface SyncNeedsApproval {
+  id: string
+  title: string
+  kind: string
+}
+
+export interface SyncPulled {
+  commits: number
+  files: string[]
+  headBefore: string | null
+  headAfter: string | null
+  needsApproval: SyncNeedsApproval[]
+  kitsChanged: string[]
+  warnings: SyncFinding[]
+}
+
+export interface SyncCommitReview {
+  branch: string | null
+  files: { status: 'A' | 'M' | 'D' | 'U'; path: string }[]
+  inspection: SyncInspection
+  identity: boolean
+  token: string
+}
+
+export interface SyncPushReview {
+  remote: string
+  branch: string
+  firstPush: boolean
+  commits: GitLogEntry[]
+  files: GitDiffEntry[]
+  behind: number
+  inspection: SyncInspection
+  token: string
+}
+
+export type SyncSide = 'working' | 'incoming' | 'outgoing'
+
+export interface SyncFileDiff {
+  path: string
+  text: string
+  truncated: boolean
+  binary: boolean
+}
+
+export interface SyncRestore {
+  workspaceId: string
+  name: string
+  projects: { id: string; name: string; remoteUrl: string | null; available: boolean }[]
+  pendingApprovals: SyncNeedsApproval[]
+  kitFolders: [string, boolean][]
+  gatesNeeded: string[]
+  steps: string[]
+}
+
+export interface SyncCloned {
+  workspace: Workspace
+  restore: SyncRestore
 }

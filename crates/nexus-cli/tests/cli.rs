@@ -765,6 +765,79 @@ fn workspace_sync_status_is_read_only_and_flags_what_must_not_travel() {
     assert_eq!(std::fs::read_to_string(ws_dir.join(".git").join("HEAD")).unwrap(), head, "nothing in the repository changed");
 }
 
+/// M29 (ADR-0031): two machines share a workspace through a local bare remote. Commits and pushes need the token of
+/// the review the person saw; a secret blocks; onboarding clones and lists what restoring needs; pulls fast-forward.
+#[test]
+fn sync_across_two_machines_reviews_before_publishing() {
+    let e = Env::new();
+    e.setup();
+    let base = e.data.parent().unwrap().to_path_buf();
+    let ws_dir = base.join("ws");
+    let git = |dir: &Path, args: &[&str]| {
+        let out = Command::new("git").args(["-c", "init.defaultBranch=main"]).args(args).current_dir(dir).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&ws_dir, &["init", "-q"]);
+    git(&ws_dir, &["config", "user.name", "T"]);
+    git(&ws_dir, &["config", "user.email", "t@example.invalid"]);
+    let remote = base.join("remote.git");
+    std::fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "-q", "--bare"]);
+    let url = format!("file://{}", remote.display()).replace('\\', "/");
+    git(&ws_dir, &["remote", "add", "origin", &url]);
+    assert_eq!(e.json(&["sync", "status"])["state"], "no-upstream");
+    let token_of = |text: &str| text.split_whitespace().skip_while(|w| *w != "--confirm").nth(1).map(str::to_string).unwrap_or_else(|| panic!("no token in {text}"));
+
+    // A secret blocks the review (and the commit); without it the reviewed state is committed and pushed.
+    std::fs::write(ws_dir.join("leak.md"), format!("key {}{}\n", "sk-ant-", "q".repeat(30))).unwrap();
+    let blocked = e.run(&["sync", "review"]);
+    assert_eq!(blocked.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&blocked.stdout).to_string();
+    assert!(text.contains("BLOCK leak.md:1") && !text.contains("qqqq"), "{text}");
+    std::fs::remove_file(ws_dir.join("leak.md")).unwrap();
+    let review = e.ok(&["sync", "review"]);
+    let stale = e.run(&["sync", "commit", "-m", "Workspace", "--confirm", "0000"]);
+    assert_eq!(stale.status.code(), Some(1), "a token from another review is refused");
+    let committed = e.ok(&["sync", "commit", "-m", "Workspace", "--confirm", &token_of(&review)]);
+    assert!(committed.contains("nothing was pushed"), "{committed}");
+    let push_review = e.ok(&["sync", "push"]);
+    assert!(push_review.contains("first push"), "{push_review}");
+    assert!(e.ok(&["sync", "push", "--confirm", &token_of(&push_review)]).contains("pushed 1 commit(s) to origin/main"));
+
+    // Machine B onboards from the repository.
+    let b_data = base.join("b-data");
+    let b = |args: &[&str]| {
+        let mut c = Command::new(NEXUS);
+        c.arg("--data-dir").arg(&b_data).args(args).env("USERPROFILE", e.home()).env("HOME", e.home());
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "nexus(B) {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let cloned = b(&["sync", "clone", &url, base.join("b-ws").to_str().unwrap()]);
+    assert!(cloned.contains("opened from Git") && cloned.contains("never synced"), "{cloned}");
+    git(&base.join("b-ws"), &["config", "user.name", "B"]);
+    git(&base.join("b-ws"), &["config", "user.email", "b@example.invalid"]);
+
+    // A adds a note; B fetches, inspects the incoming diff and fast-forwards.
+    std::fs::create_dir_all(ws_dir.join("knowledge").join("notes")).unwrap();
+    std::fs::write(ws_dir.join("knowledge").join("notes").join("deploy.md"), "Deploy on Fridays? No.\n").unwrap();
+    let review = e.ok(&["sync", "review"]);
+    e.ok(&["sync", "commit", "-m", "Note", "--confirm", &token_of(&review)]);
+    let push_review = e.ok(&["sync", "push"]);
+    e.ok(&["sync", "push", "--confirm", &token_of(&push_review)]);
+    assert!(b(&["sync", "fetch"]).contains("1 incoming"));
+    let st: Value = serde_json::from_str(&b(&["--json", "sync", "status"])).unwrap();
+    assert_eq!((st["state"].as_str(), st["incoming"][0]["summary"].as_str()), (Some("behind"), Some("Note")));
+    assert!(b(&["sync", "diff", "knowledge/notes/deploy.md", "--incoming"]).contains("+Deploy on Fridays? No."));
+    assert!(b(&["sync", "pull", "--no-fetch"]).contains("fast-forwarded 1 commit(s)"));
+    assert!(base.join("b-ws").join("knowledge").join("notes").join("deploy.md").is_file());
+    let history = b(&["sync", "history"]);
+    for op in ["clone", "fetch", "pull"] {
+        assert!(history.contains(op), "{history}");
+    }
+    assert!(b(&["sync", "restore"]).contains("Add your Claude profiles on this machine"));
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {

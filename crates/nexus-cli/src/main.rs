@@ -12,6 +12,7 @@ mod launch;
 mod mcp;
 mod notifications;
 mod out;
+mod sync;
 mod usage;
 mod workflow;
 
@@ -77,6 +78,9 @@ enum Command {
     Context(context::ContextCmd),
     /// Token usage from Claude Code's local session transcripts: measured, estimated, unavailable (ADR-0030).
     Usage(usage::UsageArgs),
+    /// Workspace synchronisation through Git: status, fetch, fast-forward pull, reviewed commit and push, clone (ADR-0031).
+    #[command(subcommand)]
+    Sync(sync::SyncCmd),
     /// Constitutions: structured rules (articles, sections, rules with ids and enforcement) by scope.
     #[command(subcommand)]
     Constitution(constitution::ConstitutionCmd),
@@ -225,6 +229,7 @@ impl Ctx {
         }
         host::reconcile(&conn, now_ms())?;
         nexus_core::workflow::run::reconcile(&conn, now_ms())?;
+        nexus_core::workspace_sync::history::reconcile(&conn, now_ms())?;
         Ok(conn)
     }
 }
@@ -249,6 +254,7 @@ fn main() -> ExitCode {
         Command::Constitution(c) => constitution::run(&ctx, c),
         Command::Context(c) => context::run(&ctx, c).map(|_| 0),
         Command::Usage(a) => usage::run(&ctx, a),
+        Command::Sync(c) => sync::run(&ctx, c),
         Command::Workflow(c) => workflow::run_workflow(&ctx, c),
         Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),

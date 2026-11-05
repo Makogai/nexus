@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ArrowRight, FolderInput, FolderPlus, ShieldCheck, Sparkles, TriangleAlert } from '@lucide/vue'
+import { ArrowRight, FolderInput, FolderPlus, GitBranch, ShieldCheck, Sparkles, TriangleAlert } from '@lucide/vue'
+import CloneWorkspaceForm from '../components/CloneWorkspaceForm.vue'
+import type { SyncCloned } from '../lib/types'
+import { router } from '../router'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { toIpcError } from '../lib/ipc'
 import { useAppStore } from '../stores/app'
@@ -13,7 +16,7 @@ const workspaces = useWorkspaceStore()
 const profiles = useProfileStore()
 const projects = useProjectStore()
 
-const mode = ref<'choose' | 'create'>('choose')
+const mode = ref<'choose' | 'create' | 'clone'>('choose')
 const name = ref('Personal')
 const parentDir = ref<string | null>(null)
 const busy = ref(false)
@@ -45,6 +48,11 @@ async function create() {
   } finally {
     busy.value = false
   }
+}
+
+async function cloned(r: SyncCloned) {
+  app.toast('success', `Workspace “${r.workspace.name}” opened from Git`)
+  await router.push({ name: 'sync', query: { restore: '1' } })
 }
 
 async function importExisting() {
@@ -103,6 +111,18 @@ async function importExisting() {
           </div>
           <ArrowRight class="arrow" />
         </button>
+        <button class="choice" :disabled="busy" data-onboarding-clone @click="mode = 'clone'">
+          <GitBranch />
+          <div>
+            <h3>Open a workspace from Git</h3>
+            <p>Clone your workspace repository to this machine — knowledge, rules and workflows come along; profiles, sessions and usage stay machine-local.</p>
+          </div>
+          <ArrowRight class="arrow" />
+        </button>
+      </div>
+
+      <div v-else-if="mode === 'clone'" class="card create">
+        <CloneWorkspaceForm @cloned="cloned" @cancel="mode = 'choose'" />
       </div>
 
       <div v-else class="card create">

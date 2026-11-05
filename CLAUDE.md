@@ -28,6 +28,7 @@ cd apps/desktop && node e2e/workflows.mjs   # Workflow Engine: runs, gates, revi
 cd apps/desktop && node e2e/workflow-real-claude.mjs # workflow skills only in the run's session (real Claude)
 cd apps/desktop && node e2e/usage.mjs       # Usage dashboard: transcripts → scanner → tiles, trend, breakdowns (E2E build)
 cd apps/desktop && node e2e/usage-real-claude.mjs # real transcript format parsed; nothing invented (real Claude)
+cd apps/desktop && node e2e/sync.mjs        # Sync Center: local bare remote, reviewed commit/push, ff pull (E2E build)
 cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Windows notification sender
 ```
 
@@ -67,8 +68,10 @@ cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Wi
   it reaches Claude only as escaped, labelled data (SessionStart context, tool output) — ADR-0020, threat T22.
 * Usage analytics (ADR-0030) reads Claude's transcripts read-only and stores numbers only; every figure carries
   provenance (parsed / estimate / unavailable, ADR-0010); cost only for API-billed profiles; NEXUS never sets or
-  forwards telemetry. Workspace sync (ADR-0031) is Git in the person's repository: read-only readiness now; commits
-  and pushes only on explicit action, fast-forward-only pulls, machine-local state never travels.
+  forwards telemetry. Workspace sync (ADR-0031) is Git in the person's repository: commits and pushes only with the
+  token of a confirmed review and after the inspection (`workspace_sync::inspect`) did not block; pulls fast-forward
+  only; never force, never automatic; machine-local state never travels; synced rules, constitutions, workflows and
+  kits need approval again. Tests use temporary repositories and local bare remotes only.
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
   older Tauri crates than the npm packages and `tauri build` fails its version check.
 

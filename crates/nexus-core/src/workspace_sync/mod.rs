@@ -1,15 +1,22 @@
-//! Git-based workspace synchronisation — readiness only (ADR-0031). Read-only: this module never fetches, commits,
-//! pushes or changes the repository. It answers "would syncing this workspace folder through Git be safe now?":
+//! Git-based workspace synchronisation (ADR-0031, M29): the person's own repository is the transport and history —
+//! no sync service. This module reports readiness and status (read-only); [`ops`] fetches, fast-forwards, commits and
+//! pushes — commits and pushes only after a review the person confirmed and an inspection that did not block
+//! ([`inspect`]); [`history`] records every operation, one at a time per workspace.
 //!
-//! * the folder is a Git repository with a branch and (optionally) an upstream; ahead/behind as of the last fetch;
-//! * which portable files changed (they would be part of an outgoing commit);
-//! * files that must never travel — machine-local databases, environment files, keys and credential files — are
-//!   reported by *name* (never read) when tracked or not ignored;
-//! * local-only knowledge inside the folder must be ignored; the NEXUS data dir must not be inside it;
-//! * how many synced rules, constitutions and workflows wait for approval (incoming changes are untrusted).
-//!
-//! The planned sync (desktop review of the outgoing diff, explicit commit and push, fast-forward-only pull) builds on
-//! this check; machine-local state (SQLite: sessions, approvals, gates, usage, notifications) never leaves the machine.
+//! What travels: the portable files of the workspace folder (manifest, tasks, notes, decisions, specs, rules,
+//! constitutions, workflows, kit folders the team keeps there). What never travels: everything machine-local —
+//! sessions, usage, process information, notifications, gate commands, approvals, profiles, credentials (SQLite in the
+//! NEXUS data folder, which must not be inside the workspace) and local-only knowledge (`.nexus-local/`).
+//! Incoming documents that activate behaviour (rules, constitutions, workflows, AI Kits) need approval here.
+
+pub mod history;
+pub mod inspect;
+pub mod ops;
+
+#[cfg(test)]
+mod tests;
+
+pub use inspect::sensitive_reason;
 
 use std::path::Path;
 
@@ -61,25 +68,6 @@ pub struct Readiness {
     pub issues: Vec<Issue>,
 }
 
-/// Why a file name must never be synced (checked by name only; contents are never read).
-pub fn sensitive_reason(rel: &str) -> Option<&'static str> {
-    let name = rel.rsplit(['/', '\\']).next().unwrap_or(rel).to_ascii_lowercase();
-    if name == ".env" || name.starts_with(".env.") {
-        return Some("environment file (may contain secrets)");
-    }
-    let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
-    if matches!(ext, "db" | "db-wal" | "db-shm" | "sqlite" | "sqlite3") || name.ends_with(".db-journal") {
-        return Some("machine-local database");
-    }
-    if matches!(ext, "pem" | "key" | "p12" | "pfx" | "jks" | "keystore") || name.starts_with("id_rsa") || name.starts_with("id_ed25519") || name.starts_with("id_ecdsa") {
-        return Some("private key or keystore");
-    }
-    if matches!(name.as_str(), ".credentials.json" | "credentials.json" | ".git-credentials" | ".netrc" | "_netrc" | ".npmrc" | ".pypirc") {
-        return Some("credential file");
-    }
-    None
-}
-
 pub fn readiness(conn: &Connection, ws: &Workspace, data_dir: &Path) -> Result<Readiness> {
     let root = &ws.root_path;
     let mut r = Readiness {
@@ -105,7 +93,7 @@ pub fn readiness(conn: &Connection, ws: &Workspace, data_dir: &Path) -> Result<R
     }
     // Only a repository rooted at the workspace folder counts (a parent repository is someone else's).
     let top = git::toplevel(root).map(|t| canon(&t));
-    if top.as_deref() != Some(canon(root).as_path()) {
+    if !own_repository(root) {
         r.issues.push(Issue {
             severity: "info",
             message: if top.is_some() {
@@ -204,74 +192,130 @@ fn local_only_paths(conn: &Connection, workspace_id: &str, root: &Path) -> Resul
         .collect())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Is the workspace folder the root of a Git repository of its own (not a folder inside someone else's)?
+pub fn own_repository(root: &Path) -> bool {
+    let canon = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    git::toplevel(root).map(|t| canon(&t)).as_deref() == Some(canon(root).as_path())
+}
 
-    fn git(dir: &Path, args: &[&str]) {
-        let ok = std::process::Command::new("git")
-            .args(["-c", "user.name=T", "-c", "user.email=t@example.invalid", "-c", "core.autocrlf=false", "-c", "init.defaultBranch=main"])
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .unwrap();
-        assert!(ok.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&ok.stderr));
-    }
-
-    #[test]
-    fn sensitive_names() {
-        for n in [".env", "config/.env.production", "nexus.db", "x.db-wal", "id_rsa", "keys/server.pem", ".credentials.json", ".npmrc"] {
-            assert!(sensitive_reason(n).is_some(), "{n}");
-        }
-        for n in ["README.md", "tasks/env-setup.md", "rules/keys.md", "nexus-workspace.json"] {
-            assert!(sensitive_reason(n).is_none(), "{n}");
+/// A Git operation left unfinished in the repository (by a person's Git tool or an interrupted program).
+pub fn in_progress(root: &Path) -> Option<String> {
+    let dir = git::git_dir(root)?;
+    for (f, what) in [
+        ("MERGE_HEAD", "a merge is in progress"),
+        ("rebase-merge", "a rebase is in progress"),
+        ("rebase-apply", "a rebase or patch is in progress"),
+        ("CHERRY_PICK_HEAD", "a cherry-pick is in progress"),
+        ("REVERT_HEAD", "a revert is in progress"),
+    ] {
+        if dir.join(f).exists() {
+            return Some(what.into());
         }
     }
-
-    #[test]
-    fn readiness_reports_what_would_travel_and_what_must_not() {
-        let t = tempfile::tempdir().unwrap();
-        let root = dunce::canonicalize(t.path()).unwrap();
-        let conn = crate::db::open_in_memory().unwrap();
-        let ws = crate::workspace::create(&conn, root.join("ws").to_str().unwrap(), "W", "").unwrap();
-        let data = root.join("data");
-        std::fs::create_dir_all(&data).unwrap();
-        // Not a repository yet: guidance, not ready.
-        let r = readiness(&conn, &ws, &data).unwrap();
-        assert!(!r.repo && !r.ready && r.issues[0].message.contains("not a Git repository"));
-
-        git(&ws.root_path, &["init", "-q"]);
-        git(&ws.root_path, &["add", "-A"]);
-        git(&ws.root_path, &["commit", "-qm", "init"]);
-        std::fs::create_dir_all(ws.root_path.join("tasks")).unwrap();
-        std::fs::write(ws.root_path.join("tasks").join("a.md"), "---\nnexus: 1\n---\n").unwrap();
-        std::fs::write(ws.root_path.join("server.pem"), "not read").unwrap();
-        std::fs::write(ws.root_path.join(".env"), "IGNORED=by-the-generated-gitignore").unwrap();
-        let r = readiness(&conn, &ws, &data).unwrap();
-        assert!(r.repo && r.branch.is_some());
-        assert_eq!(r.changed, vec!["tasks/a.md".to_string()], "the new task would travel; .env is ignored by the generated .gitignore");
-        assert_eq!(r.sensitive, vec![SensitiveFile { path: "server.pem".into(), tracked: false, reason: "private key or keystore" }]);
-        assert!(r.ready, "warnings only: {:?}", r.issues);
-        assert!(r.issues.iter().any(|i| i.severity == "warning" && i.message.contains("not ignored")));
-        assert!(r.issues.iter().any(|i| i.message.contains("no remote")));
-
-        // A committed key blocks; so does a data dir inside the workspace.
-        git(&ws.root_path, &["add", "server.pem"]);
-        git(&ws.root_path, &["commit", "-qm", "oops"]);
-        let r = readiness(&conn, &ws, &ws.root_path.join(".nexus-data")).unwrap();
-        assert!(!r.ready && r.data_dir_inside);
-        assert!(r.sensitive.iter().any(|s| s.tracked && s.path == "server.pem"));
-        assert!(r.issues.iter().any(|i| i.severity == "error" && i.message.contains("committed")));
-
-        // Ahead of an upstream (as of the last fetch); no network is used by the check.
-        let remote = root.join("remote.git");
-        std::fs::create_dir_all(&remote).unwrap();
-        git(&remote, &["init", "-q", "--bare"]);
-        git(&ws.root_path, &["remote", "add", "origin", &format!("file://{}", remote.display())]);
-        git(&ws.root_path, &["push", "-q", "-u", "origin", "HEAD"]);
-        git(&ws.root_path, &["add", "-A"]);
-        git(&ws.root_path, &["commit", "-qm", "task"]);
-        let r = readiness(&conn, &ws, &data).unwrap();
-        assert_eq!((r.ahead, r.behind, r.upstream.is_some(), r.remote.is_some()), (1, 0, true, true));
+    let lock = dir.join("index.lock");
+    if lock.exists() {
+        return Some("Git's index is locked (index.lock) — another Git program is running, or one stopped; if none runs, remove the lock file".into());
     }
+    None
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingFile {
+    pub path: String,
+    /// added, modified, deleted, conflicted
+    pub status: &'static str,
+    /// Name/path rules that apply (contents are inspected in the commit review).
+    pub findings: Vec<inspect::Finding>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatus {
+    pub readiness: Readiness,
+    /// not-repo, conflicts, in-progress, no-remote, no-upstream, diverged, behind, ahead, up-to-date
+    pub state: &'static str,
+    pub remote_name: Option<String>,
+    pub last_fetch_at: Option<i64>,
+    pub incoming: Vec<git::LogEntry>,
+    pub outgoing: Vec<git::LogEntry>,
+    pub incoming_files: Vec<git::DiffEntry>,
+    pub outgoing_files: Vec<git::DiffEntry>,
+    pub working: Vec<WorkingFile>,
+    pub in_progress: Option<String>,
+    /// Git has a name and e-mail for commits.
+    pub identity: bool,
+    pub history: Vec<history::Entry>,
+}
+
+/// Everything the Sync Center shows — read-only, no network (incoming/outgoing as of the last fetch).
+pub fn status(conn: &Connection, ws: &Workspace, data_dir: &Path) -> Result<SyncStatus> {
+    let root = &ws.root_path;
+    let readiness = readiness(conn, ws, data_dir)?;
+    let history = history::list(conn, &ws.id, 30)?;
+    let mut s = SyncStatus {
+        state: "not-repo",
+        remote_name: None,
+        last_fetch_at: history::last_ok(conn, &ws.id, "fetch")?,
+        incoming: vec![],
+        outgoing: vec![],
+        incoming_files: vec![],
+        outgoing_files: vec![],
+        working: vec![],
+        in_progress: None,
+        identity: false,
+        history,
+        readiness,
+    };
+    if !s.readiness.repo {
+        return Ok(s);
+    }
+    s.identity = git::identity_configured(root);
+    s.in_progress = in_progress(root);
+    if s.last_fetch_at.is_none() {
+        s.last_fetch_at = git::git_dir(root).and_then(|d| std::fs::metadata(d.join("FETCH_HEAD")).ok()).and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64);
+    }
+    for (xy, path) in git::changed_paths(root)? {
+        let status = match ops::status_of(&xy) {
+            "A" => "added",
+            "D" => "deleted",
+            "U" => "conflicted",
+            _ => "modified",
+        };
+        let mode = if std::fs::symlink_metadata(root.join(&path)).is_ok_and(|m| m.file_type().is_symlink()) { "120000" } else { "100644" };
+        let findings = inspect::path_findings(&path, mode, inspect::Direction::Outgoing);
+        s.working.push(WorkingFile { path, status, findings });
+    }
+    let upstream = git::upstream_of_head(root);
+    s.remote_name = upstream.as_ref().map(|(r, _)| r.clone()).or_else(|| {
+        let all = git::remotes(root);
+        if all.iter().any(|r| r == "origin") { Some("origin".into()) } else { all.into_iter().next() }
+    });
+    if let Some((_, up)) = &upstream {
+        s.incoming = git::log_range(root, &format!("HEAD..{up}"), 100)?;
+        s.outgoing = git::log_range(root, &format!("{up}..HEAD"), 100)?;
+        s.incoming_files = git::diff_raw(root, "HEAD", Some(up))?;
+        s.outgoing_files = git::diff_raw(root, up, Some("HEAD"))?;
+    } else if s.readiness.branch.is_some() && git::head(root).is_some() {
+        s.outgoing = git::log_range(root, "HEAD", 100)?;
+    }
+    let r = &s.readiness;
+    s.state = if r.conflicted > 0 {
+        "conflicts"
+    } else if s.in_progress.is_some() {
+        "in-progress"
+    } else if s.remote_name.is_none() {
+        "no-remote"
+    } else if upstream.is_none() {
+        "no-upstream"
+    } else if r.ahead > 0 && r.behind > 0 {
+        "diverged"
+    } else if r.behind > 0 {
+        "behind"
+    } else if r.ahead > 0 {
+        "ahead"
+    } else {
+        "up-to-date"
+    };
+    Ok(s)
 }
