@@ -76,7 +76,8 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
   * **Checks:** `claude plugin validate` passes on the built-in plugin (throwaway config folder). CI on the branch
     (run 42122452334 at `c54e2b2`) is green on all platforms, including `workbench.mjs` (depth, rules, skill folder,
     first message, session record) and `task-flow.mjs`. Not run locally: the owner's installed NEXUS was open (same app
-    identity, single instance). **Waits for the owner's approval to merge** (with `fix/learn-session`).
+    identity, single instance). **Merged into `main`** (`a3202a8`, `--no-ff`, owner approval 2026-11-05) and prepared
+    as **v0.1.1** (version bump, `docs/RELEASE_NOTES.md` rewritten for 0.1.1; tag `v0.1.1` created locally).
   * **After adding a project:** it opens on Learn.
   * **Fix:** the knowledge index refresh takes SQLite's write lock up front (IMMEDIATE). A deferred read-then-write
     upgrade failed at once with "database is locked" when the desktop and the MCP server refreshed together; it showed
@@ -336,7 +337,8 @@ free.
 
 ## Next actions (in order)
 
-1. Owner: try the published v0.1.0 installers from the website's download page.
+1. Owner: push `main` and the tag `v0.1.1`; review the draft release the workflow creates and publish it (the site
+   updates itself — the `github-pages` environment now accepts `v*` tags). Then install 0.1.1 over 0.1.0.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
    project from Git and try *Learn*; MANUAL_CHECKS 33 (with `docs/TEMPLATE_REVIEW.md`).
 3. Owner decisions still open: product name and `nexus://`, code signing (Windows SmartScreen, macOS notarization),

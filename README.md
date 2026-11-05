@@ -8,7 +8,7 @@
 A local-first desktop workbench for [Claude Code](https://code.claude.com): one workspace for every project, sessions
 that start informed, rules Claude actually follows — and a setup that travels to your next computer through your own Git.
 
-<a href="https://github.com/Makogai/nexus/releases/latest"><img alt="Download" src="https://img.shields.io/badge/download-v0.1.0-7c6cf2?style=for-the-badge" /></a>
+<a href="https://github.com/Makogai/nexus/releases/latest"><img alt="Download" src="https://img.shields.io/badge/download-v0.1.1-7c6cf2?style=for-the-badge" /></a>
 <img alt="Windows · macOS · Linux" src="https://img.shields.io/badge/Windows%20·%20macOS%20·%20Linux-141822?style=for-the-badge" />
 <img alt="Built with Tauri, Rust and Vue" src="https://img.shields.io/badge/Tauri%20·%20Rust%20·%20Vue-3ad1c5?style=for-the-badge&labelColor=141822" />
 
@@ -22,7 +22,7 @@ that start informed, rules Claude actually follows — and a setup that travels 
 
 | Platform | Get it | |
 | --- | --- | --- |
-| **Windows** 10/11 x64 | [`NEXUS_0.1.0_x64-setup.exe`](https://github.com/Makogai/nexus/releases/latest) | per user, no administrator rights |
+| **Windows** 10/11 x64 | [`NEXUS_0.1.1_x64-setup.exe`](https://github.com/Makogai/nexus/releases/latest) | per user, no administrator rights |
 | **macOS** 11+ | [Apple silicon `.dmg`](https://github.com/Makogai/nexus/releases/latest) · [Intel `.dmg`](https://github.com/Makogai/nexus/releases/latest) | drag to Applications |
 | **Linux** x64 | [`.AppImage`](https://github.com/Makogai/nexus/releases/latest) · [`.deb`](https://github.com/Makogai/nexus/releases/latest) | most distributions |
 
