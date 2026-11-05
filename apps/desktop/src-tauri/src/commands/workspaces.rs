@@ -1,5 +1,6 @@
 use tauri::State;
 
+use nexus_core::templates;
 use nexus_core::workspace::{self, Workspace, migrate};
 
 use crate::error::IpcResult;
@@ -16,10 +17,37 @@ pub fn workspace_active(ctx: State<'_, Ctx>) -> IpcResult<Option<Workspace>> {
 }
 
 #[tauri::command]
-pub fn workspace_create(ctx: State<'_, Ctx>, path: String, name: String, description: Option<String>) -> IpcResult<Workspace> {
+pub fn workspace_create(ctx: State<'_, Ctx>, path: String, name: String, description: Option<String>, template: Option<String>) -> IpcResult<Workspace> {
     let db = ctx.db();
+    if let Some(t) = template.as_deref() {
+        templates::info(t)?; // an unknown template fails before anything is created
+    }
     let ws = workspace::create(&db, &path, &name, description.as_deref().unwrap_or(""))?;
+    if let Some(t) = template.as_deref() {
+        templates::apply(&db, &ctx.data_dir, &ws, t)?;
+    }
     Ok(workspace::activate(&db, &ws.id)?)
+}
+
+/// The built-in workspace templates (ADR-0037).
+#[tauri::command]
+pub fn template_list() -> IpcResult<Vec<templates::Summary>> {
+    Ok(templates::list()?)
+}
+
+/// What installing or updating a template in the workspace would do. Read-only.
+#[tauri::command]
+pub fn template_plan(ctx: State<'_, Ctx>, workspace_id: String, template: String) -> IpcResult<templates::Plan> {
+    let ws = workspace::get(&ctx.db(), &workspace_id)?;
+    Ok(templates::plan(&ws.root_path, &template)?)
+}
+
+/// Install or update the template after the person reviewed the plan; never overwrites changed or own files.
+#[tauri::command]
+pub fn template_apply(ctx: State<'_, Ctx>, workspace_id: String, template: String) -> IpcResult<templates::Applied> {
+    let db = ctx.db();
+    let ws = workspace::get(&db, &workspace_id)?;
+    Ok(templates::apply(&db, &ctx.data_dir, &ws, &template)?)
 }
 
 #[tauri::command]

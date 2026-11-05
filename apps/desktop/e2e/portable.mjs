@@ -1,6 +1,8 @@
 // End-to-end Portable Workspace against the REAL app (docs/PORTABLE_WORKSPACE.md). Grows with each milestone:
 //   P1 — a schema 1 workspace shows the migration banner → the plan lists the changes → migrating writes schema 2 and
 //        a backup; a workspace from a newer NEXUS opens read-only and refuses changes.
+//   P2 — templates are listed → a workspace created from AI Engineering Pro has the library, approved, with the
+//        workspace skills as an approved kit → the Constitutions view shows it → applying again changes nothing.
 //
 //   cargo build -p fake-claude -p nexus-cli
 //   npx tauri build --debug --no-bundle --features e2e-webview-debugging
@@ -105,6 +107,26 @@ try {
   check('…and refuses changes', !!refused && refused.includes('read-only'), refused ?? 'accepted')
   check('…without touching its manifest', JSON.parse(readFileSync(join(futureWs, 'nexus-workspace.json'), 'utf8')).somethingNew?.a === 1)
   check('the workspace list still opens it (not refused as before schema 2)', (await text('.shell')).length > 0)
+
+  // ---- P2: templates ----
+  const tpls = await inv('template_list')
+  const pro = tpls.find((t) => t.id === 'ai-engineering-pro')
+  check('three templates are offered, Pro with the full library', tpls.map((t) => t.id).join(',') === 'minimal,developer,ai-engineering-pro' && pro.stackRuleSets === 13 && pro.skills === 11 && pro.workflows === 7, js(tpls.map((t) => [t.id, t.constitutions, t.stackRuleSets, t.skills, t.workflows])))
+  check('…and only a small core is always on', pro.alwaysOnChars > 0 && pro.alwaysOnChars < 1000, String(pro.alwaysOnChars))
+  const proWs = await inv('workspace_create', { path: join(root, 'pro-ws'), name: 'Pro', description: null, template: 'ai-engineering-pro' })
+  check('a workspace created from a template records it', proWs.template?.id === 'ai-engineering-pro', js(proWs.template))
+  check('…with its lock file', existsSync(join(root, 'pro-ws', 'nexus.lock.json')))
+  const constitutions = await inv('constitution_list', { workspaceId: proWs.id })
+  check('…its constitutions are indexed', constitutions.length === 27, String(constitutions.length))
+  const kits = await inv('kit_list')
+  const wk = kits.find((k) => k.workspaceId === proWs.id)
+  check('…its skills are the approved workspace kit', wk?.name === 'workspace' && wk.status === 'approved' && wk.inventory.skills.length === 11, js(wk && [wk.name, wk.status]))
+  await reload()
+  await cdp.evaluate(`location.hash = '#/constitutions'; true`)
+  const view = await cdp.waitFor(`(() => { const t = document.querySelector('main')?.innerText ?? ''; return t.includes('Core working agreement') && t.includes('Security') ? t : '' })()`, 15000).catch(() => '')
+  check('the Constitutions view shows the installed library', !!view)
+  const again = await inv('template_plan', { workspaceId: proWs.id, template: 'ai-engineering-pro' })
+  check('applying the same template again changes nothing', again.items.every((i) => i.action === 'unchanged'), js(again.items.filter((i) => i.action !== 'unchanged').slice(0, 3)))
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

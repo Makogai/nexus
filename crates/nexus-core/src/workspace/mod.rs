@@ -217,7 +217,7 @@ repos/
 .env.*
 ";
 
-fn workspace_readme(name: &str) -> String {
+pub(crate) fn workspace_readme(name: &str) -> String {
     format!(
         "# {name}\n\nThis folder is a NEXUS workspace.\n\n\
          * `{MANIFEST_FILE}` — portable workspace manifest (identity, schema, template, projects).\n\

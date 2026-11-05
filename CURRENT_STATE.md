@@ -8,7 +8,7 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
   Nothing pushed.
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
-  P1 (workspace schema 2) done and committed; P2 (templates) next. Not merged, not pushed, no release.
+  P1 (workspace schema 2) and P2 (templates) done and committed; P3 (Workspace Doctor) next. Not merged, not pushed, no release.
 
 ## Portable Workspace — progress (session 10)
 
@@ -25,6 +25,22 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   `workspace_migration_plan`/`workspace_migrate`; desktop `WorkspaceBanner` (read-only reason, review → migrate).
   Verified: core 192/192, CLI 33 + 6, vitest banner 2/2, desktop E2E `portable.mjs` 11/11, `run-smoke` 27/27,
   `sync` 18/18, clippy clean.
+* **P2 — templates (ADR-0037)**: built-in packages embedded by `crates/nexus-core/build.rs` from
+  `crates/nexus-core/templates/<id>/` — *Minimal* (core agreement), *Developer* (+ engineering, code quality, testing,
+  Git, documentation; 5 skills; 4 workflows), *AI Engineering Pro* (+ architecture, security, performance,
+  accessibility, database, frontend, backend, DevOps; 13 stack rule sets Angular … Docker; 11 skills; 7 workflows;
+  4 integration manifests: Graphify, Codex CLI, Playwright MCP, GitHub CLI — researched against official sources,
+  never installed automatically). 27 constitutions / 319 rules. `templates::plan/apply` with `nexus.lock.json`
+  (add / update / keep yours + copy in `.nexus-local/template-updates/` / keep removed / skip own file / retire),
+  validation before writing, rollback; approvals for what the person installs; the `skills/` folder becomes the
+  workspace AI Kit (`kits.workspace_id`, migration 0016, plugin `workspace`, only that workspace's sessions).
+  Progressive delivery: only the core (6 rules, ~950 characters) is always on; on-demand documents are listed by
+  title + id pattern (`get_constitution` accepts `"TST-*"`), stack sets only for matching projects — a Vue/TS project
+  gets 1 463 characters for the whole library. Detection adds `docker` and `sql`. `nexus templates list|show|apply`,
+  `workspaces create --template`, IPC `template_list/plan/apply`, onboarding template choice. Content written by four
+  delegated writers against one brief, then gated by `templates::tests` (structure, ids, lengths, stacks, skills,
+  integration schema, no credentials). Verified: core 201, CLI 34 + 6, vitest 79, desktop E2E `portable.mjs` 19/19,
+  `profiles-kits` 9/9, `workflows` 24/24, real-Claude `kits` 17/17 and `workflow` 7/7, clippy clean.
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 

@@ -57,6 +57,28 @@ fn any_with_ext(dir: &Path, exts: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the project works with a SQL database: a migrations/schema folder, `.sql` files at the top, or a well-known
+/// database library in a manifest. Read-only and capped like everything here.
+fn uses_sql(root: &Path) -> bool {
+    const DIRS: &[&str] = &["migrations", "db/migrations", "database/migrations", "prisma", "alembic", "supabase/migrations", "sql"];
+    if DIRS.iter().any(|d| root.join(d).is_dir()) || any_with_ext(root, &["sql"]) {
+        return true;
+    }
+    const LIBS: &[(&str, &[&str])] = &[
+        ("package.json", &["\"prisma\"", "\"@prisma/client\"", "\"typeorm\"", "\"sequelize\"", "\"knex\"", "\"drizzle-orm\"", "\"pg\"", "\"mysql2\"", "\"better-sqlite3\"", "\"kysely\""]),
+        ("Cargo.toml", &["sqlx", "diesel", "rusqlite", "sea-orm", "tokio-postgres"]),
+        ("pyproject.toml", &["sqlalchemy", "alembic", "psycopg", "django", "sqlmodel"]),
+        ("requirements.txt", &["sqlalchemy", "alembic", "psycopg", "django", "sqlmodel"]),
+        ("composer.json", &["doctrine/orm", "doctrine/dbal", "laravel/framework"]),
+        ("go.mod", &["database/sql", "gorm.io", "jackc/pgx", "sqlx"]),
+        ("pubspec.yaml", &["sqflite", "drift:", "postgres:"]),
+    ];
+    LIBS.iter().any(|(file, needles)| read_capped(&root.join(file)).is_some_and(|t| {
+        let t = t.to_lowercase();
+        needles.iter().any(|n| t.contains(n))
+    }))
+}
+
 pub fn detect(root: &Path) -> StackInfo {
     let mut info = StackInfo {
         is_git: root.join(".git").exists(),
@@ -214,8 +236,20 @@ pub fn detect(root: &Path) -> StackInfo {
         push(&mut info.stacks, "roblox");
     }
 
+    // Containers: Dockerfile, Compose or a Dev Container (ADR-0037 stack rules; environment manifest).
+    if ["Dockerfile", "compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml", "Containerfile"].iter().any(|f| has(f))
+        || root.join(".devcontainer").join("devcontainer.json").is_file()
+        || root.join(".devcontainer.json").is_file()
+    {
+        push(&mut info.stacks, "docker");
+    }
+    // SQL databases: migrations folders, schema files or a database library in a manifest.
+    if uses_sql(root) {
+        push(&mut info.stacks, "sql");
+    }
+
     // Most specific first: frameworks before languages/runtimes.
-    const GENERIC: &[&str] = &["vite", "typescript", "node", "php", "dart", "python", "rust"];
+    const GENERIC: &[&str] = &["vite", "typescript", "node", "php", "dart", "python", "rust", "sql", "docker"];
     info.stacks.sort_by_key(|s| GENERIC.iter().position(|g| g == s).map_or(0, |i| i + 1));
     info
 }
@@ -228,6 +262,25 @@ mod tests {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, body).unwrap();
+    }
+
+    #[test]
+    fn containers_and_sql_databases_are_detected() {
+        let t = tempfile::tempdir().unwrap();
+        write(t.path(), "package.json", r#"{"dependencies":{"vue":"^3","@prisma/client":"^6"}}"#);
+        write(t.path(), "compose.yaml", "services: {}\n");
+        let s = detect(t.path()).stacks;
+        assert!(s.contains(&"docker".to_string()) && s.contains(&"sql".to_string()), "{s:?}");
+        assert_eq!(s.first().map(String::as_str), Some("vue"), "frameworks stay first: {s:?}");
+        let plain = tempfile::tempdir().unwrap();
+        write(plain.path(), "package.json", r#"{"dependencies":{"vue":"^3"}}"#);
+        let s = detect(plain.path()).stacks;
+        assert!(!s.contains(&"docker".to_string()) && !s.contains(&"sql".to_string()), "{s:?}");
+        let dev = tempfile::tempdir().unwrap();
+        write(dev.path(), ".devcontainer/devcontainer.json", "{}");
+        write(dev.path(), "database/migrations/0001_create_users.php", "<?php");
+        let s = detect(dev.path()).stacks;
+        assert!(s.contains(&"docker".to_string()) && s.contains(&"sql".to_string()), "{s:?}");
     }
 
     #[test]

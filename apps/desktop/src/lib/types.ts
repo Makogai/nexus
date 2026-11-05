@@ -67,6 +67,38 @@ export interface MigrationPlan {
   notes: string[]
 }
 
+export interface TemplateSummary {
+  id: string
+  version: string
+  title: string
+  summary: string
+  extends: string | null
+  features: string[]
+  highlights: string[]
+  constitutions: number
+  stackRuleSets: number
+  skills: number
+  workflows: number
+  integrations: number
+  alwaysOnChars: number
+}
+
+export type TemplateAction = 'add' | 'update' | 'unchanged' | 'keep-customized' | 'keep-removed' | 'skip-existing' | 'retire'
+
+export interface TemplatePlan {
+  template: { id: string; version: string }
+  installed: { id: string; version: string } | null
+  items: { path: string; kind: 'constitution' | 'skill' | 'workflow' | 'integration' | 'file'; template: string; action: TemplateAction }[]
+  notes: string[]
+}
+
+export interface TemplateApplied {
+  plan: TemplatePlan
+  written: string[]
+  savedForReview: string[]
+  kitId: string | null
+}
+
 export interface Migrated {
   plan: MigrationPlan
   backupDir: string | null
@@ -985,6 +1017,8 @@ export interface KitView {
   commitSha: string | null
   registeredAt: number
   updatedAt: number
+  /** Set for a workspace's own skills kit: only that workspace's sessions get it (ADR-0037). */
+  workspaceId: string | null
   status: 'approved' | 'needs-review' | 'changed' | 'missing'
   contentDir: string
   inventory: KitInventory

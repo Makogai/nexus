@@ -14,6 +14,7 @@ mod mcp;
 mod notifications;
 mod out;
 mod sync;
+mod templates;
 mod usage;
 mod workflow;
 
@@ -85,6 +86,9 @@ enum Command {
     /// Backups of NEXUS's machine-local state (database, global knowledge) and a safe restore (ADR-0032).
     #[command(subcommand)]
     Backup(backup::BackupCmd),
+    /// Workspace starter templates: Minimal, Developer, AI Engineering Pro (ADR-0037).
+    #[command(subcommand)]
+    Templates(templates::TemplateCmd),
     /// Constitutions: structured rules (articles, sections, rules with ids and enforcement) by scope.
     #[command(subcommand)]
     Constitution(constitution::ConstitutionCmd),
@@ -121,6 +125,9 @@ enum WorkspaceCmd {
         name: String,
         #[arg(long, default_value = "")]
         description: String,
+        /// Starter template: minimal, developer or ai-engineering-pro (`nexus templates list`).
+        #[arg(long)]
+        template: Option<String>,
     },
     /// Register an existing workspace folder (e.g. cloned on a new machine) and make it active.
     Open { folder: String },
@@ -268,6 +275,7 @@ fn main() -> ExitCode {
         Command::Usage(a) => usage::run(&ctx, a),
         Command::Sync(c) => sync::run(&ctx, c),
         Command::Backup(c) => backup::run(&ctx, c),
+        Command::Templates(c) => templates::run(&ctx, c),
         Command::Workflow(c) => workflow::run_workflow(&ctx, c),
         Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),
@@ -298,7 +306,7 @@ fn fail(e: &CoreError) -> ExitCode {
     ExitCode::from(1)
 }
 
-fn active_workspace(conn: &Connection) -> nexus_core::Result<workspace::Workspace> {
+pub(crate) fn active_workspace(conn: &Connection) -> nexus_core::Result<workspace::Workspace> {
     workspace::active(conn)?.ok_or_else(|| {
         CoreError::invalid("no active workspace — create one with `nexus workspaces create <folder> --name <name>`")
     })
@@ -370,8 +378,14 @@ fn cmd_workspaces(ctx: &Ctx, cmd: WorkspaceCmd) -> nexus_core::Result<()> {
                 .collect();
             out::table(&["", "NAME", "PROJECTS", "FOLDER"], &rows);
         }
-        WorkspaceCmd::Create { folder, name, description } => {
+        WorkspaceCmd::Create { folder, name, description, template } => {
+            if let Some(t) = &template {
+                nexus_core::templates::info(t)?; // unknown templates fail before anything is created
+            }
             let ws = workspace::create(&conn, &folder, &name, &description)?;
+            if let Some(t) = &template {
+                nexus_core::templates::apply(&conn, &ctx.data_dir, &ws, t)?;
+            }
             print_one(&workspace::activate(&conn, &ws.id)?);
         }
         WorkspaceCmd::Open { folder } => {

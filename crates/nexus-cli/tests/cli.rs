@@ -915,6 +915,56 @@ fn workspace_schema_migration_and_read_only_compatibility() {
     assert!(!e.run(&["workspaces", "migrate", "--yes"]).status.success(), "a newer schema is never migrated backwards");
 }
 
+/// ADR-0037: a template installs through the stores after a reviewed plan; its skills reach this workspace's sessions
+/// (and no other workspace's) as the `workspace` kit; the constitution reaches Claude progressively — the core text plus
+/// one entry per on-demand document, stack rules only for the project's stacks.
+#[test]
+fn templates_install_a_progressive_library_scoped_to_its_workspace() {
+    let e = Env::new();
+    e.setup();
+    let list = e.json(&["templates", "list"]);
+    assert_eq!(list.as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect::<Vec<_>>(), ["minimal", "developer", "ai-engineering-pro"]);
+    let dry = e.run(&["templates", "apply", "ai-engineering-pro"]);
+    assert_eq!(dry.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&dry.stdout).contains("Repeat with --yes"));
+    assert!(!ws_dir(&e).join("constitutions").exists(), "nothing written before --yes");
+    let done = e.json(&["templates", "apply", "ai-engineering-pro", "--yes"]);
+    assert!(done["written"].as_array().unwrap().len() > 40, "{done}");
+    assert!(e.ok(&["templates", "apply", "ai-engineering-pro"]).contains("nothing to change"));
+    assert_eq!(e.json(&["workspaces", "info"])["template"]["id"], "ai-engineering-pro");
+    assert!(ws_dir(&e).join("nexus.lock.json").is_file());
+
+    let (report, session) = launch_report(&e, &[], "template-launch.json");
+    let args: Vec<String> = serde_json::from_value(report["args"].clone()).unwrap();
+    let plugin = args.windows(2).find(|w| w[0] == "--plugin-dir").map(|w| PathBuf::from(&w[1])).expect("the workspace kit is delivered");
+    let manifest: Value = serde_json::from_slice(&std::fs::read(plugin.join(".claude-plugin").join("plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["name"], "workspace");
+    assert!(plugin.join("skills").join("feature-development").join("SKILL.md").is_file());
+    assert!(session["integrations"]["kits"].as_array().unwrap().iter().any(|k| k["name"] == "workspace" && k["blocked"].is_null()), "{}", session["integrations"]);
+    let prompt = args.windows(2).find(|w| w[0] == "--append-system-prompt").map(|w| w[1].clone()).unwrap();
+    assert!(prompt.contains("CORE-1") && prompt.contains("TST-*") && prompt.contains("RS-*"), "{prompt}");
+    assert!(!prompt.contains("VUE-*") && !prompt.contains("TST-1 "), "stack rules follow the project; documents, not rule ids: {prompt}");
+
+    // A different workspace's sessions never get these skills.
+    let other = e.home().join("other-repo");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("Cargo.toml"), "[package]\nname = \"other\"\n").unwrap();
+    assert!(Command::new("git").args(["init", "-q", "-b", "main"]).current_dir(&other).status().unwrap().success());
+    e.ok(&["workspaces", "create", e.home().join("ws2").to_str().unwrap(), "--name", "Other"]);
+    e.ok(&["projects", "add", other.to_str().unwrap()]);
+    let report2 = e.home().join("other-launch.json");
+    let out = e.cmd(&["launch", "--project", "other-repo", "-q"]).env("FAKE_CLAUDE_REPORT", &report2).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let args2: Vec<String> = serde_json::from_value(read_report(&report2)["args"].clone()).unwrap();
+    assert!(!args2.iter().any(|a| a == "--plugin-dir"), "workspace skills stay in their workspace: {args2:?}");
+
+    // A new workspace can start from a template directly; an unknown template creates nothing.
+    e.ok(&["workspaces", "create", e.home().join("ws3").to_str().unwrap(), "--name", "Third", "--template", "minimal"]);
+    assert!(e.home().join("ws3").join("constitutions").join("core.md").is_file());
+    assert!(!e.run(&["workspaces", "create", e.home().join("ws4").to_str().unwrap(), "--name", "Fourth", "--template", "nope"]).status.success());
+    assert!(!e.home().join("ws4").exists());
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {

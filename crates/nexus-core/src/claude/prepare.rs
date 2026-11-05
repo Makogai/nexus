@@ -199,7 +199,7 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
     // A workflow run carried by the task activates its skills for this session only (ADR-0029).
     let run = r.task_id.and_then(|t| crate::workflow::run::active_for_task(r.conn, t).ok().flatten());
     let extra = run.as_ref().map(|x| x.skills.clone()).unwrap_or_default();
-    let (plugin_dirs, kit_launches, refused) = crate::kits::session_plugin_dirs_with(r.conn, r.data_dir, &r.profile.id, &pol, &extra)?;
+    let (plugin_dirs, kit_launches, refused) = crate::kits::session_plugin_dirs_with(r.conn, r.data_dir, &r.profile.id, r.workspace_id, &pol, &extra)?;
     let ws = r.workspace_id.and_then(|id| workspace::get(r.conn, id).ok()).filter(|w| w.available);
     let project = r.project_id.and_then(|id| project::get(r.conn, id).ok());
     let mut parts: Vec<String> = Vec::new();

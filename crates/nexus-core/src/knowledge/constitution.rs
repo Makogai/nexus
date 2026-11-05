@@ -1028,13 +1028,59 @@ pub fn delivery(e: &Effective, budget: usize, tools: bool, level: crate::context
         }
     }
     if !d.on_demand.is_empty() {
-        let ids: Vec<&str> = d.on_demand.iter().take(30).map(String::as_str).collect();
-        let more = if d.on_demand.len() > 30 { format!(" and {} more", d.on_demand.len() - 30) } else { String::new() };
-        if tools {
-            text.push_str(&format!("\nAlso in force (read with the NEXUS get_constitution tool when relevant): {}{more}.", ids.join(", ")));
-        } else {
-            text.push_str(&format!("\nAlso in force (ask the user for their text): {}{more}.", ids.join(", ")));
+        // One entry per document (title + id pattern), not one id per rule: a large library costs a line per topic
+        // (progressive loading, ADR-0037). Documents with mandatory policies say so.
+        let mut groups: Vec<(&str, Vec<&EffectiveRule>)> = Vec::new();
+        for id in &d.on_demand {
+            let Some(r) = e.rules.iter().find(|r| &r.id == id) else { continue };
+            match groups.iter_mut().find(|(t, _)| *t == r.doc_title.as_str()) {
+                Some((_, rs)) => rs.push(r),
+                None => groups.push((r.doc_title.as_str(), vec![r])),
+            }
         }
+        const MAX_GROUPS: usize = 40;
+        let mut example: Option<String> = None;
+        let parts: Vec<String> = groups
+            .iter()
+            .take(MAX_GROUPS)
+            .map(|(title, rs)| {
+                let prefix = rs[0].id.rsplit_once('-').map(|(p, _)| p).filter(|p| !p.is_empty() && rs.iter().all(|r| r.id.starts_with(&format!("{p}-"))));
+                let what = match prefix {
+                    Some(p) => {
+                        example.get_or_insert_with(|| format!("{p}-*"));
+                        format!("{p}-*")
+                    }
+                    None => rs.iter().take(8).map(|r| r.id.as_str()).collect::<Vec<_>>().join(", ") + if rs.len() > 8 { ", …" } else { "" },
+                };
+                let mandatory = rs.iter().filter(|r| r.enforcement == Enforcement::Mandatory).count();
+                let title = crate::knowledge::tasks::escape_untrusted(title, 60);
+                if mandatory > 0 { format!("{title} {what} ({}, {mandatory} mandatory)", rs.len()) } else { format!("{title} {what} ({})", rs.len()) }
+            })
+            .collect();
+        let intro = if tools {
+            format!("\nOn demand — read the relevant ones with get_constitution (e.g. ids [\"{}\"]): ", example.unwrap_or_else(|| d.on_demand[0].clone()))
+        } else {
+            "\nAlso in force — ask the user for the text: ".to_string()
+        };
+        // The listing stays inside the budget: documents that do not fit are counted, not named.
+        let mut line = intro;
+        let mut listed = 0;
+        let used = text.chars().count();
+        for p in &parts {
+            let sep = if listed == 0 { "" } else { "; " };
+            if used + line.chars().count() + sep.len() + p.chars().count() + 30 > budget.max(used + 200) {
+                break;
+            }
+            line.push_str(sep);
+            line.push_str(p);
+            listed += 1;
+        }
+        let rest = groups.len() - listed;
+        if rest > 0 {
+            line.push_str(&format!("{}{rest} more document{}", if listed == 0 { "" } else { "; and " }, if rest == 1 { "" } else { "s" }));
+        }
+        line.push('.');
+        text.push_str(&line);
     }
     if text.chars().count() > header {
         d.text = Some(text);

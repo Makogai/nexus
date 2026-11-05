@@ -15,8 +15,8 @@ export const useWorkspaceStore = defineStore('workspaces', () => {
     loaded.value = true
   }
 
-  async function create(path: string, name: string, description?: string) {
-    active.value = await api.workspaceCreate(path, name, description)
+  async function create(path: string, name: string, description?: string, template?: string | null) {
+    active.value = await api.workspaceCreate(path, name, description, template)
     list.value = await api.workspaceList()
     return active.value
   }

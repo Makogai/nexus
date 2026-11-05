@@ -307,7 +307,8 @@ impl Server {
         let rules: Vec<Value> = e
             .rules
             .iter()
-            .filter(|r| ids.as_ref().is_none_or(|ids| ids.contains(&r.id)))
+            // Exact ids, or a document's rules by prefix (`"TST-*"`, ADR-0037).
+            .filter(|r| ids.as_ref().is_none_or(|ids| ids.iter().any(|i| *i == r.id || i.strip_suffix('*').is_some_and(|p| !p.is_empty() && r.id.starts_with(p)))))
             .filter(|r| guidelines || r.enforcement != constitution::Enforcement::Guideline)
             .take(100)
             .map(|r| {
@@ -1018,7 +1019,7 @@ fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "get_constitution", "title": "Constitution rules",
-            "description": "The effective constitution rules for this session (workspace, stack, project and task scopes applied; mandatory policies cannot be overridden): ids, enforcement (mandatory, rule, guideline) and text. Use it to read rules that are listed by id only, or to check a rule before acting.",
+            "description": "The effective constitution rules for this session (workspace, stack, project and task scopes applied; mandatory policies cannot be overridden): ids, enforcement (mandatory, rule, guideline) and text. Use it to read the rules of a document listed for on-demand reading (ids such as \"TST-*\" select all rules with that prefix), or to check a rule before acting.",
             "inputSchema": { "type": "object", "properties": {
                 "project": project_arg,
                 "ids": { "type": "array", "items": { "type": "string", "maxLength": 48 }, "maxItems": 50 },

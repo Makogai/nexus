@@ -23,6 +23,8 @@ pub mod project;
 pub mod resume;
 pub mod session;
 pub mod settings;
+pub mod templates;
+pub mod toolchain;
 pub mod usage;
 pub mod workprofile;
 pub mod workflow;

@@ -1,0 +1,56 @@
+{
+  "nexus": 1,
+  "id": "playwright-mcp",
+  "name": "Playwright MCP",
+  "kind": "mcp-server",
+  "summary": "Microsoft's MCP server that lets Claude drive a real browser through Playwright (navigate, click, fill forms, inspect pages) for exploratory testing and UI debugging.",
+  "homepage": "https://github.com/microsoft/playwright-mcp",
+  "license": "Apache-2.0",
+  "verifiedAt": "2026-11-05",
+  "enabled": false,
+  "requires": ["node", "npx"],
+  "provides": null,
+  "stacks": ["angular", "vue", "react", "svelte", "nextjs", "nuxt"],
+  "install": [
+    {
+      "platform": "any",
+      "method": "NEXUS AI Kit (recommended)",
+      "steps": [
+        "Install Node.js 18 or newer.",
+        "Create an AI Kit containing a `.mcp.json` with the server: `{\"mcpServers\": {\"playwright\": {\"command\": \"npx\", \"args\": [\"@playwright/mcp@latest\", \"--isolated\", \"--headless\"]}}}`.",
+        "Enable the kit for a work profile and give that profile the explicit MCP opt-in.",
+        "Start a new session; npx fetches the server on first use."
+      ],
+      "changes": "Nothing is installed globally; npx stores the package in the npm cache. The kit lives in the NEXUS workspace and reaches only sessions of the profile it is enabled for."
+    },
+    {
+      "platform": "any",
+      "method": "project .mcp.json",
+      "steps": [
+        "Install Node.js 18 or newer.",
+        "Add a `.mcp.json` to the project root with the same `playwright` server entry.",
+        "Review it and commit it to the project repository."
+      ],
+      "changes": "Writes `.mcp.json` into the project repository, visible in Git. The person's Claude configuration is not changed."
+    }
+  ],
+  "nexusDelivery": "Package a `.mcp.json` with the `playwright` server in an AI Kit and enable it for a profile with the explicit MCP opt-in, or let the person commit a project `.mcp.json`. NEXUS never runs `claude mcp add playwright npx @playwright/mcp@latest`, because that command writes to the person's Claude configuration.",
+  "dataFlow": "The server runs locally and controls a local browser, which loads pages from wherever they are hosted. Page content and other results it returns to Claude become part of the conversation and are sent to the model provider.",
+  "security": [
+    "Playwright MCP is not a security boundary: treat everything the browser can reach as reachable by the agent.",
+    "`--allowed-origins` (semicolon-separated trusted origins; all origins are allowed by default) is not a security boundary either and does not affect redirects.",
+    "The `browser_run_code_unsafe` capability executes arbitrary JavaScript in the server process, which is equivalent to remote code execution on this machine.",
+    "file:// navigation is blocked unless `--allow-unrestricted-file-access` is given; do not give it.",
+    "`--no-sandbox` disables browser sandboxing; do not use it.",
+    "Never use `--host 0.0.0.0`: it exposes the server to other machines on the network.",
+    "For agent use, run with `--isolated` (browser profile kept in memory) and `--headless`, and point the browser only at local or test environments with test accounts.",
+    "`@latest` runs whatever version is newest when the session starts; pin an exact package version in the kit when you need reviewed, reproducible server code."
+  ],
+  "usage": [
+    "Standard MCP configuration: `{\"mcpServers\": {\"playwright\": {\"command\": \"npx\", \"args\": [\"@playwright/mcp@latest\"]}}}`; add `--isolated` and `--headless` to args for agent use.",
+    "`--browser` selects chrome, firefox, webkit or msedge.",
+    "`--allowed-origins` limits navigation to the listed origins, separated by semicolons (a convenience, not a security control).",
+    "`--output-dir` sets where the server writes its output files.",
+    "Use it for exploratory checks and for reproducing UI bugs, then turn what you find into committed Playwright tests (playwright-testing skill) so they run without the agent."
+  ]
+}

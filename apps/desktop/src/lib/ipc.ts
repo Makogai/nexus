@@ -4,6 +4,9 @@ import type {
   AppInfo,
   Migrated,
   MigrationPlan,
+  TemplateApplied,
+  TemplatePlan,
+  TemplateSummary,
   AuthStatus,
   Checkpoint,
   ClaudeProfile,
@@ -135,8 +138,11 @@ export const api = {
 
   workspaceList: () => call<Workspace[]>('workspace_list'),
   workspaceActive: () => call<Workspace | null>('workspace_active'),
-  workspaceCreate: (path: string, name: string, description?: string) =>
-    call<Workspace>('workspace_create', { path, name, description }),
+  workspaceCreate: (path: string, name: string, description?: string, template?: string | null) =>
+    call<Workspace>('workspace_create', { path, name, description, template: template ?? null }),
+  templateList: () => call<TemplateSummary[]>('template_list'),
+  templatePlan: (workspaceId: string, template: string) => call<TemplatePlan>('template_plan', { workspaceId, template }),
+  templateApply: (workspaceId: string, template: string) => call<TemplateApplied>('template_apply', { workspaceId, template }),
   workspaceImport: (path: string) => call<Workspace>('workspace_import', { path }),
   workspaceActivate: (id: string) => call<Workspace>('workspace_activate', { id }),
   workspaceForget: (id: string) => call<void>('workspace_forget', { id }),

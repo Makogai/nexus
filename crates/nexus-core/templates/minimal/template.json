@@ -1,0 +1,12 @@
+{
+  "id": "minimal",
+  "version": "1.0.0",
+  "title": "Minimal",
+  "summary": "The core working agreement only: verified claims, no secrets, confirmation before destructive actions.",
+  "extends": null,
+  "features": ["project-context"],
+  "highlights": [
+    "One small always-on constitution (6 rules, about 1,000 characters per session)",
+    "Everything else you add yourself"
+  ]
+}

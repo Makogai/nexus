@@ -117,5 +117,11 @@
     *Settings → Backups → Back up now* → *Restore…* restarts and restores → uninstall from Windows Settings → your data
     in `%LOCALAPPDATA%\NEXUS` is still there; reinstall → everything is back.
 
+33. **Template library review** (owner, once): create a scratch workspace from *AI Engineering Pro* → read the core
+    agreement and two or three constitutions and skills you know well (e.g. Git practices, your main stack, code review)
+    → are the rules ones you would sign? Anything to tighten, drop or add goes into the next template version. Then
+    launch a session in a project and ask Claude which constitution documents are available — it should list them by
+    title and read one only when relevant.
+
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

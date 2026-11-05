@@ -1,0 +1,13 @@
+{
+  "id": "developer",
+  "version": "1.0.0",
+  "title": "Developer",
+  "summary": "Core agreement plus engineering, code-quality, testing, Git and documentation standards, five everyday skills and four workflows.",
+  "extends": "minimal",
+  "features": ["project-context", "development-records"],
+  "highlights": [
+    "6 constitutions — only the core one is always on; the rest are read when relevant",
+    "Skills: project onboarding, feature development, bug investigation, code review, development continuation",
+    "Workflows: prototype, standard feature, bug fix, code review"
+  ]
+}
