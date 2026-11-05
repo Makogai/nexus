@@ -73,9 +73,10 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
   * **Rules:** LEARN-1 to LEARN-7 in the system prompt of learning sessions — one session, no subagents unless the
     person asks, read only, a budget.
   * **Depth:** Quick / Standard / Deep in the Learn tab (label on the task), with the budget and the exact rules shown.
-  * **Checks:** `claude plugin validate` passes on the built-in plugin (throwaway config folder). `workbench.mjs` and
-    `task-flow.mjs` not yet run on this branch — the owner's installed NEXUS was open (same app identity, single
-    instance); CI on the branch or a run with NEXUS closed is next.
+  * **Checks:** `claude plugin validate` passes on the built-in plugin (throwaway config folder). CI on the branch
+    (run 42122452334 at `c54e2b2`) is green on all platforms, including `workbench.mjs` (depth, rules, skill folder,
+    first message, session record) and `task-flow.mjs`. Not run locally: the owner's installed NEXUS was open (same app
+    identity, single instance). **Waits for the owner's approval to merge** (with `fix/learn-session`).
   * **After adding a project:** it opens on Learn.
   * **Fix:** the knowledge index refresh takes SQLite's write lock up front (IMMEDIATE). A deferred read-then-write
     upgrade failed at once with "database is locked" when the desktop and the MCP server refreshed together; it showed
