@@ -123,7 +123,7 @@ pub enum GatesCmd {
     },
 }
 
-fn find_run(conn: &nexus_core::db::Connection, ws_id: &str, q: &str) -> Result<String> {
+pub(crate) fn find_run(conn: &nexus_core::db::Connection, ws_id: &str, q: &str) -> Result<String> {
     let runs = run::list(conn, ws_id, &RunFilter { limit: Some(500), ..Default::default() })?;
     if let Some(r) = runs.iter().find(|r| r.id == q) {
         return Ok(r.id.clone());
@@ -299,6 +299,20 @@ fn verify_here(ctx: &Ctx) -> Result<usize> {
     Ok(total)
 }
 
+/// "resumes 2 steps in 1 run (1 more keeps waiting for other gates)" — what approving a gate does to waiting work.
+fn impact_text(i: &run::ApprovalImpact, done: bool) -> String {
+    let verb = if done { "resumed" } else { "resumes" };
+    let mut s = if i.steps > 0 {
+        format!("{verb} {} waiting step(s) in {} run(s) automatically", i.steps, i.runs)
+    } else {
+        "no waiting workflow step resumes".to_string()
+    };
+    if i.still_waiting > 0 {
+        s.push_str(&format!("; {} step(s) keep waiting for other gates", i.still_waiting));
+    }
+    s
+}
+
 pub fn run_gates(ctx: &Ctx, c: GatesCmd) -> Result<i32> {
     let conn = ctx.db()?;
     let ws = active_workspace(&conn)?;
@@ -314,10 +328,15 @@ pub fn run_gates(ctx: &Ctx, c: GatesCmd) -> Result<i32> {
                     .map(|g| {
                         let last = gates::latest(&conn, &p.id, &g.name).ok().flatten().map(|r| format!("{} {}", r.status, out::ago(Some(r.started_at)))).unwrap_or_else(|| "never run".into());
                         let state = if g.approved { "approved".to_string() } else { "NOT APPROVED".to_string() };
-                        vec![g.name.clone(), format!("v{}", g.version), state, g.command_line(), format!("{} s", g.timeout_secs), last]
+                        let on_approval = if g.approved {
+                            "–".to_string()
+                        } else {
+                            run::approval_impact(&conn, &p.id, &g.name).map(|i| impact_text(&i, false)).unwrap_or_else(|_| "–".into())
+                        };
+                        vec![g.name.clone(), format!("v{}", g.version), state, g.command_line(), format!("{} s", g.timeout_secs), last, on_approval]
                     })
                     .collect();
-                out::table(&["NAME", "VERSION", "APPROVAL", "COMMAND", "TIMEOUT", "LAST RESULT"], &rows);
+                out::table(&["NAME", "VERSION", "APPROVAL", "COMMAND", "TIMEOUT", "LAST RESULT", "ON APPROVAL"], &rows);
                 if list.iter().any(|g| !g.approved) {
                     println!("\nreview a command, then: nexus gates approve --project {} <name> --version <n>", p.name);
                 }
@@ -344,13 +363,15 @@ pub fn run_gates(ctx: &Ctx, c: GatesCmd) -> Result<i32> {
                 return Err(CoreError::Conflict(format!("gate {name} is version {} now, not {version} — review it again with `nexus gates list`", g.version)));
             }
             let g = gates::approve(&conn, &p.id, &name, &g.command_hash)?;
+            // Resuming is part of the one approval (no second confirmation); its effect is reported.
             let resumed = run::resume_gate_waits(&conn, &p.id)?;
             if ctx.json {
-                out::json(&g)
+                out::json(&serde_json::json!({ "gate": g, "resumed": resumed }))
             } else {
                 println!("approved gate {} v{}: {}", g.name, g.version, g.command_line());
-                if resumed > 0 {
-                    println!("resumed {resumed} waiting step(s) — `nexus workflow verify` (or the desktop) runs their gates");
+                println!("{}", impact_text(&resumed, true));
+                if resumed.steps > 0 {
+                    println!("`nexus workflow verify` (or the desktop) runs their gates now");
                 }
             }
         }

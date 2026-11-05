@@ -779,23 +779,91 @@ pub fn retry(conn: &Connection, data_dir: &Path, ws: &Workspace, run_id: &str, s
     view(conn, run_id)
 }
 
-/// A gate of the project was approved: steps that waited for their gates verify again (they block again with a fresh
-/// explanation if something is still missing). Returns how many steps resumed.
-pub fn resume_gate_waits(conn: &Connection, project_id: &str) -> Result<usize> {
+/// A step whose reported work waits for its gates, and the gate names it still needs (not defined or not approved).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GateWait {
+    pub run_id: String,
+    pub step_id: String,
+    pub needs: Vec<String>,
+}
+
+/// Steps of the project's active runs waiting for gates, with what each still needs.
+pub fn gate_waits(conn: &Connection, project_id: &str) -> Result<Vec<GateWait>> {
     let waiting: Vec<(String, String)> = conn
         .prepare(
             "SELECT s.run_id, s.step_id FROM workflow_steps s JOIN workflow_runs r ON r.id = s.run_id
-             WHERE s.status = 'blocked' AND s.blocked_on = 'gates' AND r.project_id = ?1 AND r.status IN ('running', 'waiting')",
+             WHERE s.status = 'blocked' AND s.blocked_on = 'gates' AND r.project_id = ?1 AND r.status IN ('running', 'waiting')
+             ORDER BY r.created_at, s.position",
         )?
         .query_map([project_id], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<std::result::Result<_, _>>()?;
-    for (run_id, step_id) in &waiting {
-        set_step(conn, run_id, step_id, "status = 'verifying', last_failure = NULL", &[])?;
-        set_run(conn, run_id, "running", None)?;
-        notify::resolve_dedupe(conn, &format!("wf-approve:{run_id}:{step_id}"))?;
-        notify::resolve_dedupe(conn, &format!("wf-gates:{run_id}:{step_id}"))?;
+    let mut out = Vec::new();
+    for (run_id, step_id) in waiting {
+        let run = get_run(conn, &run_id)?;
+        let d = definition(conn, &run_id)?;
+        let Ok(def) = step_def(&d, &step_id) else { continue };
+        let mut names: Vec<String> = def.gates.iter().flat_map(|g| if g == "constitution" { constitution_gates(conn, &run) } else { vec![g.clone()] }).collect();
+        names.sort();
+        names.dedup();
+        let mut needs = Vec::new();
+        for n in names {
+            if !gates::find(conn, project_id, &n)?.is_some_and(|g| g.approved) {
+                needs.push(n);
+            }
+        }
+        out.push(GateWait { run_id, step_id, needs });
     }
-    Ok(waiting.len())
+    Ok(out)
+}
+
+/// What approving one gate changes for waiting work — shown before the approval is confirmed (desktop dialog,
+/// `nexus gates list`) and reported after it. Purely informational: the approval itself is `gates::approve`.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalImpact {
+    /// Steps that resume verification automatically once this gate is approved …
+    pub steps: usize,
+    /// … in this many runs.
+    pub runs: usize,
+    /// Steps that also wait for this gate but keep waiting for other gates.
+    pub still_waiting: usize,
+}
+
+pub fn approval_impact(conn: &Connection, project_id: &str, gate: &str) -> Result<ApprovalImpact> {
+    let mut impact = ApprovalImpact::default();
+    let mut runs = std::collections::HashSet::new();
+    for w in gate_waits(conn, project_id)?.into_iter().filter(|w| w.needs.iter().any(|n| n == gate)) {
+        if w.needs.iter().all(|n| n == gate) {
+            impact.steps += 1;
+            runs.insert(w.run_id);
+        } else {
+            impact.still_waiting += 1;
+        }
+    }
+    impact.runs = runs.len();
+    Ok(impact)
+}
+
+/// After a gate approval: steps whose gates are now all defined and approved verify again (no new report from
+/// Claude); steps still missing something keep waiting. Returns how many steps resumed and in how many runs.
+pub fn resume_gate_waits(conn: &Connection, project_id: &str) -> Result<ApprovalImpact> {
+    let mut impact = ApprovalImpact::default();
+    let mut runs = std::collections::HashSet::new();
+    for w in gate_waits(conn, project_id)? {
+        if !w.needs.is_empty() {
+            impact.still_waiting += 1;
+            continue;
+        }
+        set_step(conn, &w.run_id, &w.step_id, "status = 'verifying', last_failure = NULL", &[])?;
+        set_run(conn, &w.run_id, "running", None)?;
+        notify::resolve_dedupe(conn, &format!("wf-approve:{}:{}", w.run_id, w.step_id))?;
+        notify::resolve_dedupe(conn, &format!("wf-gates:{}:{}", w.run_id, w.step_id))?;
+        impact.steps += 1;
+        runs.insert(w.run_id);
+    }
+    impact.runs = runs.len();
+    Ok(impact)
 }
 
 /// After a crash: gate executions of dead hosts are interrupted; their steps stay `verifying` and are run again.

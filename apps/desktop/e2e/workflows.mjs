@@ -147,6 +147,7 @@ try {
   await click('[data-confirm-ok]')
   const approvedRow = await cdp.waitFor(`document.querySelector('[data-gate="test"][data-approved="yes"]')?.innerText`, 10000).catch(() => '')
   check('…the approval dialog shows the exact command, then the gate is approved', shown.includes('git --version') && shown.includes('does not approve any workflow') && approvedRow.includes('v1 approved'), `${shown.slice(0, 80)} / ${approvedRow}`)
+  check('…and says that no waiting workflow step resumes yet', shown.includes('No waiting workflow step resumes with this approval.'))
 
   // 3. Start from the project page at professional rigor, launching the fake Claude for the run's task.
   await cdp.evaluate(`location.hash = '#/projects/${project.id}', true`)
@@ -222,7 +223,16 @@ try {
     !!waiting && waiting.s.lastFailure.includes('test (version 2) are not approved') && waiting.s.results.every((g) => g.gateName !== 'test') && !!approvalNote,
     waiting?.s?.lastFailure?.slice(0, 90),
   )
-  await approvedGate(project.id, { name: 'test', program: 'git', args: ['rev-parse', '--verify', 'no-such-ref'] })
+  // The approval dialog's preview: exactly this step in this run resumes.
+  await cdp.evaluate(`location.hash = '#/workflows'; true`)
+  await cdp.waitFor(`document.querySelector('[data-tab="gates"]')`, 10000)
+  await click('[data-tab="gates"]')
+  await cdp.waitFor(`document.querySelector('[data-approve-gate="test"]')`, 10000)
+  await click('[data-approve-gate="test"]')
+  const preview = await cdp.waitFor(`document.querySelector('[data-confirm-message]')?.innerText`, 5000).catch(() => '')
+  check('…the approval dialog says which waiting work resumes', preview.includes('Approving resumes 1 waiting workflow step in 1 run automatically.'), preview.split('\n').find((l) => l.includes('resume')))
+  await click('[data-confirm-ok]')
+  await until(async () => (await inv('gates_list', { projectId: project.id })).find(([g]) => g.name === 'test' && g.approved))
   const back = await until(async () => {
     const v = await inv('workflow_run', { id: run2.id })
     const s = stepOf(v, 'implement')

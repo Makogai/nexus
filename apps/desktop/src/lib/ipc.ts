@@ -23,6 +23,11 @@ import type {
   KitView,
   MemoryApproval,
   MemoryProposal,
+  ApprovalImpact,
+  SessionUsage,
+  UsageDimension,
+  UsageFilter,
+  UsageView,
   Gate,
   GateInput,
   GateResult,
@@ -100,6 +105,8 @@ export const NOTIFICATIONS_EVENT = 'nexus://notifications'
 export const NOTIFICATION_ACTIVATED_EVENT = 'nexus://notification-activated'
 /** A workflow run changed (gates ran, a review was given …). */
 export const WORKFLOW_EVENT = 'nexus://workflows'
+/** New usage data was read from transcripts (ADR-0030). */
+export const USAGE_EVENT = 'nexus://usage'
 
 export const api = {
   appInfo: () => call<AppInfo>('app_info'),
@@ -214,6 +221,10 @@ export const api = {
   gateUpsert: (projectId: string, input: GateInput) => call<Gate>('gate_upsert', { projectId, input }),
   gateApprove: (projectId: string, name: string, expectedHash: string) => call<Gate>('gate_approve', { projectId, name, expectedHash }),
   gateRevoke: (projectId: string, name: string) => call<void>('gate_revoke', { projectId, name }),
+  gateApprovalImpact: (projectId: string, name: string) => call<ApprovalImpact>('gate_approval_impact', { projectId, name }),
+  usageReport: (filter: UsageFilter, by: UsageDimension) => call<UsageView>('usage_report', { filter, by }),
+  usageSessions: (filter: UsageFilter, limit?: number) => call<SessionUsage[]>('usage_sessions', { filter, limit: limit ?? null }),
+  usageScan: () => call<number>('usage_scan'),
   gateRemove: (projectId: string, name: string) => call<boolean>('gate_remove', { projectId, name }),
   gateSuggest: (projectId: string) => call<GateInput[]>('gate_suggest', { projectId }),
   gateRun: (projectId: string, name: string) => call<GateResult>('gate_run', { projectId, name }),

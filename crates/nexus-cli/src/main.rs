@@ -12,6 +12,7 @@ mod launch;
 mod mcp;
 mod notifications;
 mod out;
+mod usage;
 mod workflow;
 
 use std::path::PathBuf;
@@ -74,6 +75,8 @@ enum Command {
     /// Context Manager: a project's context strategy, onboarding analysis and the Context Inspector.
     #[command(subcommand)]
     Context(context::ContextCmd),
+    /// Token usage from Claude Code's local session transcripts: measured, estimated, unavailable (ADR-0030).
+    Usage(usage::UsageArgs),
     /// Constitutions: structured rules (articles, sections, rules with ids and enforcement) by scope.
     #[command(subcommand)]
     Constitution(constitution::ConstitutionCmd),
@@ -115,6 +118,9 @@ enum WorkspaceCmd {
     Open { folder: String },
     /// Make WORKSPACE (name or id) the active workspace.
     Use { workspace: String },
+    /// Would syncing the active workspace folder through Git be safe? Read-only: no fetch, commit or push (ADR-0031).
+    /// Exit code 1 when something blocks syncing.
+    SyncStatus,
 }
 
 #[derive(Subcommand)]
@@ -242,6 +248,7 @@ fn main() -> ExitCode {
         Command::Notifications(c) => notifications::run(&ctx, c).map(|_| 0),
         Command::Constitution(c) => constitution::run(&ctx, c),
         Command::Context(c) => context::run(&ctx, c).map(|_| 0),
+        Command::Usage(a) => usage::run(&ctx, a),
         Command::Workflow(c) => workflow::run_workflow(&ctx, c),
         Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),
@@ -356,6 +363,33 @@ fn cmd_workspaces(ctx: &Ctx, cmd: WorkspaceCmd) -> nexus_core::Result<()> {
             let list = workspace::list(&conn)?;
             let ws = resolve_ref(&list, &query, |w| &w.id, |w| &w.name, "workspace")?;
             print_one(&workspace::activate(&conn, &ws.id)?);
+        }
+        WorkspaceCmd::SyncStatus => {
+            let ws = active_workspace(&conn)?;
+            let r = nexus_core::workspace_sync::readiness(&conn, &ws, &ctx.data_dir)?;
+            if ctx.json {
+                out::json(&r);
+            } else {
+                println!("{} — {}", ws.name, if r.ready { "ready to sync through Git" } else { "not ready to sync" });
+                if r.repo {
+                    println!(
+                        "  branch {} · upstream {} · {} ahead, {} behind (as of the last fetch) · remote {}",
+                        r.branch.as_deref().unwrap_or("–"),
+                        r.upstream.as_deref().unwrap_or("none"),
+                        r.ahead,
+                        r.behind,
+                        r.remote.as_deref().unwrap_or("none")
+                    );
+                    println!("  {} portable file(s) changed{}", r.changed.len(), if r.changed.is_empty() { String::new() } else { format!(": {}", r.changed.iter().take(8).cloned().collect::<Vec<_>>().join(", ")) });
+                }
+                for s in &r.sensitive {
+                    println!("  {}: {} ({})", if s.tracked { "COMMITTED" } else { "not ignored" }, s.path, s.reason);
+                }
+                for i in &r.issues {
+                    println!("  {}: {}", i.severity, i.message);
+                }
+            }
+            std::process::exit(if r.ready { 0 } else { 1 });
         }
     }
     Ok(())
@@ -615,6 +649,8 @@ fn cmd_profiles(ctx: &Ctx, cmd: ProfileCmd) -> nexus_core::Result<()> {
             let p = resolve_ref(&list, &q, |p| &p.id, |p| &p.name, "profile")?;
             let exe = install::resolve(p.executable.as_deref(), &ctx.home)?;
             let s = auth::status(&exe, p)?;
+            // Classification only (subscription / API / unknown) — decides whether usage may be shown as spend.
+            let _ = nexus_core::usage::record_billing(&conn, &p.id, &s);
             if ctx.json {
                 out::json(&s);
             } else if s.logged_in {

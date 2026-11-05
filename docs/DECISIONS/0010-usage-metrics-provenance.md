@@ -1,6 +1,6 @@
 # ADR-0010 — Usage metrics with explicit provenance
 
-Status: Accepted (implementation Phase 5)
+Status: Accepted. Source 3 (transcripts, *parsed*) implemented by ADR-0030 (2026-11-05); sources 1–2 not yet.
 
 ## Decision
 Every number shown carries a provenance: **measured** (documented interface), **parsed** (undocumented local

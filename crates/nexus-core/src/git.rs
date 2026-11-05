@@ -260,6 +260,45 @@ pub fn last_commit(repo: &Path) -> Option<CommitInfo> {
     })
 }
 
+/// Most paths listed by [`changed_paths`] / [`tracked_files`] (bounded output).
+pub const MAX_PATHS: usize = 20_000;
+
+/// Changed paths relative to the repository (`git status --porcelain=v1 -z`, untracked files one by one, ignored
+/// files not listed): `(XY, path)`. Read-only.
+pub fn changed_paths(repo: &Path) -> Result<Vec<(String, String)>> {
+    let out = run_git(Some(repo), &["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git status".into(), message: first_line(&out.stderr_str()) });
+    }
+    Ok(parse_porcelain_v1(&out.stdout))
+}
+
+pub fn parse_porcelain_v1(bytes: &[u8]) -> Vec<(String, String)> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = Vec::new();
+    let mut fields = text.split('\0');
+    while let Some(rec) = fields.next() {
+        if rec.len() < 4 || out.len() >= MAX_PATHS {
+            continue;
+        }
+        let (xy, path) = (&rec[..2], &rec[3..]);
+        if xy.contains('R') || xy.contains('C') {
+            fields.next(); // the original path of a rename/copy
+        }
+        out.push((xy.to_string(), path.to_string()));
+    }
+    out
+}
+
+/// Tracked files relative to the repository (`git ls-files -z`). Read-only.
+pub fn tracked_files(repo: &Path) -> Result<Vec<String>> {
+    let out = run_git(Some(repo), &["ls-files", "-z"])?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git ls-files".into(), message: first_line(&out.stderr_str()) });
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).split('\0').filter(|p| !p.is_empty()).take(MAX_PATHS).map(str::to_string).collect())
+}
+
 /// Parse `git status --porcelain=v2 --branch -z` output.
 pub fn parse_porcelain_v2(bytes: &[u8]) -> GitStatus {
     let mut st = GitStatus::default();
@@ -338,6 +377,15 @@ fn first_line(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn porcelain_v1_paths_and_renames() {
+        let raw = b" M rules/a.md\0?? tasks/new.md\0R  knowledge/new.md\0knowledge/old.md\0UU tasks/x.md\0";
+        assert_eq!(
+            parse_porcelain_v1(raw),
+            vec![(" M".into(), "rules/a.md".into()), ("??".into(), "tasks/new.md".into()), ("R ".into(), "knowledge/new.md".into()), ("UU".into(), "tasks/x.md".into())]
+        );
+    }
 
     #[test]
     fn parses_branch_headers_and_entries() {

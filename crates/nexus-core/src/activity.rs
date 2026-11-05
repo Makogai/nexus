@@ -130,15 +130,26 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
             {
                 data["previousClaudeSessionId"] = json!(s.claude_session_id);
                 conn.execute("UPDATE sessions SET claude_session_id = ?2 WHERE id = ?1", params![s.id, sid])?;
+                // Usage stays attributable across the switch (ADR-0030).
+                if let Some(old) = s.claude_session_id.as_deref() {
+                    conn.execute("INSERT OR IGNORE INTO session_conversations(session_id, claude_session_id, since) VALUES (?1, ?2, ?3)", params![s.id, old, s.started_at])?;
+                }
+                conn.execute("INSERT OR IGNORE INTO session_conversations(session_id, claude_session_id, since) VALUES (?1, ?2, ?3)", params![s.id, sid, now_ms()])?;
             }
             if let Some(tp) = str_field("transcript_path").filter(|p| p.len() < 2048 && Path::new(p).is_absolute()) {
                 conn.execute("UPDATE sessions SET transcript_path = ?2 WHERE id = ?1", params![s.id, tp])?;
             }
             record(conn, &s.id, "session-start", source, Some(data))?;
             touch(conn, &s.id, ", attention = NULL, attention_kind = NULL, attention_at = NULL")?;
-            Ok(Outcome {
-                additional_context: recovery_context(conn, &s, source)?,
-            })
+            let additional_context = recovery_context(conn, &s, source)?;
+            // Size only (for usage estimates, ADR-0030) — the text itself is not stored.
+            if let Some(c) = &additional_context {
+                conn.execute(
+                    "UPDATE sessions SET session_start_chars = MAX(COALESCE(session_start_chars, 0), ?2) WHERE id = ?1",
+                    params![s.id, c.chars().count() as i64],
+                )?;
+            }
+            Ok(Outcome { additional_context })
         }
         HookEvent::SessionEnd => {
             let reason = one_of(

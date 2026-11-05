@@ -4,7 +4,7 @@ import { Info, Play, Plus, ShieldCheck, Trash2 } from '@lucide/vue'
 import { api } from '../lib/ipc'
 import type { Gate, GateInput, GateResult } from '../lib/types'
 import { relativeTime } from '../lib/format'
-import { joinArgs, splitArgs } from '../lib/workflow'
+import { approvalImpactText, joinArgs, splitArgs } from '../lib/workflow'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 
@@ -33,11 +33,14 @@ async function add(input: GateInput) {
   }
 }
 async function approve(g: Gate) {
+  // Informational preview of what the one approval resumes (not a second approval).
+  const impact = await app.attempt(() => api.gateApprovalImpact(projectId.value, g.name), 'Could not check waiting workflow steps')
+  const effect = impact ? `\n\n${approvalImpactText(impact)}` : ''
   const ok = await app.confirm({
     title: `Approve gate ${g.name} (version ${g.version})?`,
     message: `NEXUS will run exactly this command in the project folder, without a shell, whenever a workflow or a constitution check needs "${g.name}":
 
-${joinArgs([g.program, ...g.args])}
+${joinArgs([g.program, ...g.args])}${effect}
 
 If the command changes it becomes a new version and needs approval again. This does not approve any workflow.`,
     confirmLabel: 'Approve command',

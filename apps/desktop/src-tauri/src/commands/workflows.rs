@@ -164,11 +164,17 @@ pub fn gate_upsert(ctx: State<'_, Ctx>, project_id: String, input: GateInput) ->
 pub fn gate_approve(app: AppHandle, ctx: State<'_, Ctx>, project_id: String, name: String, expected_hash: String) -> IpcResult<Gate> {
     let db = ctx.db();
     let g = gates::approve(&db, &project_id, &name, &expected_hash)?;
-    // Steps that waited for this approval verify again (the runner picks them up).
-    if run::resume_gate_waits(&db, &project_id)? > 0 {
+    // Steps that waited only for this approval verify again (the runner picks them up).
+    if run::resume_gate_waits(&db, &project_id)?.steps > 0 {
         let _ = app.emit(WORKFLOW_EVENT, ());
     }
     Ok(g)
+}
+
+/// What approving this gate would resume — shown in the approval confirmation (informational, not an approval).
+#[tauri::command]
+pub fn gate_approval_impact(ctx: State<'_, Ctx>, project_id: String, name: String) -> IpcResult<run::ApprovalImpact> {
+    Ok(run::approval_impact(&ctx.db(), &project_id, &name)?)
 }
 
 #[tauri::command]

@@ -106,11 +106,25 @@ constitutions, checkpoints and MCP (ADR-0012 → ADR-0029).
 | W6 | Pre-release: NEXUS as notification sender, click routing incl. `nexus://`, withdrawal, lock-screen content policy; constitution compliance (instructed vs verified) | opt-in Windows self-test, attention E2E 27/27, core | ✅ |
 | W7 | Gate approval and versions: each gate command version needs explicit approval before it runs (separate from workflow approval); waiting steps resume once approved | core + CLI E2E + desktop E2E `workflows.mjs` 22/22 | ✅ |
 
+## Stage: Usage analytics and sync preparation (owner specification, 2026-11-05)
+
+Branch `milestone/usage-analytics` (off `main` at `cba2b7a`). ADR-0030 (usage), ADR-0031 (Git workspace sync).
+
+| # | Milestone | Acceptance check | Status |
+| --- | --- | --- | --- |
+| G1 | Gate approvals show which waiting steps and runs resume (desktop dialog, `nexus gates list` / `approve`); approval resumes exactly those | core + CLI E2E + desktop E2E `workflows.mjs` | ✅ |
+| U1 | Transcript reader (incremental, deduplicated, numbers only, subagents, version compatibility) and ingestion with resume/`/clear` attribution | core + real CLI `usage-real-claude.mjs` | ✅ |
+| U2 | Provenance on every figure (parsed / estimate / unavailable, ADR-0010); cost only for API-billed profiles; telemetry never changed | core + CLI E2E | ✅ |
+| U3 | Reports: totals, trend, breakdowns by project, profile, task, workflow, context strategy, work profile, model; efficiency; coverage | core + CLI E2E | ✅ |
+| U4 | Usage dashboard (filters, tiles, stacked trend with table view, breakdowns, strategy comparison, sessions) and summaries on project, workflow run, task | vitest + desktop E2E `usage.mjs` | ✅ |
+| S0 | Git workspace sync architecture (ADR-0031) and read-only readiness (`nexus workspaces sync-status`) | core + CLI E2E | ✅ |
+| U5 | OpenTelemetry to a local receiver for opt-in personal profiles (*measured* provenance, ADR-0010 source 1) | needs a signed-in profile for verification | planned |
+
 ## Phase 6 — Product maturity
 
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
-| M29 | Workspace Git sync UI (fetch/pull/push with outgoing-diff review) | Scenario K |
+| M29 | Workspace Git sync UI (fetch/pull/push with outgoing-diff review) on the ADR-0031 readiness check | Scenario K |
 | M30 | Packaging + GitHub Releases CI + updater signing (stable/prerelease channels) | artifacts verified on clean VMs |
 | M31 | Backup/restore, performance budget, user documentation | Scenario A on a clean machine |
 

@@ -26,6 +26,8 @@ cd apps/desktop && node e2e/context.mjs     # Context Manager: wizard, strategy,
 cd apps/desktop && node e2e/context-real-claude.mjs # inspector prediction vs. real InstructionsLoaded via NEXUS hook
 cd apps/desktop && node e2e/workflows.mjs   # Workflow Engine: runs, gates, reviews, crash recovery (E2E build)
 cd apps/desktop && node e2e/workflow-real-claude.mjs # workflow skills only in the run's session (real Claude)
+cd apps/desktop && node e2e/usage.mjs       # Usage dashboard: transcripts → scanner → tiles, trend, breakdowns (E2E build)
+cd apps/desktop && node e2e/usage-real-claude.mjs # real transcript format parsed; nothing invented (real Claude)
 cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Windows notification sender
 ```
 
@@ -63,6 +65,10 @@ cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Wi
   Project docs are read only when indexed (allowlisted Markdown); retrieval records counts and ids, never queries.
 * Workspace-controlled text (task titles/descriptions, synced files) never goes into the system prompt or `--name`;
   it reaches Claude only as escaped, labelled data (SessionStart context, tool output) — ADR-0020, threat T22.
+* Usage analytics (ADR-0030) reads Claude's transcripts read-only and stores numbers only; every figure carries
+  provenance (parsed / estimate / unavailable, ADR-0010); cost only for API-billed profiles; NEXUS never sets or
+  forwards telemetry. Workspace sync (ADR-0031) is Git in the person's repository: read-only readiness now; commits
+  and pushes only on explicit action, fast-forward-only pulls, machine-local state never travels.
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
   older Tauri crates than the npm packages and `tauri build` fails its version check.
 

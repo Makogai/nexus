@@ -81,3 +81,13 @@ export function splitArgs(line: string): string[] {
 export function joinArgs(args: string[]): string {
   return args.map((a) => (a === '' || /\s|"/.test(a) ? `"${a.replace(/"/g, "'")}"` : a)).join(' ')
 }
+
+/** Plain-language effect of approving a gate on waiting workflow work (shown before the approval is confirmed). */
+export function approvalImpactText(i: { steps: number; runs: number; stillWaiting: number }): string {
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+  let text = i.steps > 0
+    ? `Approving resumes ${plural(i.steps, 'waiting workflow step', 'waiting workflow steps')} in ${plural(i.runs, 'run', 'runs')} automatically.`
+    : 'No waiting workflow step resumes with this approval.'
+  if (i.stillWaiting > 0) text += ` ${plural(i.stillWaiting, 'step keeps', 'steps keep')} waiting for other gates.`
+  return text
+}

@@ -5,6 +5,7 @@ import { api } from '../lib/ipc'
 import type { RunStep, RunView } from '../lib/types'
 import { relativeTime } from '../lib/format'
 import { KIND_LABELS, STATUS_LABELS, verificationLabel } from '../lib/workflow'
+import UsageSummary from './UsageSummary.vue'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
 import { useSessionStore } from '../stores/sessions'
@@ -81,6 +82,7 @@ function icon(s: RunStep) {
     <p class="small" data-progress>
       <strong>{{ r.progress.verified }}</strong> verified by gates · <strong>{{ r.progress.human }}</strong> signed off · <strong>{{ r.progress.aiReported }}</strong> AI-reported only · {{ r.progress.skipped }} not in this rigor
     </p>
+    <UsageSummary :workflow-run-id="r.id" />
     <p v-if="r.error" class="notice notice-error small"><TriangleAlert /> {{ r.error }}</p>
     <div class="actions">
       <button class="btn btn-sm btn-primary" data-open-session @click="openSession"><Sparkles /> {{ liveSession ? 'Open Claude session' : lastSession?.resumable ? 'Resume Claude session' : 'Launch Claude' }}</button>

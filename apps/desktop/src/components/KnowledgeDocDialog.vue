@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Workflow as WorkflowIcon } from '@lucide/vue'
+import UsageSummary from './UsageSummary.vue'
 import { router as appRouter } from '../router'
 import { computed, ref, watch } from 'vue'
 import { FolderOpen, GitBranch, ShieldCheck, Sparkles, TriangleAlert } from '@lucide/vue'
@@ -110,6 +111,7 @@ async function approve() {
           <span>{{ c.text }}</span>
         </label>
       </div>
+      <UsageSummary v-if="item" :task-id="item.id" />
       <div v-if="task.recentLog.length" class="log">
         <div class="label">Progress <span class="faint">last {{ task.recentLog.length }} of {{ task.logEntries }}</span></div>
         <ul>

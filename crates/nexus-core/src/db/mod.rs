@@ -90,6 +90,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0013_gate_approval.sql"),
         disable_foreign_keys: false,
     },
+    Migration {
+        name: "0014_usage",
+        sql: include_str!("migrations/0014_usage.sql"),
+        disable_foreign_keys: false,
+    },
 ];
 
 /// Schema version this build understands.
