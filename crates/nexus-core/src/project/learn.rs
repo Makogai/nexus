@@ -80,6 +80,105 @@ pub struct LearnTask {
     pub id: String,
     pub title: String,
     pub status: Option<String>,
+    pub depth: Depth,
+}
+
+/// How much a learning session may spend (ADR-0041): one Claude session in every case; the depth limits how many
+/// files Claude reads and how long the drafts are. Stored as a task label (`learn-quick` …), so the person can change
+/// it before (re)starting the session.
+#[derive(Debug, Clone, Copy, Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Depth {
+    Quick,
+    #[default]
+    Standard,
+    Deep,
+}
+
+/// A depth as the Learn tab shows it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthInfo {
+    pub id: Depth,
+    pub files: Option<u32>,
+    pub overview_words: u32,
+    pub architecture_words: u32,
+    pub memories: (u32, u32),
+    pub rules: String,
+}
+
+impl DepthInfo {
+    fn of(d: Depth) -> DepthInfo {
+        let b = d.budget();
+        DepthInfo { id: d, files: b.files, overview_words: b.overview_words, architecture_words: b.architecture_words, memories: b.memories, rules: rules(d) }
+    }
+}
+
+/// What a depth allows: files Claude may open (`None` = no limit, still selective), words per draft, memories.
+pub struct Budget {
+    pub files: Option<u32>,
+    pub overview_words: u32,
+    pub architecture_words: u32,
+    pub memories: (u32, u32),
+}
+
+impl Depth {
+    pub const ALL: [Depth; 3] = [Depth::Quick, Depth::Standard, Depth::Deep];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Depth::Quick => "quick",
+            Depth::Standard => "standard",
+            Depth::Deep => "deep",
+        }
+    }
+
+    pub fn label(self) -> String {
+        format!("{LEARN_LABEL}-{}", self.id())
+    }
+
+    pub fn parse(s: &str) -> Option<Depth> {
+        Depth::ALL.into_iter().find(|d| d.id() == s.trim().to_ascii_lowercase())
+    }
+
+    /// The depth a task's labels name — `None` when the task is not a learning task.
+    pub fn of_labels(labels: &[String]) -> Option<Depth> {
+        labels.iter().any(|l| l == LEARN_LABEL).then(|| Depth::ALL.into_iter().find(|d| labels.contains(&d.label())).unwrap_or_default())
+    }
+
+    pub fn budget(self) -> Budget {
+        match self {
+            Depth::Quick => Budget { files: Some(20), overview_words: 250, architecture_words: 400, memories: (3, 5) },
+            Depth::Standard => Budget { files: Some(50), overview_words: 400, architecture_words: 700, memories: (3, 8) },
+            Depth::Deep => Budget { files: None, overview_words: 700, architecture_words: 1200, memories: (5, 10) },
+        }
+    }
+}
+
+/// The learning session's rules (ADR-0041) for the system prompt: NEXUS-authored, built from the validated depth only
+/// — no task text (T22). Stable ids so they can be referred to; they hold even where the work profile asks for more.
+pub fn rules(depth: Depth) -> String {
+    let b = depth.budget();
+    let files = match b.files {
+        Some(n) => format!("open at most {n} files"),
+        None => "no file limit, but read selectively".to_string(),
+    };
+    format!(
+        "NEXUS learning session — rules LEARN-1 to LEARN-7 (they apply even where the work profile suggests reviews or more depth):\n\
+         LEARN-1 Follow the {skill} skill for this session's task.\n\
+         LEARN-2 Work alone in this session: do not start subagents, agent teams or multi-agent workflows unless the user asks for them.\n\
+         LEARN-3 Read only: do not change, create or delete files in the repository, and do not run builds, tests or installs.\n\
+         LEARN-4 Budget (depth: {depth}): {files}; overview at most {ow} words; architecture summary at most {aw} words; {m0} to {m1} memories.\n\
+         LEARN-5 Mark every statement in a draft as verified (seen in the code, with the file) or inferred.\n\
+         LEARN-6 Save drafts only with draft_project_document and memories only with record_memory; the user decides what enters the knowledge base.\n\
+         LEARN-7 Stop when the drafts and memories are saved: report what you skipped and ask before reading further.",
+        skill = crate::claude::builtin::LEARN_SKILL,
+        depth = depth.id(),
+        ow = b.overview_words,
+        aw = b.architecture_words,
+        m0 = b.memories.0,
+        m1 = b.memories.1,
+    )
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -100,6 +199,10 @@ pub struct ProjectMap {
     pub graph: GraphStatus,
     pub task: Option<LearnTask>,
     pub drafts: usize,
+    /// The depths to choose from, with their budgets and the exact rules a learning session gets (ADR-0041).
+    pub depths: Vec<DepthInfo>,
+    /// The built-in skill learning sessions get (`nexus:learn-project`).
+    pub skill: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -230,7 +333,7 @@ pub fn map(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str)
     let task = tasks
         .iter()
         .filter(|t| t.status.as_deref() != Some("done") && labels(t).iter().any(|l| l == LEARN_LABEL))
-        .find_map(|t| Some(LearnTask { id: t.id.clone()?, title: t.title.clone(), status: t.status.clone() }));
+        .find_map(|t| Some(LearnTask { id: t.id.clone()?, title: t.title.clone(), status: t.status.clone(), depth: Depth::of_labels(&labels(t)).unwrap_or_default() }));
 
     let report = root.join(GRAPH_DIR).join("GRAPH_REPORT.md");
     let built_ms = std::fs::metadata(&report).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64);
@@ -260,6 +363,8 @@ pub fn map(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str)
         graph,
         task,
         drafts,
+        depths: Depth::ALL.into_iter().map(DepthInfo::of).collect(),
+        skill: crate::claude::builtin::LEARN_SKILL,
     })
 }
 
@@ -305,12 +410,16 @@ fn brief(m: &ProjectMap) -> String {
     b
 }
 
-/// Create (or reuse the open) learning task for the project; the desktop then launches Claude on it.
-pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str) -> Result<LearnTask> {
+/// Create (or reuse the open) learning task for the project at `depth`; the desktop then launches Claude on it.
+pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str, depth: Depth) -> Result<LearnTask> {
     let m = map(conn, data_dir, ws, project_id)?;
-    if let Some(t) = m.task.clone() {
+    if let Some(mut t) = m.task.clone() {
         if m.graph.built {
             add_graph_step(conn, data_dir, ws, &t.id)?;
+        }
+        if t.depth != depth {
+            set_depth(conn, data_dir, ws, &t.id, depth)?;
+            t.depth = depth;
         }
         return Ok(t);
     }
@@ -321,11 +430,25 @@ pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &st
         project_id: Some(project_id.to_string()),
         priority: Some("medium".into()),
         status: Some("ready".into()),
-        labels: vec![LEARN_LABEL.into()],
+        labels: vec![LEARN_LABEL.into(), depth.label()],
         ..Default::default()
     };
     let item = service::create(conn, data_dir, ws, &input, Author::Human)?;
-    Ok(LearnTask { id: item.id.clone().unwrap_or_default(), title: item.title, status: item.status })
+    Ok(LearnTask { id: item.id.clone().unwrap_or_default(), title: item.title, status: item.status, depth })
+}
+
+/// The learning task's depth label, replaced (the person chose another depth before starting again).
+fn set_depth(conn: &Connection, data_dir: &Path, ws: &Workspace, task_id: &str, depth: Depth) -> Result<()> {
+    let item = index::get(conn, &ws.id, task_id)?;
+    let privacy = index::root_privacy(conn, &item.path)?;
+    store::update(&item.path, None, privacy, |d| {
+        let mut labels: Vec<String> = d.fm.list("labels").into_iter().filter(|l| !Depth::ALL.iter().any(|x| &x.label() == l)).collect();
+        labels.push(depth.label());
+        d.fm.set("labels", Value::List(labels));
+        Ok(())
+    })?;
+    service::refresh(conn, data_dir, ws)?;
+    Ok(())
 }
 
 /// A graph built after the learning task was created joins the task's checklist — once, after its first step (or at
@@ -529,10 +652,10 @@ mod tests {
         assert!(!m.graph.built && m.task.is_none());
 
         // The learning task carries the map as its brief; starting again reuses it.
-        let task = start(&conn, &data, &ws, &p.id).unwrap();
+        let task = start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap();
         let brief = service::read(&conn, &ws, &task.id, 50_000).unwrap().body;
         assert!(brief.contains("draft_project_document") && brief.contains("TypeScript (2)") && brief.contains("do not change any file"), "{brief}");
-        assert_eq!(start(&conn, &data, &ws, &p.id).unwrap().id, task.id);
+        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap().id, task.id);
 
         // Claude drafts; the person applies one and discards the other.
         let ov = record_draft(&conn, &data, &ws, &p.id, "overview", "## What it is\n\nA web shop (verified: src/main.ts).").unwrap();
@@ -571,13 +694,37 @@ mod tests {
         assert!(m.graph.built && m.graph.report.as_deref() == Some("graphify-out/GRAPH_REPORT.md"));
 
         // A graph built after the task was created joins its checklist, after the first step, once.
-        assert_eq!(start(&conn, &data, &ws, &p.id).unwrap().id, task.id);
-        assert_eq!(start(&conn, &data, &ws, &p.id).unwrap().id, task.id);
+        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap().id, task.id);
+        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap().id, task.id);
         let brief = service::read(&conn, &ws, &task.id, 50_000).unwrap().body;
         assert_eq!(brief.matches("graphify-out/GRAPH_REPORT.md").count(), 1, "{brief}");
         let steps: Vec<&str> = brief.lines().filter(|l| l.starts_with("- [")).collect();
         assert!(steps[0].contains("NEXUS's map") && steps[1].contains("Graphify report"), "{steps:?}");
         assert_eq!(crate::knowledge::tasks::checklist(crate::knowledge::tasks::split_log(&brief).0).len(), steps.len(), "every step is a checklist item");
+
+        // The depth is a label on the task; choosing another one replaces it (one depth label, the learn label stays).
+        let labels_of = |id: &str| index::get(&conn, &ws.id, id).map(|i| labels(&i)).unwrap();
+        assert_eq!(Depth::of_labels(&labels_of(&task.id)), Some(Depth::Standard));
+        let t = start(&conn, &data, &ws, &p.id, Depth::Quick).unwrap();
+        assert_eq!((t.id.as_str(), t.depth), (task.id.as_str(), Depth::Quick));
+        let l = labels_of(&task.id);
+        assert!(l.contains(&LEARN_LABEL.to_string()) && l.contains(&"learn-quick".to_string()) && !l.contains(&"learn-standard".to_string()), "{l:?}");
+        assert_eq!(map(&conn, &data, &ws, &p.id).unwrap().task.unwrap().depth, Depth::Quick);
+    }
+
+    #[test]
+    fn depths_have_budgets_and_rules_carry_them_without_task_text() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(Depth::of_labels(&s(&["bug"])), None, "not a learning task");
+        assert_eq!(Depth::of_labels(&s(&["learn"])), Some(Depth::Standard), "older learning tasks: the default");
+        assert_eq!(Depth::of_labels(&s(&["learn", "learn-deep"])), Some(Depth::Deep));
+        assert_eq!(Depth::parse(" Quick "), Some(Depth::Quick));
+        assert_eq!(Depth::parse("huge"), None);
+        let quick = rules(Depth::Quick);
+        assert!(quick.contains("LEARN-2") && quick.contains("open at most 20 files") && quick.contains("at most 250 words") && quick.contains("nexus:learn-project"), "{quick}");
+        assert!(rules(Depth::Deep).contains("no file limit"));
+        assert_eq!((1..=7).filter(|i| quick.contains(&format!("LEARN-{i} "))).count(), 7, "seven stable rule ids");
+        assert!(quick.chars().count() < 1200, "compact: {} chars", quick.chars().count());
     }
 
     #[test]

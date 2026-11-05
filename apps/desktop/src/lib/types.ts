@@ -453,6 +453,8 @@ export interface SessionView {
     hooks?: IntegrationStatus
     task?: { id: string; title: string; status: string; delivery: 'session-start' | 'tools' | 'none' }
     isolation?: { claudeMdExcludes: string[] }
+    /** A learning session (ADR-0041): its depth and the built-in skill it got (or why not). */
+    learn?: { depth: LearnDepth; skill: string | null; withheld: string | null }
   } | null
   turns: number
   prompts: number
@@ -1763,6 +1765,26 @@ export interface LearnCount {
   files: number
 }
 
+/** How much a learning session may spend (ADR-0041): one session; the depth limits files read and draft length. */
+export type LearnDepth = 'quick' | 'standard' | 'deep'
+
+export interface LearnDepthInfo {
+  id: LearnDepth
+  /** Files Claude may open; null = no limit (still selective). */
+  files: number | null
+  overviewWords: number
+  architectureWords: number
+  memories: [number, number]
+  rules: string
+}
+
+export interface LearnTask {
+  id: string
+  title: string
+  status: string | null
+  depth: LearnDepth
+}
+
 export interface ProjectMap {
   projectId: string
   name: string
@@ -1786,7 +1808,11 @@ export interface ProjectMap {
     openTasks: number
   }
   graph: { installed: boolean; built: boolean; report: string | null; builtMs: number | null; ignored: boolean; command: string }
-  task: { id: string; title: string; status: string | null } | null
+  task: LearnTask | null
+  /** The depths to choose from, with their budgets and the exact rules a learning session gets. */
+  depths: LearnDepthInfo[]
+  /** The built-in skill learning sessions get. */
+  skill: string
   drafts: number
 }
 

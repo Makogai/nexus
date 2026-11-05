@@ -65,6 +65,17 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
+* **Built-in learning skill (ADR-0041, branch `milestone/learn-skill`, off `fix/learn-session`)** — owner feedback:
+  a learning session fanned out into a multi-agent plan and burned tokens.
+  * **Skill:** NEXUS ships a plugin `nexus` with the skill `learn-project` (`crates/nexus-core/builtin/`, written to
+    `<data>/builtin/<hash>/nexus/`), given with `--plugin-dir` to learning sessions only. The plugin name is reserved for
+    kits; policy that forbids `--plugin-dir` withholds it.
+  * **Rules:** LEARN-1 to LEARN-7 in the system prompt of learning sessions — one session, no subagents unless the
+    person asks, read only, a budget.
+  * **Depth:** Quick / Standard / Deep in the Learn tab (label on the task), with the budget and the exact rules shown.
+  * **Checks:** `claude plugin validate` passes on the built-in plugin (throwaway config folder). `workbench.mjs` and
+    `task-flow.mjs` not yet run on this branch — the owner's installed NEXUS was open (same app identity, single
+    instance); CI on the branch or a run with NEXUS closed is next.
   * **After adding a project:** it opens on Learn.
   * **Fix:** the knowledge index refresh takes SQLite's write lock up front (IMMEDIATE). A deferred read-then-write
     upgrade failed at once with "database is locked" when the desktop and the MCP server refreshed together; it showed

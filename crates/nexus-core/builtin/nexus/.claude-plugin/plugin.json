@@ -1,0 +1,7 @@
+{
+  "name": "nexus",
+  "version": "1.0.0",
+  "description": "Skills NEXUS gives to its own sessions. Built into NEXUS, read-only, updated with NEXUS.",
+  "author": { "name": "NEXUS" },
+  "license": "MIT OR Apache-2.0"
+}

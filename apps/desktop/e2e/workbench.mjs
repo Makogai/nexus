@@ -194,6 +194,13 @@ try {
   await inv('profile_create', { input: { name: 'Fake', configDir: cfg, executable: fileURLToPath(new URL('../../../target/debug/fake-claude.exe', import.meta.url)), defaultWorkProfile: 'balanced' } })
   await cdp.evaluate(`location.reload(); true`)
   await cdp.waitFor(`!!document.querySelector('[data-learn-start]')`, 30000)
+  // The depth sets the budget; the rules Claude gets are shown as they are sent.
+  await click('[data-learn-depth] [data-depth="quick"]')
+  const budget = await textOf('[data-learn-budget]')
+  check('Quick depth shows its budget', budget.includes('at most 20 files') && budget.includes('250 words'), budget)
+  await click('[data-learn-rules-toggle]')
+  const shownRules = await textOf('[data-learn-rules]')
+  check('…and the exact rules Claude gets (LEARN-1 to LEARN-7, no subagents)', shownRules.includes('LEARN-2 Work alone') && shownRules.includes('LEARN-7'), shownRules.slice(0, 80))
   await click('[data-learn-start]')
   const launch = await cdp.waitFor(`document.querySelector('[data-launch-task]')?.innerText`, 10000).catch(() => '')
   check('Start a learning session opens the launch for the learning task', launch.includes('Learn App'), launch.replace(/\n/g, ' ').slice(0, 120))
@@ -211,6 +218,15 @@ try {
   })
   const tail = report?.args.slice(-2) ?? []
   check('…and Claude gets it as its first message, after `--` (no option can take it)', tail[0] === '--' && `“${tail[1]}”` === kickoff.text, JSON.stringify(tail).slice(0, 160))
+  const args = report?.args ?? []
+  const pluginDirs = args.flatMap((a, i) => (a === '--plugin-dir' ? [args[i + 1]] : []))
+  const skillDir = pluginDirs.find((d) => existsSync(join(d, 'skills', 'learn-project', 'SKILL.md')))
+  check('…with NEXUS’s built-in learn-project skill for this session (--plugin-dir)', !!skillDir && /[\\/]nexus$/.test(skillDir), JSON.stringify(pluginDirs).slice(0, 160))
+  const system = args[args.indexOf('--append-system-prompt') + 1] ?? ''
+  check('…and the Quick rules in its system prompt (no task text)', system.includes('LEARN-2 Work alone') && system.includes('open at most 20 files') && !system.includes('Learn App'), system.slice(-160))
+  const learnTaskId = (await inv('project_learn_map', { workspaceId: ws.id, projectId: proj.id })).task?.id
+  const learnSession = (await inv('session_list', { filter: null })).find((x) => x.taskId === learnTaskId)
+  check('…recorded with the session (depth, skill)', learnSession?.integrations?.learn?.depth === 'quick' && learnSession?.integrations?.learn?.skill === 'nexus:learn-project', JSON.stringify(learnSession?.integrations?.learn ?? null))
   await click('[data-project-tab="learn"]')
   const lm = await inv('project_learn_map', { workspaceId: ws.id, projectId: proj.id })
   const brief = lm.task ? (await inv('knowledge_read', { workspaceId: ws.id, id: lm.task.id })).body : ''

@@ -199,6 +199,10 @@ fn insert(conn: &Connection, data_dir: &Path, mut k: Kit, approve: bool) -> Resu
     if !plugin::valid_plugin_name(&k.name) {
         return Err(CoreError::invalid(format!("“{}” is not a usable plugin name (letters, digits, '-' or '_')", k.name)));
     }
+    // The built-in plugin's name (ADR-0041): a kit with the same name would shadow NEXUS's own skills in a session.
+    if k.name.eq_ignore_ascii_case(crate::claude::builtin::PLUGIN) {
+        return Err(CoreError::invalid(format!("“{}” is reserved for NEXUS's built-in skills — rename the plugin", k.name)));
+    }
     k.kind = inv.kind.clone();
     k.version = inv.version.clone();
     k.content_hash = hash_dir(&dir);
@@ -704,6 +708,12 @@ mod tests {
         let home = root.join("home");
         let mk = |n: &str| profile::create_managed(&conn, &ProfileInput { name: n.into(), config_dir: Some(root.join(n).to_string_lossy().into_owned()), ..Default::default() }, &home).unwrap();
         let (work, personal) = (mk("work"), mk("personal"));
+
+        let reserved = root.join("named-nexus");
+        w(&reserved.join(".claude-plugin/plugin.json"), r#"{"name":"nexus","version":"1.0.0"}"#);
+        w(&reserved.join("skills/x/SKILL.md"), "---\nname: x\ndescription: X\n---\nbody");
+        let e = register_local(&conn, &data, reserved.to_str().unwrap(), None, None).unwrap_err();
+        assert!(e.to_string().contains("reserved for NEXUS"), "the built-in plugin's name is reserved: {e}");
 
         let k = register_local(&conn, &data, src.to_str().unwrap(), None, None).unwrap();
         assert_eq!((k.name.as_str(), k.kind.as_str(), k.approved()), ("probe-kit", "plugin", false));

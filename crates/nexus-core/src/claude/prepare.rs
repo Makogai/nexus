@@ -8,6 +8,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde::Serialize;
 
+use super::builtin;
 use super::instructions::{self, Inspection};
 use super::isolation;
 use super::mcp::{self, IntegrationStatus, Integrations};
@@ -135,6 +136,16 @@ pub struct WorkflowLaunch {
     pub refused: Vec<String>,
 }
 
+/// A learning session (ADR-0041): its depth and whether the built-in skill was given (or why not). The rules are in
+/// the system prompt either way.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnLaunch {
+    pub depth: crate::project::learn::Depth,
+    pub skill: Option<String>,
+    pub withheld: Option<String>,
+}
+
 /// The context strategy a session was launched with (ADR-0028).
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -178,7 +189,8 @@ pub fn preview(r: &PreviewRequest<'_>) -> Result<Preview> {
         let rules = context::launch_rules_with(r.conn, &ws.id, scope, Some(&claude), r.task_id, &context::RuleOptions::from(&ctx))?;
         if let Some(tid) = r.task_id {
             let v = tasks::view(r.conn, &ws, tid, 4000)?;
-            nexus.task_brief_chars = tasks::pointer(&v.id, "session-start").chars().count();
+            nexus.task_brief_chars = tasks::pointer(&v.id, "session-start").chars().count()
+                + crate::project::learn::Depth::of_labels(&v.labels).map(|d| crate::project::learn::rules(d).chars().count() + 2).unwrap_or(0);
             nexus.task = Some(v.title);
         }
         nexus.appended_chars = rules.text.as_deref().map(|t| t.chars().count()).unwrap_or(0) + nexus.task_brief_chars;
@@ -199,7 +211,8 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
     // A workflow run carried by the task activates its skills for this session only (ADR-0029).
     let run = r.task_id.and_then(|t| crate::workflow::run::active_for_task(r.conn, t).ok().flatten());
     let extra = run.as_ref().map(|x| x.skills.clone()).unwrap_or_default();
-    let (plugin_dirs, kit_launches, refused) = crate::kits::session_plugin_dirs_with(r.conn, r.data_dir, &r.profile.id, r.workspace_id, &pol, &extra)?;
+    let (mut plugin_dirs, kit_launches, refused) = crate::kits::session_plugin_dirs_with(r.conn, r.data_dir, &r.profile.id, r.workspace_id, &pol, &extra)?;
+    let mut learn = None;
     let ws = r.workspace_id.and_then(|id| workspace::get(r.conn, id).ok()).filter(|w| w.available);
     let project = r.project_id.and_then(|id| project::get(r.conn, id).ok());
     let mut parts: Vec<String> = Vec::new();
@@ -258,6 +271,18 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
                         run.rigor
                     ));
                 }
+                if let Some(depth) = crate::project::learn::Depth::of_labels(&v.labels) {
+                    // A learning task (ADR-0041): NEXUS's rules with the depth's budget, and the built-in skill for this
+                    // session only — unless policy forbids --plugin-dir or an AI Kit already uses the name `nexus`.
+                    parts.push(crate::project::learn::rules(depth));
+                    let withheld = crate::kits::blocked_by(&pol).map(str::to_string).or_else(|| {
+                        kit_launches.iter().any(|k| k.name == builtin::PLUGIN).then(|| format!("an AI Kit of this profile is named “{}”", builtin::PLUGIN))
+                    });
+                    if withheld.is_none() {
+                        plugin_dirs.push(builtin::plugin_dir(r.data_dir)?);
+                    }
+                    learn = Some(LearnLaunch { depth, skill: withheld.is_none().then(|| builtin::LEARN_SKILL.to_string()), withheld });
+                }
                 claude_name = Some(format!("NEXUS task {}", service::short_id(&v.id)));
                 task = Some(TaskLaunch { id: v.id.clone(), title: v.title.clone(), status: v.status.clone(), delivery });
             }
@@ -276,6 +301,7 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
             kits: kit_launches,
             context: Some(ContextLaunch { strategy, observe_instructions: observing }),
             workflow: run.map(|x| WorkflowLaunch { run_id: x.id, workflow: x.workflow_title, rigor: x.rigor, skills: extra, refused }),
+            learn,
             prompt_chars: (!parts.is_empty()).then(|| parts.iter().map(|p| p.chars().count()).sum::<usize>() + 2 * (parts.len() - 1)),
         },
         prompt: (!parts.is_empty()).then(|| parts.join("\n\n")),
@@ -338,5 +364,50 @@ mod tests {
         assert!(req(Some("task"), &other.id).is_err(), "a task launches only in its own project");
         let disabled = [("CLAUDE_CODE_DISABLE_CLAUDE_MDS".to_string(), "1".to_string())];
         assert!(claude_mds_disabled(&disabled) && !claude_mds_disabled(&[]));
+        assert!(prepared.integrations.learn.is_none() && prepared.plugin_dirs.is_empty(), "an ordinary task: no learning rules, no skill");
+    }
+
+    #[test]
+    fn learning_sessions_get_the_rules_and_the_built_in_skill_for_this_session_only() {
+        let t = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(t.path()).unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        let (home, data) = (root.join("home"), root.join("data"));
+        let ws = workspace::create(&conn, root.join("ws").to_str().unwrap(), "W", "").unwrap();
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let p = project::register(&conn, &ws.id, repo.to_str().unwrap(), Some("repo")).unwrap();
+        let prof = profile::create_managed(&conn, &ProfileInput { name: "P".into(), config_dir: Some(root.join("cfg").to_string_lossy().into_owned()), ..Default::default() }, &home).unwrap();
+        let labels = vec!["learn".to_string(), "learn-quick".to_string()];
+        let task = service::create(
+            &conn, &data, &ws,
+            &CreateInput { kind: "task".into(), title: "Learn repo".into(), body: "- [ ] Read\n".into(), project_id: Some(p.id.clone()), labels, ..Default::default() },
+            Author::Human,
+        ).unwrap();
+        let tid = task.id.unwrap();
+        let prepare_with = |machine: &MachinePolicyLocations| {
+            prepare(&Request {
+                conn: &conn, data_dir: &data, home: &home, profile: &prof, machine, nexus_exe: None,
+                nexus_session_id: "00000000-0000-4000-8000-000000000002", workspace_id: Some(&ws.id), project_id: Some(&p.id), task_id: Some(&tid),
+                cwd: &repo, base_env: &[], start_task: false,
+            })
+            .unwrap()
+        };
+        let prepared = prepare_with(&MachinePolicyLocations::default());
+        let prompt = prepared.prompt.unwrap();
+        assert!(prompt.contains("LEARN-2 Work alone") && prompt.contains("open at most 20 files"), "quick depth's rules: {prompt}");
+        assert!(!prompt.contains("Learn repo"), "still no task text in the system prompt");
+        assert_eq!(prepared.plugin_dirs, [builtin::plugin_dir(&data).unwrap()]);
+        assert!(prepared.plugin_dirs[0].join("skills/learn-project/SKILL.md").is_file());
+        let l = prepared.integrations.learn.unwrap();
+        assert_eq!((l.depth, l.skill.as_deref(), l.withheld), (crate::project::learn::Depth::Quick, Some(builtin::LEARN_SKILL), None));
+
+        // An organisation that forbids --plugin-dir: the skill is withheld (and says why); the rules still apply.
+        let managed = root.join("managed-settings.json");
+        std::fs::write(&managed, r#"{"disableSideloadFlags": true}"#).unwrap();
+        let blocked = prepare_with(&MachinePolicyLocations { files: vec![managed], ..Default::default() });
+        assert!(blocked.plugin_dirs.is_empty() && blocked.prompt.unwrap().contains("LEARN-1"));
+        let l = blocked.integrations.learn.unwrap();
+        assert!(l.skill.is_none() && l.withheld.unwrap().contains("disableSideloadFlags"));
     }
 }
