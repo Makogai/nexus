@@ -1,0 +1,13 @@
+{
+  "version": "0.1.0",
+  "tag": "v0.1.0",
+  "url": "https://github.com/Makogai/nexus/releases/tag/v0.1.0",
+  "assets": [
+    { "name": "NEXUS_0.1.0_x64-setup.exe", "size": null, "url": "https://github.com/Makogai/nexus/releases/download/v0.1.0/NEXUS_0.1.0_x64-setup.exe" },
+    { "name": "NEXUS_0.1.0_aarch64.dmg", "size": null, "url": "https://github.com/Makogai/nexus/releases/download/v0.1.0/NEXUS_0.1.0_aarch64.dmg" },
+    { "name": "NEXUS_0.1.0_x64.dmg", "size": null, "url": "https://github.com/Makogai/nexus/releases/download/v0.1.0/NEXUS_0.1.0_x64.dmg" },
+    { "name": "NEXUS_0.1.0_amd64.AppImage", "size": null, "url": "https://github.com/Makogai/nexus/releases/download/v0.1.0/NEXUS_0.1.0_amd64.AppImage" },
+    { "name": "NEXUS_0.1.0_amd64.deb", "size": null, "url": "https://github.com/Makogai/nexus/releases/download/v0.1.0/NEXUS_0.1.0_amd64.deb" },
+    { "name": "SHA256SUMS.txt", "size": null, "url": "https://github.com/Makogai/nexus/releases/download/v0.1.0/SHA256SUMS.txt" }
+  ]
+}
