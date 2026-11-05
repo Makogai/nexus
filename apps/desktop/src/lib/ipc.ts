@@ -13,6 +13,7 @@ import type {
   Migrated,
   MigrationPlan,
   RepairPlan,
+  Restoration,
   TemplateApplied,
   TemplatePlan,
   TemplateSummary,
@@ -150,6 +151,7 @@ export const api = {
   workspaceCreate: (path: string, name: string, description?: string, template?: string | null) =>
     call<Workspace>('workspace_create', { path, name, description, template: template ?? null }),
   workspaceDoctor: (workspaceId: string) => call<DoctorReport>('workspace_doctor', { workspaceId }),
+  workspaceRestoration: (workspaceId: string) => call<Restoration>('workspace_restoration', { workspaceId }),
   projectScan: (workspaceId: string) => call<ProjectScan>('project_scan', { workspaceId }),
   syncPolicyGet: (workspaceId: string) => call<SyncPolicyView>('sync_policy_get', { workspaceId }),
   syncPolicySet: (workspaceId: string, mode: SyncPolicyMode, remoteIsPrivate: boolean) =>

@@ -1045,6 +1045,25 @@ fn environment_requirements_and_claude_code_setup() {
     assert_eq!(v["docsUrl"], "https://code.claude.com/docs/en/setup");
 }
 
+/// Portable Workspace P8: `nexus workspaces restore` lists every step with its state, what came with the workspace and
+/// what cannot be recovered from it.
+#[test]
+fn workspace_restoration_plan_on_this_computer() {
+    let e = Env::new();
+    e.setup();
+    e.ok(&["templates", "apply", "developer", "--yes"]);
+    let r = e.json(&["workspaces", "restore"]);
+    let status = |id: &str| r["steps"].as_array().unwrap().iter().find(|s| s["id"] == id).map(|s| s["status"].as_str().unwrap().to_string());
+    assert_eq!(status("schema").as_deref(), Some("done"));
+    assert_eq!(status("projects").as_deref(), Some("done"));
+    assert_eq!(status("profiles").as_deref(), Some("done"), "setup added a profile");
+    assert_eq!(status("approvals").as_deref(), Some("done"), "installed here, so approved here");
+    assert_eq!((r["restored"]["constitutions"].as_u64(), r["restored"]["skills"].as_u64()), (Some(6), Some(5)));
+    assert!(r["notRecoverable"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("transcripts")));
+    let text = e.ok(&["workspaces", "restore"]);
+    assert!(text.contains("steps done") && text.contains("Not recoverable from the workspace"), "{text}");
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {

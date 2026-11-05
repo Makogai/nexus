@@ -121,6 +121,7 @@ async function applyTemplate() {
         <p>The health of this portable workspace — what travels with it, what this computer still needs — and its starter template. Repairs show what they change before anything is written.</p>
       </div>
       <div class="page-actions">
+        <button class="btn btn-ghost" data-open-restore @click="router.push({ name: 'restore' })">Restore on this computer</button>
         <button class="btn btn-ghost" :disabled="busy" data-doctor-refresh @click="load"><RefreshCw :class="{ spin: busy }" /> Check again</button>
       </div>
     </div>

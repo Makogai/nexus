@@ -147,6 +147,9 @@ enum WorkspaceCmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Restoring the active workspace on this computer: each step (Claude Code, schema, index, approvals, skills,
+    /// projects, tools, profiles, gates) with its state, what came with the workspace and what cannot be recovered.
+    Restore,
     /// Workspace Doctor: health of the active workspace with recommendations. `--repair ID` shows what that repair
     /// changes; add --yes to apply it. Exit code 1 when something is an error.
     Doctor {
@@ -516,6 +519,40 @@ fn cmd_workspaces(ctx: &Ctx, cmd: WorkspaceCmd) -> nexus_core::Result<()> {
             }
             println!("  features: {}", if m.features.is_empty() { "(none)".to_string() } else { m.features.join(", ") });
             println!("  project clones: {}/ · {} project(s)", m.projects_dir(), m.projects.len());
+        }
+        WorkspaceCmd::Restore => {
+            let ws = active_workspace(&conn)?;
+            let r = nexus_core::restoration::plan(&conn, &ctx.data_dir, &ctx.home, &ws, true)?;
+            if ctx.json {
+                out::json(&r);
+                return Ok(());
+            }
+            println!("Restoring {} on this computer — {} of {} steps done", r.name, r.done, r.total);
+            for s in &r.steps {
+                let mark = match s.status {
+                    "done" => "done    ",
+                    "todo" => "TO DO   ",
+                    "blocked" => "BLOCKED ",
+                    _ => "optional",
+                };
+                println!("  {mark} {}: {}", s.title, s.summary);
+                for d in &s.detail {
+                    println!("             {d}");
+                }
+                if let Some(rep) = &s.repair {
+                    println!("             → nexus workspaces doctor --repair {rep}");
+                }
+            }
+            let x = &r.restored;
+            println!(
+                "Came with the workspace: {} constitutions, {} rules, {} workflows, {} skills, {} projects, {} tasks, {} decisions, {} notes, {} development records{}",
+                x.constitutions, x.rules, x.workflows, x.skills, x.projects, x.tasks, x.decisions, x.notes, x.development_records,
+                x.template.as_deref().map(|t| format!(" (template {t})")).unwrap_or_default()
+            );
+            println!("Not recoverable from the workspace:");
+            for n in &r.not_recoverable {
+                println!("  · {n}");
+            }
         }
         WorkspaceCmd::Doctor { repair, yes } => {
             use nexus_core::workspace_doctor as wd;

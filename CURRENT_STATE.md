@@ -8,7 +8,7 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
   Nothing pushed.
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
-  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup), P6 (development records, history) and P7 (sync policies) done and committed; P8 (new-computer restoration) next. Not merged, not pushed, no release.
+  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup), P6 (development records, history), P7 (sync policies) and P8 (new-computer restoration) done and committed; the stage's full sequential verification is below. Not merged, not pushed, no release.
 
 ## Portable Workspace — progress (session 10)
 
@@ -111,6 +111,17 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   *Sync policy* card, `nexus sync policy`, IPC `sync_policy_get/set`. Threat model T45. Verified: core 216 (2 policy
   tests with local bare remotes), CLI 37 + 6, vitest 89, desktop E2E `portable.mjs` 50/50 (trusted publish through the
   UI), `sync.mjs` 18/18, clippy clean.
+* **P8 — new-computer restoration** (`restoration`): one ordered plan — Claude Code, workspace schema, knowledge index
+  (rebuilt here), approvals of synced rules/constitutions/workflows, workspace skills (register for review → approve),
+  projects (clone missing from their remotes with their ids, link clones), the projects' tools, Claude profiles,
+  quality gates, continue — each with done/to do/blocked/optional, a Doctor repair (plan first) or a view; plus what came
+  with the workspace (counts incl. development records and the template) and what cannot be recovered (transcripts,
+  uncommitted source, local-only knowledge, machine-local state, approvals and gate commands, profiles and sign-ins).
+  Onboarding from Git now leads to **Restore on this computer** (fixed: `CloneWorkspaceForm` emitted `cloned` after the
+  store reload had already unmounted onboarding, so the navigation never happened); also reachable from the Workspace
+  view. `nexus workspaces restore`, IPC `workspace_restoration`. User guide `docs/user/PORTABLE_WORKSPACE.md`.
+  Verified: core restoration test, CLI E2E, vitest, desktop E2E `restore.mjs` 12/12 (two app instances with separate
+  data folders and local bare remotes), `sync.mjs` 18/18.
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 

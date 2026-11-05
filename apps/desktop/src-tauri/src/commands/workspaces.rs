@@ -70,6 +70,19 @@ pub async fn workspace_repair(ctx: State<'_, Ctx>, workspace_id: String, repair:
     .await
 }
 
+/// What restoring the workspace on this computer still needs, step by step, and what came with it (Portable
+/// Workspace P8). Probes Claude Code and the projects' tools, so it runs on its own connection.
+#[tauri::command]
+pub async fn workspace_restoration(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResult<nexus_core::restoration::Restoration> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = workspace::get(&c, &workspace_id)?;
+        Ok(nexus_core::restoration::plan(&c, &ctx.data_dir, &ctx.home, &ws, true)?)
+    })
+    .await
+}
+
 /// The built-in workspace templates (ADR-0037).
 #[tauri::command]
 pub fn template_list() -> IpcResult<Vec<templates::Summary>> {

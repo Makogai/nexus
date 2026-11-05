@@ -56,7 +56,7 @@ async function create() {
 
 async function cloned(r: SyncCloned) {
   app.toast('success', `Workspace “${r.workspace.name}” opened from Git`)
-  await router.push({ name: 'sync', query: { restore: '1' } })
+  await router.push({ name: 'restore' })
 }
 
 async function importExisting() {

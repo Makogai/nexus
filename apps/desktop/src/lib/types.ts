@@ -190,6 +190,37 @@ export interface SyncPolicyView {
   branch: string | null
 }
 
+export interface RestorationStep {
+  id: string
+  title: string
+  status: 'done' | 'todo' | 'optional' | 'blocked'
+  summary: string
+  detail: string[]
+  repair: string | null
+  navigate: string | null
+}
+
+export interface Restoration {
+  workspaceId: string
+  name: string
+  steps: RestorationStep[]
+  restored: {
+    constitutions: number
+    rules: number
+    workflows: number
+    skills: number
+    projects: number
+    tasks: number
+    decisions: number
+    notes: number
+    developmentRecords: number
+    template: string | null
+  }
+  notRecoverable: string[]
+  done: number
+  total: number
+}
+
 export type DoctorStatus = 'ok' | 'info' | 'warn' | 'error'
 
 export interface DoctorFinding {

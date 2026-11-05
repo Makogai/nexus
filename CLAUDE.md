@@ -29,7 +29,8 @@ cd apps/desktop && node e2e/workflow-real-claude.mjs # workflow skills only in t
 cd apps/desktop && node e2e/usage.mjs       # Usage dashboard: transcripts → scanner → tiles, trend, breakdowns (E2E build)
 cd apps/desktop && node e2e/usage-real-claude.mjs # real transcript format parsed; nothing invented (real Claude)
 cd apps/desktop && node e2e/sync.mjs        # Sync Center: local bare remote, reviewed commit/push, ff pull (E2E build)
-cd apps/desktop && node e2e/portable.mjs    # Portable Workspace: schema, templates, Doctor, projects (E2E build)
+cd apps/desktop && node e2e/portable.mjs    # Portable Workspace: schema, templates, Doctor, projects, env, records, sync policy (E2E build)
+cd apps/desktop && node e2e/restore.mjs     # second computer: open from Git → Restore view → clone, approve → history (E2E build)
 cd apps/desktop && npx tauri build --debug --config src-tauri/tauri.installer.conf.json && node e2e/installed.mjs # real installer: install, check, uninstall
 cd apps/desktop && node scripts/release-check.mjs ../../target/release/bundle/nsis # after `npx tauri build --config src-tauri/tauri.installer.conf.json`
 cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Windows notification sender

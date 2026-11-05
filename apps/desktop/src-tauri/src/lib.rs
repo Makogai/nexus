@@ -153,6 +153,7 @@ pub fn run() {
             commands::sync::sync_policy_set,
             commands::claude::claude_setup_status,
             commands::workspaces::workspace_doctor,
+            commands::workspaces::workspace_restoration,
             commands::workspaces::workspace_repair_plan,
             commands::workspaces::workspace_repair,
             commands::workspaces::template_list,

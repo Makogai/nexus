@@ -15,6 +15,7 @@ export const router = createRouter({
     { path: '/usage', name: 'usage', component: () => import('./views/UsageView.vue') },
     { path: '/sync', name: 'sync', component: () => import('./views/SyncView.vue') },
     { path: '/workspace', name: 'workspace', component: () => import('./views/WorkspaceView.vue') },
+    { path: '/restore', name: 'restore', component: () => import('./views/RestoreView.vue') },
     { path: '/setup', name: 'claude-setup', component: () => import('./views/ClaudeSetupView.vue') },
     { path: '/sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
     { path: '/profiles', name: 'profiles', component: () => import('./views/ProfilesView.vue') },
