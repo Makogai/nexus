@@ -31,6 +31,15 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace → Project workbench)
   * **First run:** macOS and Linux are built for the first time by this run — not verified locally (no
     cross-toolchain here).
 
+* **README and website** (branch `docs/readme-website`):
+  * **README:** a new `README.md` with a Codex-made hero and six feature icons (`docs/assets/readme/`, made with the
+    codex-harness skill, then resized) and real screenshots of the app on a synthetic demo project.
+  * **Website:** a static site in `website/` (home with feature grid and screenshot tour; download page with OS
+    detection, checksums and first-start notes) and `.github/workflows/pages.yml`. On deploy the workflow writes
+    `release.json` from the latest *published* release, and publishing a release redeploys the site.
+  * **Before it can go live:** Pages must be enabled (Settings → Pages → GitHub Actions). On the free plan it needs a
+    public repository, and visitors can download release files only from a public repository.
+
 ## Project workbench — progress (session 10)
 
 * **W1 — add a project from Git** (`1861d74`):

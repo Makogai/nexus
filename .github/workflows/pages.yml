@@ -1,0 +1,54 @@
+name: Website (GitHub Pages)
+
+# Publishes website/ to GitHub Pages. The download page reads release.json, written here from the latest PUBLISHED
+# release (drafts are never shown), so publishing a release updates the site's links and sizes.
+# Pages must be enabled once: Settings → Pages → Source: GitHub Actions. (On the free plan Pages needs a public
+# repository; private repositories need GitHub Pro/Team.)
+
+on:
+  push:
+    branches: [main]
+    paths: ['website/**', '.github/workflows/pages.yml']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Latest published release → website/release.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view --repo "${{ github.repository }}" --json tagName,publishedAt,url,assets > release.raw.json 2>/dev/null; then
+            jq '{version: (.tagName | ltrimstr("v")), tag: .tagName, published: .publishedAt, url: .url,
+                 assets: [.assets[] | {name, size, url}]}' release.raw.json > website/release.json
+            echo "release.json from $(jq -r .tagName release.raw.json)"
+          else
+            echo "no published release yet — keeping the committed release.json"
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
