@@ -257,11 +257,15 @@ try {
   // ---- uninstall ----
   const uninstaller = join(installDir, 'uninstall.exe')
   if (existsSync(uninstaller)) spawnSync(uninstaller, ['/S'], { stdio: 'ignore', timeout: 120_000 })
-  for (let i = 0; i < 120 && existsSync(desktopExe); i++) await sleep(500)
+  // The NSIS uninstaller goes on as a copy of itself in %TEMP% and returns at once: the files go first, its registry
+  // entries (uninstall entry, then the hook's sender and nexus:// keys) a moment later — wait for both.
+  const ownKeys = ['HKCU\\Software\\Classes\\AppUserModelId\\io.github.makogai.nexus', 'HKCU\\Software\\Classes\\nexus']
+  const uninstalling = () => existsSync(desktopExe) || regQuery(UNINSTALL_KEY) || (!ui && ownKeys.some((k) => regQuery(k)))
+  for (let i = 0; i < 120 && uninstalling(); i++) await sleep(500)
   check('uninstalling removes the programs', !existsSync(desktopExe) && !existsSync(cliExe))
   if (!ui) {
     check('…the Windows uninstall entry', !regQuery(UNINSTALL_KEY))
-    check('…and what NEXUS registered for itself (sender, nexus://)', !regQuery('HKCU\\Software\\Classes\\AppUserModelId\\io.github.makogai.nexus') && !regQuery('HKCU\\Software\\Classes\\nexus'))
+    check('…and what NEXUS registered for itself (sender, nexus://)', !ownKeys.some((k) => regQuery(k)))
   }
   check('user data stays: the database and its backups survive the uninstall', existsSync(join(dataDir, 'nexus.db')) && (ui || existsSync(join(dataDir, 'backups'))))
   check('the per-user data folder was not touched by installing or uninstalling', existsSync(defaultData) === dataExistedBefore)
