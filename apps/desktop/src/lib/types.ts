@@ -8,7 +8,28 @@ export interface AppInfo {
   schemaVersion: number
   gitVersion: string | null
   homeDir: string
-  recovery: { quarantinedTo: string; reason: string } | null
+  recovery: { quarantinedTo: string; reason: string; latestBackup: string | null } | null
+  /** Schema version this build understands; a newer database is refused, never changed. */
+  supportedSchema: number
+  /** The `nexus` CLI next to the desktop program (also the MCP server and hook handler). */
+  cliPath: string | null
+  /** A restore scheduled for the next start. */
+  pendingRestore: string | null
+  /** A restore applied at this start (backup id) or why it failed. */
+  restored: string | null
+  restoreError: string | null
+}
+
+export interface BackupInfo {
+  id: string
+  path: string
+  kind: 'manual' | 'automatic' | 'pre-restore' | 'pre-migration' | 'replaced'
+  createdAt: number
+  schemaVersion: number | null
+  appVersion: string | null
+  bytes: number
+  restorable: boolean
+  problem: string | null
 }
 
 export interface Workspace {

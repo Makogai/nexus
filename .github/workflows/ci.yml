@@ -112,3 +112,9 @@ jobs:
       - name: MCP interoperability (official TypeScript SDK client)
         working-directory: apps/desktop
         run: node e2e/mcp-interop.mjs
+      - name: Installer (debug profile, production configuration, CLI as sidecar)
+        working-directory: apps/desktop
+        run: npx tauri build --debug --config src-tauri/tauri.installer.conf.json
+      - name: Installed-app verification (install, CLI/MCP/self-check/notifications, uninstall keeps data)
+        working-directory: apps/desktop
+        run: node e2e/installed.mjs

@@ -19,6 +19,8 @@ pub struct AppCtx {
     pub host: Host,
     /// Set when the database was unreadable at startup and has been moved aside.
     pub recovery: Option<Recovery>,
+    /// A restore scheduled from Settings and applied at this start: `Ok(backup id)` or the reason it failed.
+    pub restore: Option<Result<String, String>>,
     /// Where the user is looking, for notification decisions (ADR-0025).
     pub attention: AttentionState,
     pub notifier: Box<dyn crate::notifier::Notifier>,
@@ -71,6 +73,7 @@ impl AppCtx {
         db_path: PathBuf,
         host: Host,
         recovery: Option<Recovery>,
+        restore: Option<Result<String, String>>,
     ) -> Self {
         AppCtx {
             db: Mutex::new(conn),
@@ -81,6 +84,7 @@ impl AppCtx {
             machine_policy: MachinePolicyLocations::system(),
             host,
             recovery,
+            restore,
             attention: AttentionState::default(),
             notifier: crate::notifier::select(),
         }

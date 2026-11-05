@@ -24,6 +24,7 @@ import type {
   MemoryApproval,
   MemoryProposal,
   ApprovalImpact,
+  BackupInfo,
   SessionUsage,
   SyncCloned,
   SyncCommitReview,
@@ -121,6 +122,12 @@ export const SYNC_EVENT = 'nexus://sync'
 
 export const api = {
   appInfo: () => call<AppInfo>('app_info'),
+  backupList: () => call<BackupInfo[]>('backup_list'),
+  backupCreate: () => call<BackupInfo>('backup_create'),
+  backupScheduleRestore: (id: string) => call<BackupInfo>('backup_schedule_restore', { id }),
+  backupCancelRestore: () => call<void>('backup_cancel_restore'),
+  backupDelete: (id: string) => call<void>('backup_delete', { id }),
+  appRestart: () => call<void>('app_restart'),
   uiPreferencesGet: () => call<Record<string, unknown> | null>('ui_preferences_get'),
   uiPreferencesSet: (value: Record<string, unknown>) => call<void>('ui_preferences_set', { value }),
 

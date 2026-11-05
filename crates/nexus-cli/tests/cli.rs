@@ -838,6 +838,33 @@ fn sync_across_two_machines_reviews_before_publishing() {
     assert!(b(&["sync", "restore"]).contains("Add your Claude profiles on this machine"));
 }
 
+/// ADR-0032: backups of the machine-local state and a restore that asks first, backs up the current state and keeps
+/// what it replaced.
+#[test]
+fn backup_and_restore_keep_everything_recoverable() {
+    let e = Env::new();
+    e.setup();
+    let created = e.json(&["backup", "create"]);
+    let id = created["id"].as_str().unwrap().to_string();
+    assert_eq!(created["restorable"], true);
+    // A change after the backup: a second workspace.
+    e.ok(&["workspaces", "create", e.data.parent().unwrap().join("ws2").to_str().unwrap(), "--name", "Later"]);
+    let list = e.ok(&["backup", "list"]);
+    assert!(list.contains(&id) && list.contains("yes"), "{list}");
+    // Without --yes only what would happen is shown.
+    let dry = e.run(&["backup", "restore", &id]);
+    assert_eq!(dry.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&dry.stdout).contains("Repeat with --yes"));
+    assert_eq!(e.json(&["workspaces", "list"]).as_array().unwrap().len(), 2, "nothing changed yet");
+    let r = e.json(&["backup", "restore", &id, "--yes"]);
+    assert!(r["safetyBackup"].is_string(), "{r}");
+    assert_eq!(e.json(&["workspaces", "list"]).as_array().unwrap().len(), 1, "the state of the backup");
+    // The safety backup brings the later state back.
+    e.ok(&["backup", "restore", r["safetyBackup"].as_str().unwrap(), "--yes"]);
+    assert_eq!(e.json(&["workspaces", "list"]).as_array().unwrap().len(), 2);
+    assert!(e.run(&["backup", "restore", "../outside", "--yes"]).status.code() == Some(1), "ids are names, not paths");
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {

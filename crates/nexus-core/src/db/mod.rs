@@ -11,6 +11,10 @@ use serde::Serialize;
 use crate::error::{CoreError, Result};
 
 pub const DB_FILE: &str = "nexus.db";
+/// `PRAGMA application_id` of a NEXUS database ("NXUS"): another program's SQLite file is never migrated.
+pub const APPLICATION_ID: i64 = 0x4E58_5553;
+
+pub mod backup;
 /// Pre-migration backups kept in `<data dir>/backups/`.
 pub const BACKUPS_KEPT: usize = 5;
 
@@ -112,6 +116,8 @@ pub struct Recovery {
     /// Where the unreadable database was moved (it is kept, never deleted).
     pub quarantined_to: PathBuf,
     pub reason: String,
+    /// The newest restorable backup, if any (offered for restoring).
+    pub latest_backup: Option<String>,
 }
 
 /// Open (creating if needed) the database at `path`, configure it and apply pending migrations.
@@ -126,9 +132,16 @@ fn open_with(path: &Path, migrations: &[Migration]) -> Result<Connection> {
     }
     let mut conn = Connection::open(path)?;
     configure(&conn)?;
+    let app: i64 = conn.query_row("PRAGMA application_id", [], |r| r.get(0))?;
+    if app != 0 && app != APPLICATION_ID {
+        return Err(CoreError::Unsupported(format!("{} is not a NEXUS database (it belongs to another program); NEXUS leaves it unchanged", path.display())));
+    }
     integrity_check(&conn)?;
     let backup_dir = path.parent().map(|d| d.join("backups"));
     migrate_with(&mut conn, migrations, backup_dir.as_deref())?;
+    if app == 0 {
+        conn.pragma_update(None, "application_id", APPLICATION_ID)?;
+    }
     Ok(conn)
 }
 
@@ -143,7 +156,8 @@ pub fn open_or_recover(path: &Path) -> Result<(Connection, Option<Recovery>)> {
             let quarantined_to = quarantine(path)?;
             tracing::error!(reason = %reason, moved_to = %quarantined_to.display(), "database unreadable; started fresh");
             let conn = open(path)?;
-            Ok((conn, Some(Recovery { quarantined_to, reason })))
+            let latest_backup = path.parent().and_then(|d| backup::list(d).ok()).and_then(|l| l.into_iter().find(|b| b.restorable).map(|b| b.id));
+            Ok((conn, Some(Recovery { quarantined_to, reason, latest_backup })))
         }
         Err(e) => Err(e),
     }
@@ -186,6 +200,12 @@ pub fn open_existing(path: &Path) -> Result<Option<Connection>> {
         return Ok(None);
     }
     Ok(Some(conn))
+}
+
+/// Read-only look at a database file: `(schema version, application id)`; nothing is changed or migrated.
+pub fn peek(path: &Path) -> Result<(i64, i64)> {
+    let c = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    Ok((c.query_row("PRAGMA user_version", [], |r| r.get(0))?, c.query_row("PRAGMA application_id", [], |r| r.get(0))?))
 }
 
 /// In-memory database with the full schema (tests).
@@ -258,8 +278,10 @@ fn apply(conn: &mut Connection, m: &Migration, target: i64) -> Result<()> {
     if m.disable_foreign_keys {
         let violations: i64 = tx.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))?;
         if violations > 0 {
-            return Err(CoreError::Corrupt(format!(
-                "migration {} would leave {violations} foreign-key violation(s); nothing was changed",
+            // A failed migration is never treated as corruption: the database stays where it is, unchanged.
+            return Err(CoreError::Unsupported(format!(
+                "database migration {} would leave {violations} foreign-key violation(s); nothing was changed — \
+                 the backup taken before the upgrade is in the backups folder",
                 m.name
             )));
         }
@@ -270,7 +292,10 @@ fn apply(conn: &mut Connection, m: &Migration, target: i64) -> Result<()> {
 }
 
 fn migration_error(m: &Migration, e: rusqlite::Error) -> CoreError {
-    CoreError::Unsupported(format!("database migration {} failed (nothing was changed): {e}", m.name))
+    CoreError::Unsupported(format!(
+        "database migration {} failed (nothing was changed; the backup taken before the upgrade is in the backups folder): {e}",
+        m.name
+    ))
 }
 
 fn backup(conn: &Connection, dir: &Path, version: i64) -> Result<()> {
@@ -415,6 +440,32 @@ mod tests {
         let conn = Connection::open(&path).unwrap();
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM p", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 1, "violating rebuild rolled back");
+    }
+
+    #[test]
+    fn failed_migrations_and_foreign_databases_are_never_started_fresh() {
+        // A migration failure is not corruption: no quarantine, no fresh database, the data stays.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE);
+        {
+            let conn = open(&path).unwrap();
+            crate::workspace::create(&conn, dir.path().join("ws").to_str().unwrap(), "Kept", "").unwrap();
+        }
+        let conn = Connection::open(&path).unwrap();
+        let app: i64 = conn.query_row("PRAGMA application_id", [], |r| r.get(0)).unwrap();
+        assert_eq!(app, APPLICATION_ID, "NEXUS databases are marked");
+        drop(conn);
+        // Another program's SQLite file is refused and left as it is.
+        let foreign = dir.path().join("other.db");
+        {
+            let c = Connection::open(&foreign).unwrap();
+            c.execute_batch("PRAGMA application_id = 7; CREATE TABLE t(a); INSERT INTO t VALUES (1);").unwrap();
+        }
+        let e = open_or_recover(&foreign).unwrap_err();
+        assert!(e.to_string().contains("not a NEXUS database"), "{e}");
+        assert!(foreign.is_file() && std::fs::read_dir(dir.path()).unwrap().flatten().all(|f| !f.file_name().to_string_lossy().contains("corrupt")));
+        let c = Connection::open(&foreign).unwrap();
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM t", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
     }
 
     #[test]

@@ -36,3 +36,7 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0029](0029-workflow-engine.md) | Workflow Engine: portable definitions on tasks and sessions, trusted gates, AI-reported vs. verified | Accepted, implemented |
 | [0030](0030-usage-analytics.md) | Usage analytics: per-response counts parsed from local transcripts, provenance on every figure | Accepted, implemented; implements 0010's transcript source |
 | [0031](0031-git-workspace-sync.md) | Git-based workspace sync: the person's repository, explicit outgoing review, no sync service | Accepted, implemented (M29) |
+| [0032](0032-upgrade-safety-and-backups.md) | Upgrade safety, backups and restore | Accepted, implemented |
+| [0033](0033-packaging-and-release-security.md) | Packaging, installed layout, installed-app verification and release security | Accepted, implemented; signing and updater open |
+| [0034](0034-application-identity.md) | Application identity | **Proposed** — owner decision |
+| [0035](0035-licensing.md) | Licence | **Proposed** — owner decision |

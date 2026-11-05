@@ -1,0 +1,94 @@
+name: Release (draft)
+
+# Builds and verifies the Windows installer for a version tag (or on demand) and creates a DRAFT GitHub release with
+# the installer, SHA256SUMS.txt and build-provenance attestations. Nothing is published automatically: a person
+# reviews the draft and publishes it. See docs/DECISIONS/0033-packaging-and-release-security.md.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-latest
+    permissions:
+      contents: write # the draft release
+      id-token: write # build provenance (Sigstore)
+      attestations: write
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Tests
+        run: cargo test --workspace --locked
+      - name: Test double for the installed-app check
+        run: cargo build -p fake-claude --locked
+
+      - name: Release installer (CLI bundled as sidecar)
+        working-directory: apps/desktop
+        run: npx tauri build --config src-tauri/tauri.installer.conf.json
+
+      # Code signing (decision pending, ADR-0033): sign nexus-desktop.exe, nexus.exe and the installer BEFORE the
+      # checksums and attestations below, e.g. with Azure Trusted Signing or `signtool` and a certificate from
+      # repository secrets. Disabled until a certificate is chosen.
+      - name: Code signing (not configured)
+        if: ${{ false }}
+        run: echo "configure signing first"
+
+      - name: T18 — the release program ignores WebView2 debugging overrides
+        working-directory: apps/desktop
+        run: node e2e/t18-check.mjs ../../target/release/nexus-desktop.exe
+      - name: Installed-app verification (install, check, uninstall)
+        working-directory: apps/desktop
+        shell: pwsh
+        run: node e2e/installed.mjs (Get-ChildItem ../../target/release/bundle/nsis/*-setup.exe).FullName
+      - name: Release checks and checksums
+        working-directory: apps/desktop
+        run: node scripts/release-check.mjs ../../target/release/bundle/nsis
+
+      - name: Build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/nexus-desktop.exe
+            target/release/nexus.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-windows-installer
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/nsis/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Draft release (never published automatically)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = @((Get-ChildItem target/release/bundle/nsis/*-setup.exe).FullName, "target/release/bundle/nsis/SHA256SUMS.txt")
+          gh release create "${{ github.ref_name }}" --draft --verify-tag --title "NEXUS ${{ github.ref_name }}" --notes-file docs/RELEASE_NOTES.md @files
+
+      # Updates (decision pending): tauri-plugin-updater needs an update-signing key (TAURI_SIGNING_PRIVATE_KEY) and a
+      # latest.json per release. Not enabled; installers are updated by installing the new version over the old one.

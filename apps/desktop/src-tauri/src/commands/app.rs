@@ -19,6 +19,15 @@ pub struct AppInfo {
     pub home_dir: String,
     /// The database was unreadable at startup and was moved aside (shown once to the user).
     pub recovery: Option<Recovery>,
+    /// Schema version this build understands (a newer database is refused, never changed).
+    pub supported_schema: i64,
+    /// The `nexus` command-line tool next to this program (also the MCP server and hook handler).
+    pub cli_path: Option<String>,
+    /// A restore scheduled for the next start.
+    pub pending_restore: Option<String>,
+    /// The outcome of a restore applied at this start: `ok` + backup id, or the reason it failed.
+    pub restored: Option<String>,
+    pub restore_error: Option<String>,
 }
 
 #[tauri::command]
@@ -35,6 +44,11 @@ pub async fn app_info(ctx: State<'_, Ctx>) -> IpcResult<AppInfo> {
             git_version: git::version(),
             home_dir: ctx.home.display().to_string(),
             recovery: ctx.recovery.clone(),
+            supported_schema: db::SCHEMA_VERSION,
+            cli_path: nexus_core::claude::mcp::nexus_next_to_current_exe().map(|p| p.display().to_string()),
+            pending_restore: db::backup::pending(&ctx.data_dir),
+            restored: ctx.restore.as_ref().and_then(|r| r.as_ref().ok().cloned()),
+            restore_error: ctx.restore.as_ref().and_then(|r| r.as_ref().err().cloned()),
         })
     })
     .await
@@ -59,4 +73,42 @@ pub fn ui_preferences_set(ctx: State<'_, Ctx>, value: serde_json::Value) -> IpcR
 #[tauri::command]
 pub fn db_data_version(ctx: State<'_, Ctx>) -> IpcResult<i64> {
     Ok(db::data_version(&ctx.db())?)
+}
+
+// ---- Backups (ADR-0032) -------------------------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn backup_list(ctx: State<'_, Ctx>) -> IpcResult<Vec<db::backup::BackupInfo>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(db::backup::list(&ctx.data_dir)?)).await
+}
+
+#[tauri::command]
+pub async fn backup_create(ctx: State<'_, Ctx>) -> IpcResult<db::backup::BackupInfo> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(db::backup::create(&ctx.db(), &ctx.data_dir, "manual")?)).await
+}
+
+/// The open database cannot be replaced: the restore is applied when NEXUS starts next (see `app_restart`).
+#[tauri::command]
+pub async fn backup_schedule_restore(ctx: State<'_, Ctx>, id: String) -> IpcResult<db::backup::BackupInfo> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(db::backup::schedule_restore(&ctx.data_dir, &id)?)).await
+}
+
+#[tauri::command]
+pub fn backup_cancel_restore(ctx: State<'_, Ctx>) {
+    db::backup::cancel_pending(&ctx.data_dir);
+}
+
+#[tauri::command]
+pub async fn backup_delete(ctx: State<'_, Ctx>, id: String) -> IpcResult<()> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(db::backup::delete(&ctx.data_dir, &id)?)).await
+}
+
+/// Restart NEXUS (to apply a scheduled restore). Live sessions are stopped like on quit.
+#[tauri::command]
+pub fn app_restart(app: tauri::AppHandle) {
+    app.restart();
 }

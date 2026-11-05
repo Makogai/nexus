@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { Check, FolderInput, FolderOpen, FolderPlus, Monitor, Moon, Sun } from '@lucide/vue'
+import { Archive, Check, FolderInput, FolderOpen, FolderPlus, Monitor, Moon, RotateCcw, Sun, Trash2 } from '@lucide/vue'
 import { api } from '../lib/ipc'
-import type { ShellInfo } from '../lib/types'
+import type { BackupInfo, ShellInfo } from '../lib/types'
 import { relativeTime } from '../lib/format'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
@@ -14,9 +14,62 @@ const workspaces = useWorkspaceStore()
 const shells = ref<ShellInfo[]>([])
 const newName = ref('')
 
+const backups = ref<BackupInfo[]>([])
+const backingUp = ref(false)
+const KIND: Record<BackupInfo['kind'], string> = { manual: 'Manual', automatic: 'Automatic (daily)', 'pre-restore': 'Before a restore', 'pre-migration': 'Before an upgrade', replaced: 'Replaced by a restore' }
+const visibleBackups = computed(() => backups.value.filter((b) => b.kind !== 'replaced'))
+
+async function loadBackups() {
+  backups.value = await api.backupList().catch(() => [])
+}
+
 onMounted(async () => {
   shells.value = await api.shellList().catch(() => [])
+  await loadBackups()
 })
+
+async function backupNow() {
+  backingUp.value = true
+  const b = await app.attempt(() => api.backupCreate(), 'Could not create the backup')
+  backingUp.value = false
+  if (b) app.toast('success', `Backup ${b.id} created`)
+  await loadBackups()
+}
+
+async function restore(b: BackupInfo) {
+  const ok = await app.confirm({
+    title: `Restore the backup from ${new Date(b.createdAt).toLocaleString()}?`,
+    message: 'NEXUS restarts and replaces its database and global knowledge with this backup. The current state is backed up first and the replaced files are kept, so you can go back. Workspace folders and Git repositories are not touched. Running sessions are stopped.',
+    confirmLabel: 'Restore and restart',
+    danger: true,
+  })
+  if (!ok) return
+  if (await app.attempt(() => api.backupScheduleRestore(b.id), 'Could not schedule the restore')) {
+    await app.attempt(() => api.appRestart(), 'Could not restart — quit and start NEXUS to finish the restore')
+  }
+}
+
+async function cancelRestore() {
+  await api.backupCancelRestore()
+  await app.load()
+}
+
+async function removeBackup(b: BackupInfo) {
+  const ok = await app.confirm({ title: 'Delete this backup?', message: `${KIND[b.kind]} backup from ${new Date(b.createdAt).toLocaleString()}. This cannot be undone.`, confirmLabel: 'Delete', danger: true })
+  if (ok) {
+    await app.attempt(() => api.backupDelete(b.id), 'Could not delete the backup')
+    await loadBackups()
+  }
+}
+
+const cliFolder = computed(() => app.info?.cliPath?.replace(/[\/][^\/]+$/, '') ?? '')
+const pathCommand = computed(() => `[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';${cliFolder.value}', 'User')`)
+async function copyPathCommand() {
+  await navigator.clipboard.writeText(pathCommand.value).catch(() => undefined)
+  app.toast('success', 'Copied — run it in PowerShell, then open a new terminal')
+}
+
+const size = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
 async function createWorkspace() {
   const parent = await openDialog({ directory: true, title: 'Choose where to create the workspace folder' })
@@ -123,7 +176,7 @@ async function reveal(path: string) {
           <button class="btn btn-ghost btn-icon btn-sm" title="Open" @click="app.info && reveal(app.info.dbPath)"><FolderOpen /></button>
         </dd>
         <dt>Database</dt>
-        <dd>schema v{{ app.info?.schemaVersion }}</dd>
+        <dd>schema v{{ app.info?.schemaVersion }} <span class="faint">(this version understands up to v{{ app.info?.supportedSchema }})</span></dd>
         <dt>Version</dt>
         <dd>NEXUS {{ app.info?.version }} · {{ app.info?.platform }}</dd>
       </dl>
@@ -132,10 +185,84 @@ async function reveal(path: string) {
         Claude session variables, telemetry settings and API keys before launching Claude.
       </p>
     </section>
+
+    <section class="card" data-cli>
+      <h2 class="card-title">Command-line tool</h2>
+      <p v-if="app.info?.cliPath" class="hint">
+        <code class="selectable">{{ app.info.cliPath }}</code> — the <code>nexus</code> CLI, also the MCP server and hook handler NEXUS gives Claude
+        sessions (always by this full path, so it works without any PATH change).
+      </p>
+      <p v-else class="notice notice-warn">The <code>nexus</code> CLI was not found next to NEXUS — reinstall NEXUS. Claude sessions start without the NEXUS tools until then.</p>
+      <p v-if="app.info?.cliPath && app.info.platform === 'windows'" class="hint">
+        To use <code>nexus</code> in your own terminals, add its folder to your user PATH (NEXUS does not change PATH itself):
+        <button class="btn btn-sm" data-cli-copy @click="copyPathCommand">Copy PowerShell command</button>
+      </p>
+    </section>
+
+    <section class="card" data-backups>
+      <h2 class="card-title"><Archive /> Backups</h2>
+      <p class="hint">
+        A backup holds NEXUS's machine-local state on this machine: the database (workspaces registered here, profiles, sessions, approvals,
+        gate commands, usage, notifications) and global knowledge. Workspace folders are not included — they live in their own folders and
+        Git repositories. NEXUS backs up automatically once a day and before every upgrade and restore.
+      </p>
+      <p v-if="app.info?.pendingRestore" class="notice notice-warn" data-backup-pending>
+        A restore of {{ app.info.pendingRestore }} happens when NEXUS starts next.
+        <button class="btn btn-sm" @click="api.appRestart()">Restart now</button>
+        <button class="btn btn-sm btn-ghost" @click="cancelRestore">Cancel</button>
+      </p>
+      <div class="row">
+        <button class="btn" :disabled="backingUp" data-backup-create @click="backupNow"><Archive /> {{ backingUp ? 'Backing up…' : 'Back up now' }}</button>
+        <button class="btn btn-ghost" @click="app.info && reveal(`${app.info.dataDir}${app.info.platform === 'windows' ? '\\' : '/'}backups`)"><FolderOpen /> Open the backups folder</button>
+      </div>
+      <table v-if="visibleBackups.length" class="table">
+        <thead><tr><th>When</th><th>Kind</th><th>Schema</th><th>Size</th><th /></tr></thead>
+        <tbody>
+          <tr v-for="b in visibleBackups" :key="b.id" :data-backup="b.id" :data-backup-restorable="b.restorable ? 'yes' : 'no'">
+            <td>{{ relativeTime(b.createdAt) }}</td>
+            <td>{{ KIND[b.kind] }}</td>
+            <td>{{ b.schemaVersion ? `v${b.schemaVersion}` : '–' }}</td>
+            <td>{{ size(b.bytes) }}</td>
+            <td class="tools">
+              <button v-if="b.restorable" class="btn btn-sm" :data-backup-restore="b.id" @click="restore(b)"><RotateCcw /> Restore…</button>
+              <span v-else class="faint small" :title="b.problem ?? ''">not restorable: {{ b.problem }}</span>
+              <button class="btn btn-sm btn-ghost btn-icon" title="Delete" @click="removeBackup(b)"><Trash2 /></button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="faint small">No backups yet.</p>
+    </section>
   </div>
 </template>
 
 <style scoped>
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 10px;
+}
+.table th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-faint);
+  padding: 6px;
+}
+.table td {
+  padding: 6px;
+  border-top: 1px solid var(--border);
+}
+.tools {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+}
+.small {
+  font-size: 12px;
+}
 .narrow {
   max-width: 880px;
 }

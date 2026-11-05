@@ -154,7 +154,7 @@ pub mod windows_toast {
         let (key, _) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(format!(r"Software\Classes\AppUserModelId\{aumid}")).map_err(|e| e.to_string())?;
         key.set_value("DisplayName", &display.to_string()).map_err(|e| e.to_string())?;
         if let Some(i) = icon {
-            key.set_value("IconUri", &i.to_string_lossy().to_string()).map_err(|e| e.to_string())?;
+            key.set_value("IconUri", &shell_path(i)).map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -164,12 +164,22 @@ pub mod windows_toast {
     }
 
     /// `nexus://` → this executable (installed builds). The handler only focuses NEXUS and opens a notification.
+    /// A path as Windows Shell can launch it: without the `\\?\` prefix that canonical paths carry.
+    pub fn shell_path(p: &Path) -> String {
+        let s = p.to_string_lossy();
+        if let Some(unc) = s.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{unc}")
+        } else {
+            s.strip_prefix(r"\\?\").unwrap_or(&s).to_string()
+        }
+    }
+
     pub fn register_protocol(exe: &Path) -> Result<(), String> {
         let (key, _) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(format!(r"Software\Classes\{PROTOCOL}")).map_err(|e| e.to_string())?;
         key.set_value("", &"URL:NEXUS notification".to_string()).map_err(|e| e.to_string())?;
         key.set_value("URL Protocol", &String::new()).map_err(|e| e.to_string())?;
         let (cmd, _) = key.create_subkey(r"shell\open\command").map_err(|e| e.to_string())?;
-        cmd.set_value("", &format!("\"{}\" \"%1\"", exe.display())).map_err(|e| e.to_string())?;
+        cmd.set_value("", &format!("\"{}\" \"%1\"", shell_path(exe))).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -488,6 +498,15 @@ mod tests {
     }
 
     #[cfg(windows)]
+    #[cfg(windows)]
+    #[test]
+    fn shell_paths_drop_the_verbatim_prefix() {
+        use super::windows_toast::shell_path;
+        assert_eq!(shell_path(std::path::Path::new(r"\\?\C:\Apps\NEXUS\nexus-desktop.exe")), r"C:\Apps\NEXUS\nexus-desktop.exe");
+        assert_eq!(shell_path(std::path::Path::new(r"\\?\UNC\server\share\n.exe")), r"\\server\share\n.exe");
+        assert_eq!(shell_path(std::path::Path::new(r"C:\plain.exe")), r"C:\plain.exe");
+    }
+
     #[test]
     fn toast_xml_escapes_text_and_uses_the_protocol_only_when_registered() {
         let x = windows_toast::toast_xml("id-1", true, "A <b> & \"c\"", "body", false);

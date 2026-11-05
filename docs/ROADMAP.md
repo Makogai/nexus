@@ -133,13 +133,25 @@ Branch `milestone/m29-workspace-sync` (off `main` at `7bd238e`). ADR-0031; threa
 | Y5 | History, one operation at a time, interrupted operations, classified remote failures | core + desktop E2E | ✅ |
 | Y6 | Sync Center (desktop) and `nexus sync` | vitest + desktop E2E `sync.mjs` | ✅ |
 
+## Stage: Beta readiness (owner specification, 2026-11-05)
+
+Branch `milestone/beta-readiness` (off `main` at `efd3dd4`). No large product features: safe, reliable, installable.
+
+| # | Milestone | Acceptance check | Status |
+| --- | --- | --- | --- |
+| B1 | Upgrade safety: identity check, failed migrations never start fresh, startup error dialog; backups (manual, daily, pre-restore) with checksums; verified restore with rollback (ADR-0032) | core + CLI | ✅ |
+| B2 | Packaging: NSIS per-user installer with the CLI sidecar, fixed binary name, program/data folders apart, `--self-check`, `nexus://` path fix (ADR-0033) | `e2e/installed.mjs` 27/27 (debug and release installer) + UI 18/18 | ✅ |
+| B3 | Release security: compile-time ban of the test feature in release, release check, checksums, provenance, draft-only release workflow | `release-check.mjs`, T18 on the release program | ✅ |
+| B4 | User documentation: first run, user guide, backups, troubleshooting, local vs. synced | docs/user | ✅ |
+| B5 | Decisions for the owner: application identity (ADR-0034), licence (ADR-0035), code signing, updater | — | proposed |
+
 ## Phase 6 — Product maturity
 
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
 | M29 | Workspace Git sync: Sync Center + `nexus sync` (fetch, fast-forward pull, reviewed commit/push, inspection, onboarding/restore) — ADR-0031 | core + CLI E2E + desktop E2E `sync.mjs` 18/18 | ✅ (2026-11-05) |
-| M30 | Packaging + GitHub Releases CI + updater signing (stable/prerelease channels) | artifacts verified on clean VMs |
-| M31 | Backup/restore, performance budget, user documentation | Scenario A on a clean machine |
+| M30 | Packaging + GitHub Releases CI + updater signing (stable/prerelease channels) — packaging and draft-release CI done in beta readiness; signing and updater pending owner decisions | artifacts verified on clean VMs |
+| M31 | Backup/restore ✅ and user documentation ✅ (beta readiness); performance budget open | Scenario A on a clean machine |
 
 ### Gates before the first public release (owner decision, 2026-11-04)
 
