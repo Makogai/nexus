@@ -6,7 +6,7 @@
 //   node e2e/run-smoke.mjs [path/to/nexus-desktop(.exe)]
 //
 // Windows only for now (WebView2 DevTools protocol). Development/CI tooling — never used by release builds.
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -44,10 +44,15 @@ child.on('exit', (code) => {
 
 let failures = 1
 try {
-  await waitForPort(port, 120_000)
+  await waitForPort(port, 180_000)
   failures = await runSmoke()
 } catch (e) {
   console.error(`E2E error: ${e.message}`)
+  // Diagnose a port that never opened: did WebView2 start, and with the debugging switch?
+  try {
+    const ps = execFileSync('powershell', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | ForEach-Object { '{0} parent={1} debug={2} udf={3}' -f $_.ProcessId, $_.ParentProcessId, ($_.CommandLine -match 'remote-debugging-port'), ([regex]::Match($_.CommandLine, '--user-data-dir=\"?([^\" ]+)').Groups[1].Value) }"], { encoding: 'utf8' })
+    console.error(`--- WebView2 processes ---\n${ps.trim() || '(none)'}\napp pid ${child.pid}, exited: ${exited}`)
+  } catch {}
 } finally {
   tearingDown = true
   if (!exited) {

@@ -981,12 +981,13 @@ fn workspace_doctor_reports_and_repairs_after_review() {
     std::fs::remove_file(ws.join("README.md")).unwrap();
     std::fs::create_dir_all(ws.join("rules")).unwrap();
     std::fs::write(ws.join("rules").join("broken.md"), "---\nnexus: 1\nkind: rule\n---\n").unwrap();
-    let r = e.json(&["workspaces", "doctor"]);
+    // The exit code reflects this machine too (a CI runner has no Claude Code): read the report either way.
+    let r: Value = serde_json::from_slice(&e.run(&["--json", "workspaces", "doctor"]).stdout).unwrap();
     let find = |check: &str| r["findings"].as_array().unwrap().iter().find(|f| f["check"] == check).cloned();
     assert_eq!(find("readme").unwrap()["repair"]["id"], "readme");
     assert!(find("knowledge-invalid").unwrap()["detail"][0].as_str().unwrap().starts_with("rules/broken.md"));
     assert_eq!(find("projects").unwrap()["status"], "ok");
-    let text = e.ok(&["workspaces", "doctor"]);
+    let text = String::from_utf8_lossy(&e.run(&["workspaces", "doctor"]).stdout).into_owned();
     assert!(text.contains("repair: nexus workspaces doctor --repair readme"), "{text}");
 
     let dry = e.run(&["workspaces", "doctor", "--repair", "readme"]);
@@ -1464,7 +1465,7 @@ fn branch_aware_notes_follow_the_live_git_history() {
     let e = Env::new();
     e.setup();
     git_commit(&e.repo, "init");
-    let git = |args: &[&str]| assert!(Command::new("git").args(args).current_dir(&e.repo).status().unwrap().success());
+    let git = |args: &[&str]| assert!(Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@example.invalid"]).args(args).current_dir(&e.repo).status().unwrap().success());
     git(&["checkout", "-q", "-b", "feature/login"]);
     git_commit(&e.repo, "login work");
     e.ok(&["knowledge", "new", "note", "--project", "repo", "--branch", "current", "--title", "Login half-migrated", "--body", "Do not touch auth.rs yet."]);

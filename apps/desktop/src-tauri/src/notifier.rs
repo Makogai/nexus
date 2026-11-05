@@ -17,6 +17,7 @@
 //! [`Notifier::availability`] says so.
 
 use std::collections::HashSet;
+#[cfg_attr(not(windows), allow(unused_imports))] // the Windows toast adapter's state
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -86,6 +87,7 @@ pub fn parse_activation(arg: &str) -> Option<String> {
     uuid::Uuid::parse_str(id).ok().map(|u| u.to_string())
 }
 
+#[cfg_attr(not(windows), allow(dead_code))] // the sender identity exists on Windows only
 fn dev_build() -> bool {
     tauri::utils::platform::current_exe()
         .ok()
@@ -514,7 +516,6 @@ mod tests {
     }
 
     #[cfg(windows)]
-    #[cfg(windows)]
     #[test]
     fn shell_paths_drop_the_verbatim_prefix() {
         use super::windows_toast::shell_path;
@@ -523,6 +524,7 @@ mod tests {
         assert_eq!(shell_path(std::path::Path::new(r"C:\plain.exe")), r"C:\plain.exe");
     }
 
+    #[cfg(windows)]
     #[test]
     fn toast_xml_escapes_text_and_uses_the_protocol_only_when_registered() {
         let x = windows_toast::toast_xml("id-1", true, "A <b> & \"c\"", "body", false);

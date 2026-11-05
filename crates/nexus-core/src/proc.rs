@@ -33,6 +33,7 @@ impl Output {
 
 /// A `Command` with platform defaults applied (no console window on Windows).
 pub fn command(program: impl AsRef<Path>) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))] // mutated only for the Windows creation flags
     let mut cmd = Command::new(program.as_ref());
     #[cfg(windows)]
     {
