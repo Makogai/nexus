@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { BarChart3, Bell, BookOpen, FolderGit2, Gauge, House, Landmark, Package, Workflow, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
+import { BarChart3, Bell, FolderSync, BookOpen, FolderGit2, Gauge, House, Landmark, Package, Workflow, PanelLeftClose, PanelLeftOpen, Settings, SquareTerminal, UserCog } from '@lucide/vue'
 import { useAppStore } from '../stores/app'
 import { useNotificationStore } from '../stores/notifications'
 import { useSessionStore } from '../stores/sessions'
@@ -19,6 +19,7 @@ const items = computed(() => [
   { to: '/context', label: 'Context', icon: Gauge, match: (p: string) => p.startsWith('/context') },
   { to: '/workflows', label: 'Workflows', icon: Workflow, match: (p: string) => p.startsWith('/workflows') },
   { to: '/usage', label: 'Usage', icon: BarChart3, match: (p: string) => p.startsWith('/usage') },
+  { to: '/sync', label: 'Sync', icon: FolderSync, match: (p: string) => p.startsWith('/sync') },
   {
     to: '/sessions',
     label: 'Sessions',

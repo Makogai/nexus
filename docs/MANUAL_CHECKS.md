@@ -103,5 +103,11 @@
 30. **Workspace sync readiness**: `git init` in a copy of the workspace folder → `nexus workspaces sync-status` →
     it lists what would travel, flags a `.env` or key file you add by name only, and never fetches, commits or pushes.
 
+31. **Sync with a real private remote** (owner only — NEXUS never creates repositories): create an empty private
+    repository yourself, `git init` + `git remote add origin …` in a *copy* of the workspace → *Sync* → review and
+    commit → push (your credential manager signs in; NEXUS never asks) → on a second machine or folder: welcome screen
+    → *Open a workspace from Git* → the restore checklist → change a rule on one side, pull on the other → the rule is
+    inactive until approved. Try a wrong URL and going offline: the history explains both.
+
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

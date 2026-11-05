@@ -35,4 +35,4 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0028](0028-context-manager.md) | Context Manager: per-project strategies, cited retrieval from project docs, an inspector built on observation | Accepted, implemented |
 | [0029](0029-workflow-engine.md) | Workflow Engine: portable definitions on tasks and sessions, trusted gates, AI-reported vs. verified | Accepted, implemented |
 | [0030](0030-usage-analytics.md) | Usage analytics: per-response counts parsed from local transcripts, provenance on every figure | Accepted, implemented; implements 0010's transcript source |
-| [0031](0031-git-workspace-sync.md) | Git-based workspace sync: the person's repository, explicit outgoing review, no sync service | Accepted; readiness implemented, sync flow is M29 |
+| [0031](0031-git-workspace-sync.md) | Git-based workspace sync: the person's repository, explicit outgoing review, no sync service | Accepted, implemented (M29) |

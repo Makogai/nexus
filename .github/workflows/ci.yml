@@ -106,6 +106,9 @@ jobs:
       - name: End-to-end Usage dashboard
         working-directory: apps/desktop
         run: node e2e/usage.mjs
+      - name: End-to-end Sync Center
+        working-directory: apps/desktop
+        run: node e2e/sync.mjs
       - name: MCP interoperability (official TypeScript SDK client)
         working-directory: apps/desktop
         run: node e2e/mcp-interop.mjs

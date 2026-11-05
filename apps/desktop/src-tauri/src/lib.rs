@@ -33,6 +33,8 @@ fn open_context() -> Result<AppCtx, Box<dyn std::error::Error>> {
     let interrupted = host::reconcile(&conn, now_ms())?;
     // Gate executions of a crashed host are interrupted and verified again (ADR-0029).
     let _ = nexus_core::workflow::run::reconcile(&conn, now_ms());
+    // Sync operations of a crashed host are interrupted (ADR-0031).
+    let _ = nexus_core::workspace_sync::history::reconcile(&conn, now_ms());
     if interrupted > 0 {
         tracing::info!(interrupted, "sessions whose host is gone are no longer attached");
     }
@@ -51,6 +53,7 @@ fn spawn_heartbeat(ctx: Ctx) {
             if let Err(e) = host::heartbeat(&db, &ctx.host.id, &running)
                 .and_then(|_| host::reconcile(&db, now_ms()))
                 .and_then(|_| nexus_core::workflow::run::reconcile(&db, now_ms()))
+                .and_then(|_| nexus_core::workspace_sync::history::reconcile(&db, now_ms()))
             {
                 tracing::warn!(error = %e, "host heartbeat failed");
             }
@@ -181,6 +184,16 @@ pub fn run() {
             commands::workflows::workflow_retry,
             commands::workflows::gates_list,
             commands::workflows::gate_upsert,
+            commands::sync::sync_status,
+            commands::sync::sync_fetch,
+            commands::sync::sync_pull,
+            commands::sync::sync_diff,
+            commands::sync::sync_review_commit,
+            commands::sync::sync_commit,
+            commands::sync::sync_review_push,
+            commands::sync::sync_push,
+            commands::sync::sync_clone,
+            commands::sync::sync_restore,
             commands::usage::usage_report,
             commands::usage::usage_sessions,
             commands::usage::usage_scan,

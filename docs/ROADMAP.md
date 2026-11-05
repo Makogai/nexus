@@ -120,11 +120,24 @@ Branch `milestone/usage-analytics` (off `main` at `cba2b7a`). ADR-0030 (usage), 
 | S0 | Git workspace sync architecture (ADR-0031) and read-only readiness (`nexus workspaces sync-status`) | core + CLI E2E | ✅ |
 | U5 | OpenTelemetry to a local receiver for opt-in personal profiles (*measured* provenance, ADR-0010 source 1) | needs a signed-in profile for verification | planned |
 
+## Stage: M29 Workspace Git synchronisation (owner specification, 2026-11-05)
+
+Branch `milestone/m29-workspace-sync` (off `main` at `7bd238e`). ADR-0031; threat model T39–T41.
+
+| # | Milestone | Acceptance check | Status |
+| --- | --- | --- | --- |
+| Y1 | Fetch, incoming/outgoing commits and files, diffs; status offline from the last fetch | core + CLI E2E | ✅ |
+| Y2 | Fast-forward-only pull with incoming inspection, overlap/diverged/in-progress refusals and rollback; approvals required again for changed rules, constitutions, workflows, AI Kits | core + desktop E2E | ✅ |
+| Y3 | Reviewed commit and push with tokens and confirmations; pre-commit and pre-push inspection; never forced | core + CLI E2E + desktop E2E | ✅ |
+| Y4 | Onboarding from Git and restore checklist; refusals clean up | core + CLI E2E + desktop E2E | ✅ |
+| Y5 | History, one operation at a time, interrupted operations, classified remote failures | core + desktop E2E | ✅ |
+| Y6 | Sync Center (desktop) and `nexus sync` | vitest + desktop E2E `sync.mjs` | ✅ |
+
 ## Phase 6 — Product maturity
 
 | # | Milestone | Acceptance check |
 | --- | --- | --- |
-| M29 | Workspace Git sync UI (fetch/pull/push with outgoing-diff review) on the ADR-0031 readiness check | Scenario K |
+| M29 | Workspace Git sync: Sync Center + `nexus sync` (fetch, fast-forward pull, reviewed commit/push, inspection, onboarding/restore) — ADR-0031 | core + CLI E2E + desktop E2E `sync.mjs` 18/18 | ✅ (2026-11-05) |
 | M30 | Packaging + GitHub Releases CI + updater signing (stable/prerelease channels) | artifacts verified on clean VMs |
 | M31 | Backup/restore, performance budget, user documentation | Scenario A on a clean machine |
 

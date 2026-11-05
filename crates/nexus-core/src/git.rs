@@ -260,6 +260,355 @@ pub fn last_commit(repo: &Path) -> Option<CommitInfo> {
     })
 }
 
+// ---- Workspace synchronisation (ADR-0031) ---------------------------------------------------------------------
+// Everything below runs `git` with argument vectors, without prompts, with `ext::`/`fd::` transports disabled for
+// commands that talk to a remote, and with external diff/text-conversion tools disabled.
+
+/// Why a command that talks to a remote failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteFailure {
+    /// No network or the host cannot be reached.
+    Offline,
+    /// The remote refused the credentials (or Git would have to ask for them).
+    Auth,
+    /// The remote repository does not exist (or is not visible with these credentials).
+    RemoteMissing,
+    /// The remote has commits the local branch does not have (push), or a non-fast-forward update.
+    Rejected,
+    Timeout,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteError {
+    pub kind: RemoteFailure,
+    /// The relevant line of Git's message, with credentials removed from URLs.
+    pub message: String,
+}
+
+impl RemoteError {
+    pub fn explain(&self) -> String {
+        let what = match self.kind {
+            RemoteFailure::Offline => "the remote cannot be reached — check the network (you can keep working offline)",
+            RemoteFailure::Auth => "the remote refused the credentials — sign in with your Git tool or credential manager (NEXUS never asks for or stores them)",
+            RemoteFailure::RemoteMissing => "the remote repository was not found, or these credentials cannot see it",
+            RemoteFailure::Rejected => "the remote has changes you do not have yet — fetch and pull first (NEXUS never force-pushes)",
+            RemoteFailure::Timeout => "the remote did not answer in time",
+            RemoteFailure::Other => "Git reported an error",
+        };
+        if self.message.is_empty() { what.to_string() } else { format!("{what}: {}", self.message) }
+    }
+}
+
+pub fn classify_remote_error(stderr: &str) -> RemoteFailure {
+    let s = stderr.to_ascii_lowercase();
+    let any = |needles: &[&str]| needles.iter().any(|n| s.contains(n));
+    if any(&["[rejected]", "non-fast-forward", "fetch first", "updates were rejected", "[remote rejected]"]) {
+        RemoteFailure::Rejected
+    } else if any(&[
+        "authentication failed",
+        "could not read username",
+        "could not read password",
+        "permission denied (publickey",
+        "invalid username or password",
+        "terminal prompts disabled",
+        "access denied",
+        "403",
+        "401",
+        "host key verification failed",
+    ]) {
+        RemoteFailure::Auth
+    } else if any(&[
+        "could not resolve host",
+        "failed to connect",
+        "connection timed out",
+        "connection refused",
+        "network is unreachable",
+        "no route to host",
+        "could not connect",
+        "temporary failure in name resolution",
+        "unable to access",
+    ]) {
+        RemoteFailure::Offline
+    } else if any(&["does not appear to be a git repository", "repository not found", "not found", "no such file or directory"]) {
+        RemoteFailure::RemoteMissing
+    } else if any(&["timed out"]) {
+        RemoteFailure::Timeout
+    } else {
+        RemoteFailure::Other
+    }
+}
+
+fn remote_error(stderr: &str) -> RemoteError {
+    let line = stderr
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("fatal:") || l.starts_with("error:") || l.starts_with("! [") || l.contains("[rejected]"))
+        .or_else(|| stderr.lines().map(str::trim).find(|l| !l.is_empty()))
+        .unwrap_or("");
+    let message: String = line.split_whitespace().map(redact_url).collect::<Vec<_>>().join(" ").chars().take(300).collect();
+    RemoteError { kind: classify_remote_error(stderr), message }
+}
+
+fn remote_cmd(repo: Option<&Path>, args: &[&str]) -> std::result::Result<proc::Output, RemoteError> {
+    match git_long(repo, args) {
+        Ok(out) if out.success() => Ok(out),
+        Ok(out) => Err(remote_error(&out.stderr_str())),
+        Err(e) => {
+            let m = e.to_string();
+            Err(RemoteError { kind: if m.contains("timed out") { RemoteFailure::Timeout } else { RemoteFailure::Other }, message: redact_url(&m) })
+        }
+    }
+}
+
+/// `git fetch --prune <remote>` (no submodules, no tags beyond those of fetched commits).
+pub fn fetch_remote(repo: &Path, remote: &str) -> std::result::Result<(), RemoteError> {
+    if remote.starts_with('-') || remote.is_empty() {
+        return Err(RemoteError { kind: RemoteFailure::Other, message: "invalid remote name".into() });
+    }
+    remote_cmd(Some(repo), &["fetch", "--quiet", "--prune", "--no-recurse-submodules", remote]).map(|_| ())
+}
+
+/// Push the current branch to `remote` as `branch` — never forced. `set_upstream` for the first push.
+pub fn push_branch(repo: &Path, remote: &str, branch: &str, set_upstream: bool) -> std::result::Result<(), RemoteError> {
+    if remote.starts_with('-') || branch.starts_with('-') || branch.contains("..") {
+        return Err(RemoteError { kind: RemoteFailure::Other, message: "invalid remote or branch name".into() });
+    }
+    let refspec = format!("HEAD:refs/heads/{branch}");
+    let mut args = vec!["push", "--quiet", "--no-recurse-submodules"];
+    if set_upstream {
+        args.push("--set-upstream");
+    }
+    args.extend([remote, refspec.as_str()]);
+    remote_cmd(Some(repo), &args).map(|_| ())
+}
+
+/// Full clone (history, one checkout, no submodules) of `url` into `dest` (must not exist or be empty).
+pub fn clone_full(url: &str, dest: &Path) -> std::result::Result<(), RemoteError> {
+    if !clone_url_allowed(url) {
+        return Err(RemoteError { kind: RemoteFailure::Other, message: "only https://, ssh://, git@host:path and file:// Git URLs are supported".into() });
+    }
+    let dest_s = dest.to_string_lossy().into_owned();
+    remote_cmd(None, &["clone", "--quiet", "--no-recurse-submodules", "--", url, &dest_s]).map(|_| ())
+}
+
+/// A commit for review: id, time, author name (no e-mail) and summary — summaries are untrusted text, cleaned.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    pub oid: String,
+    pub timestamp_ms: i64,
+    pub author: String,
+    pub summary: String,
+}
+
+fn clean(s: &str, max: usize) -> String {
+    s.chars().map(|c| if c.is_control() { ' ' } else { c }).take(max).collect::<String>().trim().to_string()
+}
+
+/// Commits in `range` (e.g. `HEAD..@{u}`), newest first, at most `max`.
+pub fn log_range(repo: &Path, range: &str, max: usize) -> Result<Vec<LogEntry>> {
+    let n = format!("-n{}", max.clamp(1, 500));
+    let out = run_git(Some(repo), &["log", "--no-color", &n, "--format=%H%x1f%at%x1f%an%x1f%s%x1e", range, "--"])?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git log".into(), message: first_line(&out.stderr_str()) });
+    }
+    Ok(out
+        .stdout_str()
+        .split('\x1e')
+        .filter_map(|rec| {
+            let mut f = rec.trim_start_matches(['\n', '\r']).split('\x1f');
+            let oid = f.next()?.trim().to_string();
+            if oid.len() < 7 {
+                return None;
+            }
+            let ts: i64 = f.next()?.trim().parse().ok()?;
+            Some(LogEntry { oid, timestamp_ms: ts * 1000, author: clean(f.next().unwrap_or(""), 80), summary: clean(f.next().unwrap_or(""), 200) })
+        })
+        .collect())
+}
+
+/// A changed path between two trees (or a tree and the working tree): status letter, mode of the new side, path.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffEntry {
+    /// A added, M modified, D deleted, T type changed.
+    pub status: String,
+    /// Octal mode of the new side (`120000` symlink, `160000` submodule), empty when deleted.
+    pub mode: String,
+    pub path: String,
+}
+
+/// `git diff --raw -z --no-renames from [to]` — `to: None` compares with the working tree.
+pub fn diff_raw(repo: &Path, from: &str, to: Option<&str>) -> Result<Vec<DiffEntry>> {
+    let mut args = vec!["diff", "--raw", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", from];
+    if let Some(t) = to {
+        args.push(t);
+    }
+    args.push("--");
+    let out = run_git(Some(repo), &args)?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git diff".into(), message: first_line(&out.stderr_str()) });
+    }
+    Ok(parse_diff_raw(&out.stdout))
+}
+
+pub fn parse_diff_raw(bytes: &[u8]) -> Vec<DiffEntry> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut fields = text.split('\0');
+    let mut out = Vec::new();
+    while let Some(meta) = fields.next() {
+        let Some(meta) = meta.strip_prefix(':') else { continue };
+        let Some(path) = fields.next() else { break };
+        let parts: Vec<&str> = meta.split_whitespace().collect();
+        if parts.len() < 5 || out.len() >= MAX_PATHS {
+            continue;
+        }
+        let status: String = parts[4].chars().take(1).collect();
+        let mode = if status == "D" { String::new() } else { parts[1].to_string() };
+        out.push(DiffEntry { status, mode, path: path.to_string() });
+    }
+    out
+}
+
+/// A bounded text diff (`git diff --no-ext-diff --no-textconv …`); `true` when truncated.
+pub fn diff_text(repo: &Path, args: &[&str], max_bytes: usize) -> Result<(String, bool)> {
+    let mut all = vec!["diff", "--no-color", "--no-ext-diff", "--no-textconv"];
+    all.extend_from_slice(args);
+    let out = run_git(Some(repo), &all)?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git diff".into(), message: first_line(&out.stderr_str()) });
+    }
+    let truncated = out.stdout.len() > max_bytes;
+    let mut s = String::from_utf8_lossy(&out.stdout[..out.stdout.len().min(max_bytes)]).into_owned();
+    if truncated {
+        s.push_str("\n… (diff truncated)\n");
+    }
+    Ok((s, truncated))
+}
+
+/// A read-only `log`/`diff`/`show` with bounded output (for inspections); `true` when truncated.
+pub fn bounded(repo: &Path, args: &[&str], max_bytes: usize) -> Result<(String, bool)> {
+    if !matches!(args.first(), Some(&"log") | Some(&"diff") | Some(&"show")) {
+        return Err(CoreError::invalid("only git log, diff and show are allowed here"));
+    }
+    let mut all = vec![args[0], "--no-color"];
+    all.extend_from_slice(&args[1..]);
+    let out = run_git(Some(repo), &all)?;
+    if !out.success() {
+        return Err(CoreError::External { program: format!("git {}", args[0]), message: first_line(&out.stderr_str()) });
+    }
+    let truncated = out.stdout.len() > max_bytes;
+    Ok((String::from_utf8_lossy(&out.stdout[..out.stdout.len().min(max_bytes)]).into_owned(), truncated))
+}
+
+/// `git rev-parse --verify <rev>^{commit}` → full id.
+pub fn rev_parse(repo: &Path, rev: &str) -> Option<String> {
+    let spec = format!("{rev}^{{commit}}");
+    let out = run_git(Some(repo), &["rev-parse", "--verify", "--quiet", &spec]).ok()?;
+    out.success().then(|| out.stdout_str().trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// The upstream of the current branch: (remote name, `remote/branch`).
+pub fn upstream_of_head(repo: &Path) -> Option<(String, String)> {
+    let out = run_git(Some(repo), &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).ok()?;
+    if !out.success() {
+        return None;
+    }
+    let up = out.stdout_str().trim().to_string();
+    let branch = run_git(Some(repo), &["symbolic-ref", "--quiet", "--short", "HEAD"]).ok().filter(|o| o.success())?.stdout_str().trim().to_string();
+    let key = format!("branch.{branch}.remote");
+    let remote = run_git(Some(repo), &["config", "--get", &key]).ok().filter(|o| o.success()).map(|o| o.stdout_str().trim().to_string());
+    Some((remote.unwrap_or_else(|| up.split('/').next().unwrap_or("origin").to_string()), up))
+}
+
+pub fn remotes(repo: &Path) -> Vec<String> {
+    run_git(Some(repo), &["remote"]).ok().filter(|o| o.success()).map(|o| o.stdout_str().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()).unwrap_or_default()
+}
+
+/// The repository's `.git` directory (worktrees supported).
+pub fn git_dir(repo: &Path) -> Option<PathBuf> {
+    let out = run_git(Some(repo), &["rev-parse", "--absolute-git-dir"]).ok()?;
+    out.success().then(|| PathBuf::from(out.stdout_str().trim()))
+}
+
+/// Fast-forward the current branch to `target` (refuses anything else).
+pub fn merge_ff_only(repo: &Path, target: &str) -> Result<proc::Output> {
+    run_git(Some(repo), &["merge", "--ff-only", "--no-edit", "--quiet", target])
+}
+
+/// Stage new files, then commit exactly `paths` (other staged changes stay staged and are not committed).
+/// Returns the paths that were added to the index (so a failed commit can unstage them again).
+pub fn commit_only(repo: &Path, message: &str, paths: &[String], new_files: &[String]) -> std::result::Result<String, (String, Vec<String>)> {
+    let mut added = Vec::new();
+    if !new_files.is_empty() {
+        let mut args = vec!["add", "--"];
+        args.extend(new_files.iter().map(String::as_str));
+        match run_git(Some(repo), &args) {
+            Ok(o) if o.success() => added = new_files.to_vec(),
+            Ok(o) => return Err((first_line(&o.stderr_str()), Vec::new())),
+            Err(e) => return Err((e.to_string(), Vec::new())),
+        }
+    }
+    let mut args = vec!["commit", "--quiet", "-m", message, "--only", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    match run_git(Some(repo), &args) {
+        Ok(o) if o.success() => Ok(head(repo).unwrap_or_default()),
+        Ok(o) => {
+            let err = o.stderr_str();
+            let line = err.lines().map(str::trim).find(|l| l.starts_with("fatal:") || l.starts_with("error:")).unwrap_or_else(|| err.lines().next().unwrap_or("")).to_string();
+            Err((if line.is_empty() { first_line(&o.stdout_str()) } else { line }, added))
+        }
+        Err(e) => Err((e.to_string(), added)),
+    }
+}
+
+/// Unstage paths (`git reset -q -- paths`) — the rollback of a failed commit.
+pub fn unstage(repo: &Path, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["reset", "-q", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let out = run_git(Some(repo), &args)?;
+    if out.success() { Ok(()) } else { Err(CoreError::External { program: "git reset".into(), message: first_line(&out.stderr_str()) }) }
+}
+
+/// Restore paths to `HEAD` in index and working tree — the rollback of a failed fast-forward (only for paths that
+/// were clean before).
+pub fn restore_to_head(repo: &Path, paths: &[String]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["restore", "--source=HEAD", "--staged", "--worktree", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let out = run_git(Some(repo), &args)?;
+    if out.success() { Ok(()) } else { Err(CoreError::External { program: "git restore".into(), message: first_line(&out.stderr_str()) }) }
+}
+
+/// Files of a tree with their modes (`git ls-tree -r -z <rev>`), bounded.
+pub fn ls_tree(repo: &Path, rev: &str) -> Result<Vec<(String, String)>> {
+    let out = run_git(Some(repo), &["ls-tree", "-r", "-z", "--full-tree", rev])?;
+    if !out.success() {
+        return Err(CoreError::External { program: "git ls-tree".into(), message: first_line(&out.stderr_str()) });
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter_map(|rec| {
+            let (meta, path) = rec.split_once('\t')?;
+            Some((meta.split_whitespace().next()?.to_string(), path.to_string()))
+        })
+        .take(MAX_PATHS)
+        .collect())
+}
+
+/// Is a Git identity (user.name and user.email) configured for commits in this repository?
+pub fn identity_configured(repo: &Path) -> bool {
+    ["user.name", "user.email"].iter().all(|k| run_git(Some(repo), &["config", "--get", k]).ok().is_some_and(|o| o.success() && !o.stdout_str().trim().is_empty()))
+}
+
 /// Most paths listed by [`changed_paths`] / [`tracked_files`] (bounded output).
 pub const MAX_PATHS: usize = 20_000;
 
@@ -377,6 +726,25 @@ fn first_line(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_errors_are_classified_and_redacted() {
+        assert_eq!(classify_remote_error("fatal: unable to access 'https://x/': Could not resolve host: x"), RemoteFailure::Offline);
+        assert_eq!(classify_remote_error("fatal: Authentication failed for 'https://x/'"), RemoteFailure::Auth);
+        assert_eq!(classify_remote_error("fatal: could not read Username for 'https://github.com': terminal prompts disabled"), RemoteFailure::Auth);
+        assert_eq!(classify_remote_error("git@github.com: Permission denied (publickey)."), RemoteFailure::Auth);
+        assert_eq!(classify_remote_error("fatal: '/tmp/none' does not appear to be a git repository"), RemoteFailure::RemoteMissing);
+        assert_eq!(classify_remote_error(" ! [rejected]        main -> main (fetch first)"), RemoteFailure::Rejected);
+        let e = remote_error(&format!("fatal: Authentication failed for 'https://user:{}@example.invalid/r.git/'", "hunter".to_string() + "2"));
+        assert!(!e.message.contains("hunter2") && e.kind == RemoteFailure::Auth, "{e:?}");
+    }
+
+    #[test]
+    fn diff_raw_parsing() {
+        let raw = b":100644 100644 aaa bbb M\0rules/a.md\0:000000 120000 000 ccc A\0link\0:100644 000000 ddd 000 D\0gone.md\0";
+        let d = parse_diff_raw(raw);
+        assert_eq!(d.iter().map(|e| (e.status.as_str(), e.mode.as_str(), e.path.as_str())).collect::<Vec<_>>(), [("M", "100644", "rules/a.md"), ("A", "120000", "link"), ("D", "", "gone.md")]);
+    }
 
     #[test]
     fn porcelain_v1_paths_and_renames() {
