@@ -140,4 +140,8 @@ threat model in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md), and the state of
 
 ## License
 
-Not licensed yet — © 2026 Makogai, all rights reserved.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
+Third-party components and their licences are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in NEXUS by you, as
+defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.

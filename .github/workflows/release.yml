@@ -152,6 +152,8 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Licences and third-party notices (MIT OR Apache-2.0, ADR-0035)
+        run: cp LICENSE-MIT LICENSE-APACHE THIRD_PARTY_NOTICES.md dist/
       - name: Checksums
         working-directory: dist
         run: |

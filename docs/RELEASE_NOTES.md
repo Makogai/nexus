@@ -71,3 +71,6 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 - **Signing:** the installers are not code-signed (see above).
 
 The guides are in `docs/user/`: first run, user guide, portable workspace, backups, troubleshooting.
+
+NEXUS is free and open source under **MIT OR Apache-2.0** (`LICENSE-MIT`, `LICENSE-APACHE`); the licences of the
+third-party components it includes are in `THIRD_PARTY_NOTICES.md`, attached to this release.

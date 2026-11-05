@@ -1,6 +1,6 @@
 # ADR-0035 — Licence (proposal)
 
-Status: **Proposed — awaiting the owner's choice. No licence file is added until then.**
+Status: **Accepted (2026-11-05)** — **MIT OR Apache-2.0** (dual), public repository `Makogai/nexus`.
 
 ## Options
 | | MIT | Apache-2.0 |
@@ -45,3 +45,14 @@ file (licence texts plus the MPL-2.0 source pointers) generated from this invent
 ## Decision needed from the owner
 Apache-2.0, MIT, or dual — then add `LICENSE` (and `NOTICE` for Apache), set `license` in the Cargo and npm manifests,
 and generate the third-party notices.
+
+## Decision (2026-11-05)
+
+The owner chose the dual licence **MIT OR Apache-2.0** when the repository became public. In place:
+
+* `LICENSE-MIT` and `LICENSE-APACHE` at the repository root;
+* `license = "MIT OR Apache-2.0"` in the workspace `Cargo.toml` (inherited by every crate), in
+  `apps/desktop/package.json` and in the bundle metadata;
+* `THIRD_PARTY_NOTICES.md`, generated from this inventory by `scripts/third-party-notices.mjs`, attached to every
+  release.
+
