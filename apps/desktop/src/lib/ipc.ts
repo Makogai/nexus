@@ -2,8 +2,10 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type {
   AppInfo,
+  DoctorReport,
   Migrated,
   MigrationPlan,
+  RepairPlan,
   TemplateApplied,
   TemplatePlan,
   TemplateSummary,
@@ -140,6 +142,9 @@ export const api = {
   workspaceActive: () => call<Workspace | null>('workspace_active'),
   workspaceCreate: (path: string, name: string, description?: string, template?: string | null) =>
     call<Workspace>('workspace_create', { path, name, description, template: template ?? null }),
+  workspaceDoctor: (workspaceId: string) => call<DoctorReport>('workspace_doctor', { workspaceId }),
+  workspaceRepairPlan: (workspaceId: string, repair: string) => call<RepairPlan>('workspace_repair_plan', { workspaceId, repair }),
+  workspaceRepair: (workspaceId: string, repair: string) => call<{ id: string; message: string }>('workspace_repair', { workspaceId, repair }),
   templateList: () => call<TemplateSummary[]>('template_list'),
   templatePlan: (workspaceId: string, template: string) => call<TemplatePlan>('template_plan', { workspaceId, template }),
   templateApply: (workspaceId: string, template: string) => call<TemplateApplied>('template_apply', { workspaceId, template }),

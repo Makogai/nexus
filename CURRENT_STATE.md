@@ -8,7 +8,7 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
   Nothing pushed.
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
-  P1 (workspace schema 2) and P2 (templates) done and committed; P3 (Workspace Doctor) next. Not merged, not pushed, no release.
+  P1 (workspace schema 2), P2 (templates) and P3 (Workspace Doctor) done and committed; P4 (project discovery and context) next. Not merged, not pushed, no release.
 
 ## Portable Workspace — progress (session 10)
 
@@ -41,6 +41,18 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   delegated writers against one brief, then gated by `templates::tests` (structure, ids, lengths, stacks, skills,
   integration schema, no credentials). Verified: core 201, CLI 34 + 6, vitest 79, desktop E2E `portable.mjs` 19/19,
   `profiles-kits` 9/9, `workflows` 24/24, real-Claude `kits` 17/17 and `workflow` 7/7, clippy clean.
+* **P3 — Workspace Doctor** (`workspace_doctor`, `toolchain`): checks the manifest and schema (read-only, migration),
+  `.gitignore`, README, clone folder, `nexus.lock.json` and template updates (and pending comparison copies), knowledge
+  validity and duplicate ids, constitution errors, rules/constitutions/workflows waiting for approval, the workspace
+  skills kit (missing, needs review, changed), workflows naming missing `workspace:` skills, integration manifests
+  (invalid JSON; enabled ones whose tools are missing — tools only by id from `toolchain::TOOLS`, never a program
+  named by a file), projects missing on this computer, Claude Code and Git, and whether the workspace is a Git
+  repository with a remote. Findings carry a recommendation, a desktop target and, where safe, a repair that first
+  returns its plan (migrate schema, add `.gitignore` lines, README, clone folder, rebuild index, register the skills
+  *for review*, update the template). Approvals stay explicit reviews in their views. `nexus workspaces doctor
+  [--repair ID [--yes]]` (exit 1 on errors), IPC `workspace_doctor/repair_plan/repair`, desktop **Workspace** view
+  (sidebar) with the Doctor and the template card (install, switch, check for updates with the per-file plan).
+  Verified: core doctor 3/3, CLI E2E, vitest 81, desktop E2E `portable.mjs` 24/24, clippy clean.
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 

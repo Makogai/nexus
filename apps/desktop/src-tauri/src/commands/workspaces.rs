@@ -1,6 +1,6 @@
 use tauri::State;
 
-use nexus_core::templates;
+use nexus_core::{templates, workspace_doctor};
 use nexus_core::workspace::{self, Workspace, migrate};
 
 use crate::error::IpcResult;
@@ -27,6 +27,30 @@ pub fn workspace_create(ctx: State<'_, Ctx>, path: String, name: String, descrip
         templates::apply(&db, &ctx.data_dir, &ws, t)?;
     }
     Ok(workspace::activate(&db, &ws.id)?)
+}
+
+/// Workspace Doctor: health of the workspace with recommendations and repairs (Portable Workspace P3).
+#[tauri::command]
+pub fn workspace_doctor(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResult<workspace_doctor::Report> {
+    let db = ctx.db();
+    let ws = workspace::get(&db, &workspace_id)?;
+    Ok(workspace_doctor::run(&db, &ctx.data_dir, &ws, &workspace_doctor::Options { home: &ctx.home, probe_tools: true })?)
+}
+
+/// What a repair would change. Read-only.
+#[tauri::command]
+pub fn workspace_repair_plan(ctx: State<'_, Ctx>, workspace_id: String, repair: String) -> IpcResult<workspace_doctor::RepairPlan> {
+    let db = ctx.db();
+    let ws = workspace::get(&db, &workspace_id)?;
+    Ok(workspace_doctor::repair_plan(&db, &ctx.data_dir, &ws, &repair)?)
+}
+
+/// Apply a repair the person reviewed.
+#[tauri::command]
+pub fn workspace_repair(ctx: State<'_, Ctx>, workspace_id: String, repair: String) -> IpcResult<workspace_doctor::Repaired> {
+    let db = ctx.db();
+    let ws = workspace::get(&db, &workspace_id)?;
+    Ok(workspace_doctor::repair(&db, &ctx.data_dir, &ws, &repair)?)
 }
 
 /// The built-in workspace templates (ADR-0037).

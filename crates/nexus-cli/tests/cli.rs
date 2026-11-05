@@ -965,6 +965,33 @@ fn templates_install_a_progressive_library_scoped_to_its_workspace() {
     assert!(!e.home().join("ws4").exists());
 }
 
+/// Portable Workspace P3: the Workspace Doctor reports with recommendations; a repair shows its plan and changes
+/// nothing without --yes.
+#[test]
+fn workspace_doctor_reports_and_repairs_after_review() {
+    let e = Env::new();
+    e.setup();
+    let ws = ws_dir(&e);
+    std::fs::remove_file(ws.join("README.md")).unwrap();
+    std::fs::create_dir_all(ws.join("rules")).unwrap();
+    std::fs::write(ws.join("rules").join("broken.md"), "---\nnexus: 1\nkind: rule\n---\n").unwrap();
+    let r = e.json(&["workspaces", "doctor"]);
+    let find = |check: &str| r["findings"].as_array().unwrap().iter().find(|f| f["check"] == check).cloned();
+    assert_eq!(find("readme").unwrap()["repair"]["id"], "readme");
+    assert!(find("knowledge-invalid").unwrap()["detail"][0].as_str().unwrap().starts_with("rules/broken.md"));
+    assert_eq!(find("projects").unwrap()["status"], "ok");
+    let text = e.ok(&["workspaces", "doctor"]);
+    assert!(text.contains("repair: nexus workspaces doctor --repair readme"), "{text}");
+
+    let dry = e.run(&["workspaces", "doctor", "--repair", "readme"]);
+    assert_eq!(dry.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&dry.stdout).contains("create README.md"));
+    assert!(!ws.join("README.md").exists(), "a plan changes nothing");
+    e.ok(&["workspaces", "doctor", "--repair", "readme", "--yes"]);
+    assert!(ws.join("README.md").is_file());
+    assert!(!e.run(&["workspaces", "doctor", "--repair", "format-disk", "--yes"]).status.success(), "only known repairs");
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {

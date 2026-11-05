@@ -144,6 +144,14 @@ enum WorkspaceCmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Workspace Doctor: health of the active workspace with recommendations. `--repair ID` shows what that repair
+    /// changes; add --yes to apply it. Exit code 1 when something is an error.
+    Doctor {
+        #[arg(long, value_name = "ID")]
+        repair: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -456,6 +464,58 @@ fn cmd_workspaces(ctx: &Ctx, cmd: WorkspaceCmd) -> nexus_core::Result<()> {
             }
             println!("  features: {}", if m.features.is_empty() { "(none)".to_string() } else { m.features.join(", ") });
             println!("  project clones: {}/ · {} project(s)", m.projects_dir(), m.projects.len());
+        }
+        WorkspaceCmd::Doctor { repair, yes } => {
+            use nexus_core::workspace_doctor as wd;
+            let ws = active_workspace(&conn)?;
+            if let Some(id) = repair {
+                let plan = wd::repair_plan(&conn, &ctx.data_dir, &ws, &id)?;
+                if !yes {
+                    if ctx.json {
+                        out::json(&serde_json::json!({ "plan": plan, "applied": false }));
+                    } else {
+                        println!("{}:", plan.title);
+                        for c in &plan.changes {
+                            println!("  {c}");
+                        }
+                        for n in &plan.notes {
+                            println!("  · {n}");
+                        }
+                        println!("Repeat with --yes to apply.");
+                    }
+                    std::process::exit(1);
+                }
+                let done = wd::repair(&conn, &ctx.data_dir, &ws, &id)?;
+                if ctx.json { out::json(&done) } else { println!("{}", done.message) }
+                return Ok(());
+            }
+            let r = wd::run(&conn, &ctx.data_dir, &ws, &wd::Options { home: &ctx.home, probe_tools: true })?;
+            if ctx.json {
+                out::json(&r);
+            } else {
+                println!("{} — {} error(s), {} warning(s), {} note(s), {} ok", ws.name, r.counts.error, r.counts.warn, r.counts.info, r.counts.ok);
+                for f in &r.findings {
+                    let mark = match f.status {
+                        Status::Ok => "ok   ",
+                        Status::Info => "info ",
+                        Status::Warn => "WARN ",
+                        Status::Error => "ERROR",
+                    };
+                    println!("{mark} [{}] {}", f.area, f.summary);
+                    for d in &f.detail {
+                        println!("        {d}");
+                    }
+                    if let Some(rec) = &f.recommendation {
+                        println!("        → {rec}");
+                    }
+                    if let Some(rep) = &f.repair {
+                        println!("        repair: nexus workspaces doctor --repair {}  ({})", rep.id, rep.title);
+                    }
+                }
+            }
+            if r.counts.error > 0 {
+                std::process::exit(1);
+            }
         }
         WorkspaceCmd::Migrate { yes } => {
             let ws = active_workspace(&conn)?;

@@ -3,6 +3,8 @@
 //        a backup; a workspace from a newer NEXUS opens read-only and refuses changes.
 //   P2 — templates are listed → a workspace created from AI Engineering Pro has the library, approved, with the
 //        workspace skills as an approved kit → the Constitutions view shows it → applying again changes nothing.
+//   P3 — Workspace Doctor: a missing README is reported with a repair → the repair shows its plan → applying it
+//        writes the file and the finding disappears; healthy checks (approved skills, template) are listed.
 //
 //   cargo build -p fake-claude -p nexus-cli
 //   npx tauri build --debug --no-bundle --features e2e-webview-debugging
@@ -127,6 +129,21 @@ try {
   check('the Constitutions view shows the installed library', !!view)
   const again = await inv('template_plan', { workspaceId: proWs.id, template: 'ai-engineering-pro' })
   check('applying the same template again changes nothing', again.items.every((i) => i.action === 'unchanged'), js(again.items.filter((i) => i.action !== 'unchanged').slice(0, 3)))
+
+  // ---- P3: Workspace Doctor ----
+  rmSync(join(root, 'pro-ws', 'README.md'))
+  await cdp.evaluate(`location.hash = '#/workspace'; true`)
+  const readme = await cdp.waitFor(`document.querySelector('[data-finding="readme"]')?.innerText`, 30000).catch(() => '')
+  check('the Doctor reports the missing README with a repair', readme.includes('README') && !!(await cdp.evaluate(`!!document.querySelector('[data-repair="readme"]')`)), readme)
+  const okList = await cdp.evaluate(`[...document.querySelectorAll('[data-finding-ok]')].map((e) => e.getAttribute('data-finding-ok')).join(',')`)
+  check('…and lists what is healthy (approved workspace skills, template)', okList.includes('workspace-skills') && okList.includes('template'), okList)
+  check('…the template card shows the installed template', (await text('[data-template-row="ai-engineering-pro"]')).includes('Check for updates'))
+  await click('[data-repair="readme"]')
+  const plan = await cdp.waitFor(`document.querySelector('[data-repair-changes]')?.innerText`, 10000).catch(() => '')
+  check('the repair shows its plan first', plan.includes('create README.md') && !existsSync(join(root, 'pro-ws', 'README.md')), plan)
+  await click('[data-repair-apply]')
+  await cdp.waitFor(`!document.querySelector('[data-finding="readme"]')`, 20000).catch(() => undefined)
+  check('applying it writes the file and the finding disappears', existsSync(join(root, 'pro-ws', 'README.md')) && !(await cdp.evaluate(`!!document.querySelector('[data-finding="readme"]')`)))
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

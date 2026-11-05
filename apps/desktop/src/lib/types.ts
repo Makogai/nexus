@@ -99,6 +99,33 @@ export interface TemplateApplied {
   kitId: string | null
 }
 
+export type DoctorStatus = 'ok' | 'info' | 'warn' | 'error'
+
+export interface DoctorFinding {
+  check: string
+  area: 'workspace' | 'knowledge' | 'skills' | 'integrations' | 'projects' | 'tools' | 'sync'
+  status: DoctorStatus
+  summary: string
+  detail: string[]
+  recommendation: string | null
+  repair: { id: string; title: string } | null
+  navigate: string | null
+}
+
+export interface DoctorReport {
+  workspaceId: string
+  findings: DoctorFinding[]
+  counts: { ok: number; info: number; warn: number; error: number }
+  checkedAt: number
+}
+
+export interface RepairPlan {
+  id: string
+  title: string
+  changes: string[]
+  notes: string[]
+}
+
 export interface Migrated {
   plan: MigrationPlan
   backupDir: string | null
