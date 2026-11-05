@@ -130,6 +130,38 @@ pub fn update_task(
     super::tasks::update(conn, data_dir, ws, id, &u, Author::Human)
 }
 
+/// The person's edit of a document's title and body in the desktop: validated, atomic and optimistic (`expected_hash`
+/// is the version they read — a file changed since is a conflict). Tasks keep their own update (status, checklist, log);
+/// a constitution goes through its parser so its rule ids and attributes stay valid. The person wrote this version
+/// here, so it is approved on this machine (like an edit in the Constitution Manager).
+pub fn update_doc(conn: &Connection, data_dir: &Path, ws: &Workspace, id: &str, title: Option<&str>, body: &str, expected_hash: Option<&str>) -> Result<Item> {
+    refresh(conn, data_dir, ws)?;
+    let item = index::get(conn, &ws.id, id)?;
+    if item.kind.as_deref() == Some("task") {
+        return Err(CoreError::invalid("a task is changed through its status, checklist and log"));
+    }
+    let (doc, _) = store::read(&item.path)?;
+    let title = title.map(str::trim).filter(|t| !t.is_empty() && Some(*t) != doc.fm.str("title"));
+    if doc.fm.str("format") == Some("constitution") {
+        if title.is_some() {
+            return Err(CoreError::invalid("rename a constitution in the Constitution Manager"));
+        }
+        super::constitution::save_raw(conn, data_dir, ws, id, body, expected_hash)?;
+        return index::get(conn, &ws.id, id);
+    }
+    let privacy = index::root_privacy(conn, &item.path)?;
+    let written = store::update(&item.path, expected_hash, privacy, |d| {
+        if let Some(t) = title {
+            d.fm.set("title", Value::Str(t.to_string()));
+        }
+        d.body = format!("{}\n", body.trim_matches(['\r', '\n']));
+        Ok(())
+    })?;
+    refresh(conn, data_dir, ws)?;
+    index::approve(conn, &written.path, &written.hash)?;
+    index::get(conn, &ws.id, id)
+}
+
 /// Approve the current version of an always-on rule for this machine.
 pub fn approve(conn: &Connection, data_dir: &Path, ws: &Workspace, id: &str) -> Result<Item> {
     refresh(conn, data_dir, ws)?;
@@ -338,5 +370,42 @@ mod tests {
         assert_eq!((by_title("Rust style").scope, by_title("Rust style").needs_approval), ("stack", true));
         let rebuilt = overview(&conn, &data, &w, true).unwrap();
         assert_eq!(rebuilt.items.len(), o.items.len(), "a rebuild recovers the same index from the files");
+    }
+
+    /// W2: the person edits a document's title and body in the desktop — optimistic, validated, approved here; tasks
+    /// and constitution renames have their own paths; a constitution body goes through its parser.
+    #[test]
+    fn a_person_edits_a_document_safely() {
+        let t = tempfile::tempdir().unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        let w = ws(&t, &conn);
+        let data = t.path().join("data");
+        let rule = CreateInput { kind: "rule".into(), title: "Always write tests".into(), body: "Tests first.".into(), applies: Some("always".into()), ..Default::default() };
+        let r = create(&conn, &data, &w, &rule, Author::Human).unwrap();
+        let id = r.id.clone().unwrap();
+        let read_hash = read(&conn, &w, &id, 10_000).unwrap().item.hash;
+
+        let e = update_doc(&conn, &data, &w, &id, Some("Write tests"), "## Why\n\nTests **first**.", Some(&read_hash)).unwrap();
+        assert_eq!(e.title, "Write tests");
+        let v = read(&conn, &w, &id, 10_000).unwrap();
+        assert_eq!(v.body.trim(), "## Why\n\nTests **first**.");
+        assert!(v.approved, "the person's own version is approved on this machine");
+        // The version they read is gone now: a second save from the old copy is a conflict, nothing changes.
+        let stale = update_doc(&conn, &data, &w, &id, None, "Overwrite", Some(&read_hash)).unwrap_err();
+        assert_eq!(stale.code(), "conflict");
+        assert!(read(&conn, &w, &id, 10_000).unwrap().body.contains("Tests **first**."));
+
+        let task = create(&conn, &data, &w, &CreateInput { kind: "task".into(), title: "Ship".into(), ..Default::default() }, Author::Human).unwrap();
+        assert!(update_doc(&conn, &data, &w, task.id.as_deref().unwrap(), None, "x", None).is_err(), "tasks keep their own update");
+
+        let nc = super::super::constitution::NewConstitution { title: "Charter".into(), scope: "workspace".into(), prefix: Some("CH".into()), ..Default::default() };
+        let c = super::super::constitution::create(&conn, &data, &w, &nc).unwrap();
+        let cid = c.summary.id.clone();
+        let body = "## Basics\n\n#### Small commits\n<!-- rule: id=CH-1 enforcement=rule -->\nKeep commits small.\n";
+        update_doc(&conn, &data, &w, &cid, None, body, None).unwrap();
+        assert!(read(&conn, &w, &cid, 10_000).unwrap().body.contains("id=CH-1"));
+        let bad = "#### Broken\n<!-- rule: id=CH-1 enforcement=sometimes -->\nx\n";
+        assert!(update_doc(&conn, &data, &w, &cid, None, bad, None).is_err(), "an invalid rule attribute is refused");
+        assert!(update_doc(&conn, &data, &w, &cid, Some("Renamed"), body, None).is_err());
     }
 }

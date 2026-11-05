@@ -38,6 +38,18 @@
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
+  /* Code viewer / editor (CodeMirror, W2–W3): muted syntax colours that sit on --bg-input. */
+  --syn-keyword: #b4a5ff;
+  --syn-string: #8fd6a0;
+  --syn-comment: #6c7389;
+  --syn-number: #f0b67a;
+  --syn-function: #7cc4fa;
+  --syn-type: #5fd3c8;
+  --syn-property: #c9cede;
+  --syn-heading: #e7e9f0;
+  --editor-active-line: rgba(124, 108, 242, 0.06);
+  --editor-selection: rgba(124, 108, 242, 0.28);
+  --editor-match: rgba(245, 185, 66, 0.22);
   color-scheme: dark;
 }
 
@@ -70,6 +82,17 @@
   --red-soft: rgba(220, 38, 38, 0.1);
   --shadow: 0 12px 40px rgba(20, 24, 40, 0.14);
   --shadow-sm: 0 2px 8px rgba(20, 24, 40, 0.06);
+  --syn-keyword: #6a3fc8;
+  --syn-string: #1f7a3d;
+  --syn-comment: #7a8196;
+  --syn-number: #a1540d;
+  --syn-function: #1f5fb4;
+  --syn-type: #0b7d74;
+  --syn-property: #3a4157;
+  --syn-heading: #171a26;
+  --editor-active-line: rgba(106, 89, 234, 0.05);
+  --editor-selection: rgba(106, 89, 234, 0.2);
+  --editor-match: rgba(183, 121, 31, 0.2);
   color-scheme: light;
 }
 
@@ -246,6 +269,14 @@ code,
   resize: vertical;
   font-family: var(--font-mono);
   font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  line-height: 1.5;
+}
+/* Prose fields (rule text, preambles): the UI font reads better than monospace. */
+.textarea.prose {
+  font-family: var(--font-ui);
+  font-size: 13.5px;
 }
 .input:focus,
 .select:focus,
@@ -520,6 +551,28 @@ code,
 }
 .list-row:hover {
   background: var(--bg-hover);
+}
+/* A clickable row is a <button>: drop the native button look (it painted bright grey blocks with heavy borders). */
+button.list-row {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.list-row:first-child {
+  border-top: none;
+}
+button.list-row:hover {
+  background: var(--bg-hover);
+}
+button.list-row:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
 }
 
 .notice {

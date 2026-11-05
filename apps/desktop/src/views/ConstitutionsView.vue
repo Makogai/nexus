@@ -9,6 +9,7 @@ import { relativeTime } from '../lib/format'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useWorkspaceStore } from '../stores/workspaces'
+import ConstitutionRules from '../components/ConstitutionRules.vue'
 import ConstitutionTree from '../components/ConstitutionTree.vue'
 import NewConstitutionDialog from '../components/NewConstitutionDialog.vue'
 
@@ -18,9 +19,10 @@ const projects = useProjectStore()
 const route = useRoute()
 
 type Tab = 'documents' | 'effective'
-type Mode = 'structured' | 'markdown' | 'history'
+/** `read`: the formatted document (default); `structured` / `markdown`: the two editors (W2). */
+type Mode = 'read' | 'structured' | 'markdown' | 'history'
 const tab = ref<Tab>('documents')
-const mode = ref<Mode>('structured')
+const mode = ref<Mode>('read')
 const list = ref<ConstitutionSummary[]>([])
 const selectedId = ref<string | null>(null)
 const view = ref<ConstitutionView | null>(null)
@@ -94,7 +96,7 @@ async function loadList() {
 async function select(id: string) {
   if (dirty.value && !(await app.confirm({ title: 'Discard changes?', message: 'This constitution has unsaved changes.', confirmLabel: 'Discard', danger: true }))) return
   selectedId.value = id
-  mode.value = mode.value === 'history' ? 'structured' : mode.value
+  mode.value = 'read'
   await loadView()
 }
 
@@ -189,6 +191,7 @@ async function onCreated(v: ConstitutionView) {
   creating.value = false
   dirty.value = false
   selectedId.value = v.id
+  mode.value = 'structured' // a new constitution opens in the editor
   await loadList()
   await loadView()
 }
@@ -199,9 +202,14 @@ watch(wsId, () => {
   loadList()
 })
 watch(
-  () => [route.name, route.query.pending],
+  () => [route.name, route.query.pending, route.query.doc],
   async () => {
-    if (route.name === 'constitutions' && route.query.pending) {
+    if (route.name === 'constitutions' && typeof route.query.doc === 'string') {
+      // Opened from a knowledge document ("Edit in Constitutions"): show that document.
+      tab.value = 'documents'
+      await loadList()
+      await select(route.query.doc)
+    } else if (route.name === 'constitutions' && route.query.pending) {
       // Opened from a review notification: reload (the kept-alive list may be stale) and show what needs review.
       tab.value = 'documents'
       await loadList()
@@ -287,7 +295,8 @@ loadList()
               </div>
             </div>
             <div class="segments" role="radiogroup" aria-label="Editor">
-              <button class="segment" :class="{ selected: mode === 'structured' }" role="radio" :aria-checked="mode === 'structured'" data-mode="structured" @click="setMode('structured')">Structured</button>
+              <button class="segment" :class="{ selected: mode === 'read' }" role="radio" :aria-checked="mode === 'read'" data-mode="read" @click="setMode('read')">Read</button>
+              <button class="segment" :class="{ selected: mode === 'structured' }" role="radio" :aria-checked="mode === 'structured'" data-mode="structured" @click="setMode('structured')">Edit</button>
               <button class="segment" :class="{ selected: mode === 'markdown' }" role="radio" :aria-checked="mode === 'markdown'" data-mode="markdown" @click="setMode('markdown')">Markdown</button>
               <button class="segment" :class="{ selected: mode === 'history' }" role="radio" :aria-checked="mode === 'history'" data-mode="history" @click="setMode('history')"><History /> History</button>
             </div>
@@ -300,8 +309,9 @@ loadList()
           </div>
           <div v-for="p in view.problems.filter((x) => x.severity === 'error')" :key="p.message" class="notice notice-error"><TriangleAlert /> {{ p.message }}</div>
 
+          <ConstitutionRules v-if="mode === 'read'" class="reading" :structure="view.structure" />
           <ConstitutionTree
-            v-if="mode === 'structured'"
+            v-else-if="mode === 'structured'"
             :structure="draft"
             :problems="view.problems"
             :other-rules="view.otherRules"
@@ -322,7 +332,7 @@ loadList()
             <pre v-if="oldVersion" class="old selectable">{{ oldVersion.body }}</pre>
           </div>
 
-          <footer v-if="mode !== 'history'" class="save-bar">
+          <footer v-if="mode === 'structured' || mode === 'markdown'" class="save-bar">
             <span class="faint small">{{ dirty ? 'Unsaved changes' : view.updated ? `Saved ${view.updated}` : '' }}</span>
             <button class="btn" :disabled="!dirty || busy" @click="loadView"><Undo2 /> Discard</button>
             <button class="btn btn-primary" :disabled="!dirty || busy" data-save @click="save"><Save /> {{ busy ? 'Saving…' : 'Save' }}</button>

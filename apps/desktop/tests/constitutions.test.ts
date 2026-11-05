@@ -96,6 +96,10 @@ describe('ConstitutionsView', () => {
     const w = mount(ConstitutionsView, { attachTo: document.body })
     await flushPromises()
     expect(w.text()).toContain('1 mandatory, 0 rules, 1 guidelines')
+    // A document opens formatted for reading (rule cards); Edit opens the tree editor.
+    expect(w.find('[data-constitution-rules] [data-rule="TC-2"]').exists()).toBe(true)
+    expect(w.find('[data-save]').exists()).toBe(false)
+    await w.find('[data-mode="structured"]').trigger('click')
     expect(w.find('[data-save]').attributes('disabled')).toBeDefined()
     const title = w.find('[data-rule="TC-2"] input[aria-label="Rule title"]')
     await title.setValue('Explain trade-offs in one sentence')

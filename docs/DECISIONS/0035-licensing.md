@@ -34,6 +34,9 @@ non-dev entries of `apps/desktop/package-lock.json`.
   Lucide icons, the Tauri API and plugins) is MIT, ISC or MIT/Apache-2.0. The 11 MPL-2.0 entries are `lightningcss`
   native binaries — a build-time CSS tool pulled in transitively, not part of the shipped bundle; Babel, Rolldown and
   the Vue compiler are build-time as well.
+* **Added 2026-11-05 (project workbench, W2/W3)**: CodeMirror 6 (`@codemirror/*`, `@lezer/*`) and markdown-it with
+  their dependencies — 57 packages under MIT, `entities` under BSD-2-Clause and `argparse` under PSF-2.0 (used only by
+  markdown-it's command-line tool, not bundled). All permissive; include them in the third-party notices.
 
 All of it is compatible with MIT, Apache-2.0 or the dual licence. Before a public release, ship a third-party notices
 file (licence texts plus the MPL-2.0 source pointers) generated from this inventory with the installer — e.g. with

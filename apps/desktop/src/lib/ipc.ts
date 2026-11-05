@@ -254,6 +254,9 @@ export const api = {
   instructionsInspect: (args: { profileId: string; projectId?: string | null; cwd?: string | null; taskId?: string | null; workProfile?: string | null }) =>
     call<InstructionsPreview>('instructions_inspect', args),
   knowledgeApprove: (workspaceId: string, id: string) => call<KnowledgeEntry>('knowledge_approve', { workspaceId, id }),
+  /** The person's edit of a document (title + Markdown body); `expectedHash` = the version that was read. */
+  knowledgeUpdate: (workspaceId: string, id: string, body: string, expectedHash: string, title?: string | null) =>
+    call<KnowledgeEntry>('knowledge_update', { workspaceId, id, title: title ?? null, body, expectedHash }),
 
   workflowTemplates: () => call<WorkflowTemplate[]>('workflow_templates'),
   workflowList: (workspaceId: string) => call<WorkflowSummary[]>('workflow_list', { workspaceId }),
