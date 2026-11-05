@@ -16,6 +16,15 @@
 ; Remove what NEXUS registered for itself at run time — its notification sender (AppUserModelID) and the nexus://
 ; notification protocol. Nothing else: the data folder (%LOCALAPPDATA%\NEXUS) is the user's and stays.
 !macro NSIS_HOOK_POSTUNINSTALL
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\io.github.makogai.nexus"
   DeleteRegKey HKCU "Software\Classes\AppUserModelId\dev.nexus.desktop"
   DeleteRegKey HKCU "Software\Classes\nexus"
+!macroend
+
+; Builds before ADR-0034 used the identifier dev.nexus.desktop, from which Tauri derived the manufacturer "nexus":
+; their remembered install location (HKCU\Software\nexus\NEXUS) is replaced by HKCU\Software\Makogai\NEXUS. Only
+; NEXUS's own subkey is removed, the parent only if nothing else is left in it.
+!macro NSIS_HOOK_POSTINSTALL
+  DeleteRegKey HKCU "Software\nexus\NEXUS"
+  DeleteRegKey /ifempty HKCU "Software\nexus"
 !macroend

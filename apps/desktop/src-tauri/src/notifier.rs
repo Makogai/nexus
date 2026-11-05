@@ -3,7 +3,7 @@
 //!
 //! * Windows — WinRT toasts built here (no third-party wrapper). NEXUS registers **its own sender identity**
 //!   (AppUserModelID under `HKCU\Software\Classes\AppUserModelId`, the documented route for unpackaged apps):
-//!   `dev.nexus.desktop` "NEXUS" for installed builds, `dev.nexus.desktop.dev` "NEXUS (development)" for builds under
+//!   [`crate::APP_ID`] "NEXUS" for installed builds, `<APP_ID>.dev` "NEXUS (development)" for builds under
 //!   `target\`. Toasts carry the notification id as tag, so handled notifications are withdrawn from the Action
 //!   Center and stale ones are cleared at start. A click focuses NEXUS and opens the target — in-process while the
 //!   toast object lives, and in installed builds also through the `nexus://notification/<id>` protocol (works from
@@ -159,6 +159,16 @@ pub mod windows_toast {
         Ok(())
     }
 
+    /// Remove an AppUserModelID only if it is still the one NEXUS registered (its display name matches).
+    pub fn unregister_if(aumid: &str, display: &str) {
+        let classes = RegKey::predef(HKEY_CURRENT_USER);
+        let path = format!(r"Software\Classes\AppUserModelId\{aumid}");
+        let ours = classes.open_subkey(&path).and_then(|k| k.get_value::<String, _>("DisplayName")).is_ok_and(|d| d == display);
+        if ours {
+            let _ = classes.delete_subkey_all(&path);
+        }
+    }
+
     pub fn unregister(aumid: &str) {
         let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(format!(r"Software\Classes\AppUserModelId\{aumid}"));
     }
@@ -259,6 +269,12 @@ pub mod windows_toast {
                         let _ = std::fs::write(i, include_bytes!("../icons/128x128.png"));
                     }
                     register(&id.aumid, &id.display, icon.as_deref())?;
+                    // The sender of the builds before ADR-0034 (`dev.nexus.desktop[.dev]`): removed once NEXUS runs under
+                    // its final identifier — only while the key is still NEXUS's own (same display name).
+                    let legacy = identity(crate::LEGACY_APP_ID);
+                    if legacy.aumid != id.aumid {
+                        unregister_if(&legacy.aumid, &legacy.display);
+                    }
                     if id.protocol
                         && let Ok(exe) = tauri::utils::platform::current_exe()
                         && let Err(e) = register_protocol(&exe)

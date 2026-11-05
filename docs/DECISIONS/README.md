@@ -38,7 +38,7 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0031](0031-git-workspace-sync.md) | Git-based workspace sync: the person's repository, explicit outgoing review, no sync service | Accepted, implemented (M29) |
 | [0032](0032-upgrade-safety-and-backups.md) | Upgrade safety, backups and restore | Accepted, implemented |
 | [0033](0033-packaging-and-release-security.md) | Packaging, installed layout, installed-app verification and release security | Accepted, implemented; signing and updater open |
-| [0034](0034-application-identity.md) | Application identity | **Proposed** — owner decision |
+| [0034](0034-application-identity.md) | Application identity | Accepted — `io.github.makogai.nexus` (2026-11-05) |
 | [0035](0035-licensing.md) | Licence | **Proposed** — owner decision |
 | [0036](0036-workspace-schema-2.md) | Workspace schema 2: portable layout, versioning, compatibility, migration | Accepted, implemented (P1) |
 | [0037](0037-workspace-templates-and-progressive-loading.md) | Workspace templates, the workspace AI Kit and progressive loading | Accepted, implemented (P2) |

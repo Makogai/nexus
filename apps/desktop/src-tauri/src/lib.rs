@@ -4,6 +4,12 @@
 #[cfg(all(feature = "e2e-webview-debugging", not(debug_assertions)))]
 compile_error!("the `e2e-webview-debugging` feature is for debug test builds only and cannot be compiled into a release build");
 
+/// The application identifier (ADR-0034, decided 2026-11-05) — must equal `identifier` in `tauri.conf.json` (tested).
+/// Windows notification sender, installer identity, macOS bundle id and Linux app id all follow it.
+pub const APP_ID: &str = "io.github.makogai.nexus";
+/// The provisional identifier of the beta builds before ADR-0034: its Windows registrations are cleaned up.
+pub const LEGACY_APP_ID: &str = "dev.nexus.desktop";
+
 pub mod commands;
 pub mod self_check;
 pub mod error;
@@ -314,4 +320,16 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod app_id_tests {
+    /// ADR-0034: one identifier everywhere — the constant the code uses is the one the bundle is built with.
+    #[test]
+    fn the_app_id_matches_the_tauri_configuration() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], super::APP_ID);
+        assert_eq!(conf["bundle"]["publisher"], "Makogai", "the installer manufacturer is explicit, not derived from the id");
+        assert_ne!(super::APP_ID, super::LEGACY_APP_ID);
+    }
 }

@@ -1,6 +1,7 @@
 # ADR-0034 — Application identity (proposal)
 
-Status: **Proposed — awaiting the owner's choice. Nothing is changed until then.**
+Status: **Accepted (2026-11-05)** — identifier **`io.github.makogai.nexus`**, publisher `Makogai`, product name NEXUS
+for now (see the decision at the end).
 
 ## Context
 The identifier `dev.nexus.desktop` was provisional. Reverse-DNS identifiers should be in a namespace the publisher
@@ -33,3 +34,22 @@ first installer reaches anyone, because Windows and the installer key things on 
 
 ## Decision needed from the owner
 The namespace and final identifier (and whether the product name stays for the public release).
+
+## Decision (2026-11-05)
+
+The owner chose `io.github.makogai.nexus` before the first distributed release (repository `Makogai/nexus`, private).
+
+* `identifier` is set in `tauri.conf.json`; the code uses the constant `APP_ID` in `src-tauri/src/lib.rs`, and a test
+  checks that the two are equal.
+* `bundle.publisher` is `Makogai`, so the installer manufacturer (and the remembered location
+  `HKCU\Software\Makogai\NEXUS`) no longer comes from the identifier.
+* Legacy cleanup:
+  * at start, the notification sender of the beta builds (`dev.nexus.desktop[.dev]`) is removed if it is still
+    NEXUS's own (its display name matches);
+  * the uninstall hook removes both senders;
+  * the install hook removes the old remembered-location key `HKCU\Software\nexus\NEXUS`, and its parent only if it
+    is empty.
+* The WebView2 cache moves to `%LOCALAPPDATA%\io.github.makogai.nexus`; the old folder holds UI cache only. NEXUS's
+  data (`%LOCALAPPDATA%\NEXUS`) is unchanged — no migration.
+* The product name and the `nexus://` scheme stay for now; they are revisited before a public release.
+

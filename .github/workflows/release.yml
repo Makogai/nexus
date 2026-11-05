@@ -1,8 +1,11 @@
 name: Release (draft)
 
-# Builds and verifies the Windows installer for a version tag (or on demand) and creates a DRAFT GitHub release with
-# the installer, SHA256SUMS.txt and build-provenance attestations. Nothing is published automatically: a person
-# reviews the draft and publishes it. See docs/DECISIONS/0033-packaging-and-release-security.md.
+# Builds, tests and verifies NEXUS for Windows, macOS and Linux for a version tag (or on demand), then creates ONE DRAFT
+# GitHub release with every installer, a combined SHA256SUMS.txt and build-provenance attestations. Nothing is
+# published automatically: a person reviews the draft and publishes it. See docs/DECISIONS/0033 and 0040.
+#
+#   git tag v0.1.0 && git push origin v0.1.0     → builds + draft release
+#   Actions → Release (draft) → Run workflow      → builds only (artifacts on the run, no release)
 
 on:
   push:
@@ -16,16 +19,13 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  windows-installer:
-    name: Windows installer
+  windows:
+    name: Windows (x64, NSIS)
     runs-on: windows-latest
-    permissions:
-      contents: write # the draft release
-      id-token: write # build provenance (Sigstore)
-      attestations: write
-    env:
-      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -38,23 +38,15 @@ jobs:
       - name: Install frontend dependencies
         working-directory: apps/desktop
         run: npm ci
-
       - name: Tests
         run: cargo test --workspace --locked
       - name: Test double for the installed-app check
         run: cargo build -p fake-claude --locked
-
       - name: Release installer (CLI bundled as sidecar)
         working-directory: apps/desktop
         run: npx tauri build --config src-tauri/tauri.installer.conf.json
-
-      # Code signing (decision pending, ADR-0033): sign nexus-desktop.exe, nexus.exe and the installer BEFORE the
-      # checksums and attestations below, e.g. with Azure Trusted Signing or `signtool` and a certificate from
-      # repository secrets. Disabled until a certificate is chosen.
-      - name: Code signing (not configured)
-        if: ${{ false }}
-        run: echo "configure signing first"
-
+      # Code signing (decision pending, ADR-0033): sign nexus-desktop.exe, nexus.exe and the installer here, before the
+      # checksums and attestations — e.g. Azure Trusted Signing or `signtool` with a certificate from repository secrets.
       - name: T18 — the release program ignores WebView2 debugging overrides
         working-directory: apps/desktop
         run: node e2e/t18-check.mjs ../../target/release/nexus-desktop.exe
@@ -62,33 +54,118 @@ jobs:
         working-directory: apps/desktop
         shell: pwsh
         run: node e2e/installed.mjs (Get-ChildItem ../../target/release/bundle/nsis/*-setup.exe).FullName
-      - name: Release checks and checksums
+      - name: Release checks
         working-directory: apps/desktop
         run: node scripts/release-check.mjs ../../target/release/bundle/nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-windows
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
 
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: Apple silicon
+          - target: x86_64-apple-darwin
+            arch: Intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Tests (the runner's own architecture)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo test --workspace --locked
+      # Not notarized yet (needs an Apple Developer ID, ADR-0033): the bundle is ad-hoc signed (`signingIdentity: "-"`),
+      # so macOS asks the person to confirm the first start.
+      - name: App bundle and disk image (CLI bundled as sidecar)
+        working-directory: apps/desktop
+        run: npx tauri build --config src-tauri/tauri.installer.conf.json --target ${{ matrix.target }} --bundles app,dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-macos-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  linux:
+    name: Linux (x64, AppImage + deb)
+    # The oldest supported Ubuntu LTS runner: an AppImage built against an older glibc runs on more distributions.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: System dependencies (Tauri, WebKitGTK)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+      - name: Tests
+        run: cargo test --workspace --locked
+      - name: AppImage and Debian package (CLI bundled as sidecar)
+        working-directory: apps/desktop
+        run: npx tauri build --config src-tauri/tauri.installer.conf.json --bundles appimage,deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-linux
+          path: |
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+  draft-release:
+    name: Draft release
+    needs: [windows, macos, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the draft release
+      id-token: write # build provenance (Sigstore)
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          ls -la
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
       - name: Build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: |
-            target/release/bundle/nsis/*-setup.exe
-            target/release/nexus-desktop.exe
-            target/release/nexus.exe
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nexus-windows-installer
-          path: |
-            target/release/bundle/nsis/*-setup.exe
-            target/release/bundle/nsis/SHA256SUMS.txt
-          if-no-files-found: error
-
+          subject-path: dist/*
       - name: Draft release (never published automatically)
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $files = @((Get-ChildItem target/release/bundle/nsis/*-setup.exe).FullName, "target/release/bundle/nsis/SHA256SUMS.txt")
-          gh release create "${{ github.ref_name }}" --draft --verify-tag --title "NEXUS ${{ github.ref_name }}" --notes-file docs/RELEASE_NOTES.md @files
+        run: gh release create "${{ github.ref_name }}" --draft --verify-tag --title "NEXUS ${{ github.ref_name }}" --notes-file docs/RELEASE_NOTES.md dist/*
 
       # Updates (decision pending): tauri-plugin-updater needs an update-signing key (TAURI_SIGNING_PRIVATE_KEY) and a
-      # latest.json per release. Not enabled; installers are updated by installing the new version over the old one.
+      # latest.json per release. Not enabled; a new version is installed over the old one.

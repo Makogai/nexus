@@ -189,8 +189,7 @@ read-only, a guided Claude session whose drafts they approve, and Graphify used 
 
 These are deliberately open and must be closed before anything is published:
 
-1. **Application identifier** — `dev.nexus.desktop` is provisional. It determines the WebView2 user-data folder,
-   installer/registry identity and updater identity, so it cannot change after release without a migration.
+1. ~~**Application identifier**~~ — decided 2026-11-05: `io.github.makogai.nexus`, publisher `Makogai` (ADR-0034).
 2. **License** — none yet; no LICENSE file is added until the owner decides.
 3. **Code signing** — Windows Authenticode / macOS notarization certificates (Tauri updater key is separate).
 4. ~~Release builds must not honour WebView2 remote debugging~~ — done (ADR-0015, `e2e/t18-check.mjs`); remaining:
