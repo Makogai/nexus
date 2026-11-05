@@ -13,22 +13,24 @@ updated: {{now}}
 source: import
 ---
 
-Rules for writing Dockerfiles and Compose files. Apply when you create or change them; they refine OPS, which holds
-the build, secret and deployment policies.
+Rules for writing Dockerfiles and Compose files. Apply when you create or change them; OPS covers CI, running
+containers and deployment.
 
 ## Base images and layers
 
 The base image and layer order decide image size, patch level and build speed.
 
-#### Pin base images by version and digest
+#### Use slim base images pinned by version and digest
 <!-- rule: id=DKR-1 enforcement=rule -->
-Reference base images by a specific version tag (node:24.11-slim, not node or node:latest) and pin production images
-by digest as well (`image:tag@sha256:<digest>`), letting an update bot such as Renovate raise tag and digest together.
+Base images on a specific version tag of a slim or distroless variant (node:24.11-slim, not node or node:latest) and
+pin production images by digest as well (`image:tag@sha256:<digest>`), letting an update bot such as Renovate raise
+tag and digest together.
 
 #### Use multi-stage builds with named stages
 <!-- rule: id=DKR-2 enforcement=rule -->
-Name stages (FROM node:24.11-slim AS build), copy only built artefacts into the final stage with COPY --from=build,
-and keep test and dev tooling in separate stages selected with --target, so one Dockerfile serves CI and production.
+Name stages (FROM node:24.11-slim AS build) and copy only built artefacts into the final stage with COPY --from=build,
+so compilers, package caches and sources never ship. Keep test and dev tooling in separate stages selected with
+--target, so one Dockerfile serves CI and production.
 
 #### Order layers for cache efficiency
 <!-- rule: id=DKR-3 enforcement=rule -->
@@ -38,13 +40,13 @@ cleanup in one RUN.
 
 #### Copy only what the image needs
 <!-- rule: id=DKR-4 enforcement=rule -->
-Use COPY, not ADD, which also fetches URLs and auto-extracts archives; copy explicit paths instead of the whole
-context, and keep .dockerignore in step, ideally allowlist-style (exclude everything with * and re-include needed paths
-with !).
+Use COPY, not ADD (which also fetches URLs and unpacks archives), copy explicit paths, and keep a .dockerignore,
+ideally allowlist-style (* then !needed paths), that excludes .git, dependency folders, build output, env files and
+test data, so builds stay fast and nothing private reaches the builder.
 
-## Runtime
+## Runtime and secrets
 
-How the container process runs decides its privileges and whether it stops cleanly.
+How the container process runs decides its privileges, whether it stops cleanly and what leaks into the image.
 
 #### Run as a non-root user with a numeric UID
 <!-- rule: id=DKR-5 enforcement=rule -->
@@ -61,13 +63,13 @@ or tini if it spawns children.
 <!-- rule: id=DKR-7 enforcement=rule -->
 Add a HEALTHCHECK with interval, timeout, start period and retries for images run by Docker or Compose, using a
 command that exists in the final image (an app health subcommand on distroless, not a missing curl). Kubernetes
-ignores it and uses probes (OPS-7).
+ignores it and uses probes (OPS-6).
 
-#### Pass build secrets with BuildKit secret mounts
-<!-- rule: id=DKR-8 enforcement=rule -->
-Provide build-time credentials (registry or package tokens) with RUN --mount=type=secret,id=npmrc,target=... and
-docker build --secret, never through ARG, ENV or COPY: build args and env values persist in image history and layers
-(OPS-8).
+#### Keep secrets out of images, build args and Compose files
+<!-- rule: id=DKR-8 enforcement=mandatory -->
+Never put secrets in a Dockerfile, ARG, ENV, copied file or compose file: they persist in image layers and history.
+Use BuildKit secret mounts (RUN --mount=type=secret with docker build --secret) at build time and the platform's
+secret store at runtime, and commit only an .env.example. A secret that reached an image is compromised (SEC-1).
 
 ## Compose and tooling
 
@@ -75,9 +77,9 @@ Compose makes local dependencies reproducible; a Dockerfile linter catches what 
 
 #### Use Compose for local development with named volumes
 <!-- rule: id=DKR-9 enforcement=rule -->
-Define local dependencies (database, cache, broker) in compose.yaml with pinned images, named volumes for data,
-healthchecks with depends_on condition: service_healthy, and an uncommitted env file next to a committed
-.env.example; keep production settings out of it.
+Define local dependencies (database, cache, broker) in compose.yaml without the obsolete top-level version key, with
+pinned images, named volumes for data and healthchecks plus depends_on condition: service_healthy. Run it with
+docker compose (v2), keep production settings out of it and never commit env files with values.
 
 #### Lint Dockerfiles with hadolint
 <!-- rule: id=DKR-10 enforcement=rule check=lint -->

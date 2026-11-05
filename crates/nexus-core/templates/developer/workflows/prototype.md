@@ -55,7 +55,7 @@ Joins the run only at balanced rigor or above. NEXUS runs the project's test gat
 ## Learnings and recommendation
 <!-- step: id=learn kind=claude needs=demo,check -->
 
-Record what was learned as a checkpoint (decision) and, when the NEXUS tools are available, as memory: what worked, what did not, measured limits, surprises, and what you would do differently. Recommend one outcome with a short reason: discard, iterate (with the next question to answer), or productionise. For productionise, list the work needed (tests, error handling, security review, removing each listed shortcut) and propose a follow-up task for the Standard feature workflow. Prototype code is never merged to the main branch as-is.
+Record what was learned as a checkpoint (decision): what worked, what did not, measured limits, surprises, and what you would do differently. Save what future sessions need with `record_memory` (note). Recommend one outcome with a short reason: discard, iterate (with the next question to answer), or productionise. For productionise, list the work needed (tests, error handling, security review, removing each listed shortcut) and propose a follow-up task for the Standard feature workflow. Prototype code is never merged to the main branch as-is.
 
 ### Acceptance
 

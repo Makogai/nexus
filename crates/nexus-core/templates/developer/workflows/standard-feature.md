@@ -44,7 +44,7 @@ Work in small vertical steps: write or extend a test for one criterion, see it f
 
 ### Acceptance
 
-- Every acceptance criterion is covered by at least one automated test
+- Every acceptance criterion is covered by at least one automated test, or by a stated manual check where automation is impractical
 - Error paths and boundaries from the plan are tested
 - The diff contains only changes needed for the feature
 

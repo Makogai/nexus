@@ -13,8 +13,8 @@ updated: {{now}}
 source: import
 ---
 
-Rules for Flutter apps (Flutter 3, Dart 3): widgets, state, layout, accessibility and platform integration. Apply to
-Flutter code; they refine FE, A11Y and DART.
+Rules for Flutter apps (Flutter 3, Dart 3): widgets, state, layout, accessibility, platform integration and tests.
+Apply to Flutter code; they refine DART, which also covers analysis and formatting.
 
 ## Widgets
 
@@ -48,8 +48,9 @@ One deliberate approach to state is easier to reason about than several competin
 
 #### Use one state-management approach per app
 <!-- rule: id=FLT-5 enforcement=rule -->
-Choose one approach (e.g. Riverpod or Bloc), document it and use it consistently; do not mix libraries or fall back
-to global singletons. Use setState only for ephemeral UI state local to one widget.
+Follow the app's established approach; for a new app choose one (e.g. Riverpod, Bloc, or ChangeNotifier with
+provider), document it and use it consistently, without mixing libraries or falling back to global singletons. Use
+setState only for ephemeral UI state local to one widget.
 
 ## Layout and accessibility
 
@@ -60,11 +61,11 @@ Flutter apps run on phones, tablets, desktop and web, and must work with assisti
 Adapt layouts with LayoutBuilder and breakpoints from MediaQuery.sizeOf(context) instead of fixed sizes, respect safe
 areas, and check small screens and large text scaling, so the UI works across phones, tablets, desktop and web.
 
-#### Provide semantics for assistive technologies
+#### Provide semantics, tap targets and contrast
 <!-- rule: id=FLT-7 enforcement=rule -->
-Give icon buttons and meaningful images a tooltip or semanticLabel, wrap custom controls in Semantics with label,
-flags and actions, merge related nodes with MergeSemantics, and test with the screen reader on each target platform.
-Contrast and target sizes follow A11Y.
+Give icon buttons and meaningful images a tooltip or semanticLabel, wrap custom controls in Semantics with label and
+actions, keep tap targets at least 48x48 dp and text contrast at least 4.5:1, and check them in widget tests with
+meetsGuideline (androidTapTargetGuideline, textContrastGuideline) and with each platform's screen reader.
 
 ## Platform integration
 
@@ -76,17 +77,12 @@ Wrap platform channels and plugins in an app-owned Dart interface with a fake fo
 code with Pigeon instead of hand-written method-name strings, and handle MissingPluginException and unsupported
 platforms explicitly.
 
-## Quality
+## Testing
 
-Static analysis and widget tests are cheap and catch most Flutter regressions.
-
-#### Keep flutter analyze clean
-<!-- rule: id=FLT-9 enforcement=rule check=lint -->
-Run flutter analyze in CI with flutter_lints or a stricter set in analysis_options.yaml, failing on infos and warnings
-(--fatal-infos); fix findings instead of adding ignore comments.
+Widget tests are cheap and catch most Flutter regressions.
 
 #### Write widget and golden tests
-<!-- rule: id=FLT-10 enforcement=rule check=test -->
+<!-- rule: id=FLT-9 enforcement=rule check=test -->
 Test widgets with testWidgets and WidgetTester (pump, tap, enterText, finders by text, key or semantics label),
 protect key screens with golden tests (matchesGoldenFile) generated on one pinned platform, and cover critical flows
 with integration tests.

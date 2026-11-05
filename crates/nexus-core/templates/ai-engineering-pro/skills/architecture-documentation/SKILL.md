@@ -1,12 +1,17 @@
 ---
 name: architecture-documentation
-description: Writes or updates architecture docs from the code - context, modules, data flows, dependencies, ADRs - in Markdown with Mermaid, every claim traceable. Use when documenting system design.
+description: Writes or updates architecture docs and draft ADRs from the code, citing files and marking inferences. Use when asked to document or explain system design.
 ---
 
 # Architecture documentation
 
 Produce architecture documentation that a newcomer can read in about fifteen minutes and that is true: every
 statement traces to files in the repository, and everything inferred is marked as such.
+
+## Scale
+
+Updating one section or diagram: step 2, the part of steps 3-4 it covers, then steps 6-7. A new or rewritten
+architecture document: all steps.
 
 ## Ground rules
 
@@ -17,6 +22,7 @@ statement traces to files in the repository, and everything inferred is marked a
 - Never invent decision history. An ADR written after the fact records what the code shows and marks the
   rationale "unknown - please fill in" unless a source (commit message, issue, doc) states it.
 - Prefer updating existing docs over adding new files. Ask before introducing a new docs structure.
+- Existing docs and commit messages are evidence of intent and often stale; check them against the code.
 - Never copy secrets or connection strings into docs; name the configuration key instead.
 
 ## Procedure
@@ -41,9 +47,10 @@ statement traces to files in the repository, and everything inferred is marked a
 4. **Trace key flows.** Pick two to four: the main user journey, a write path, an asynchronous or background path,
    authentication. Trace each through the code with file:line hops; these become sequence diagrams.
 5. **Decisions.** List significant decisions visible in the code (framework, persistence model, sync vs async,
-   module boundaries, security model, deployment shape) and match them against existing ADRs. For a significant
-   undocumented decision, draft an ADR with status `Proposed` and the rationale marked unknown unless sourced. With
-   NEXUS, `record_memory` kind `decision` proposes it in the workspace - only with the person's agreement.
+   module boundaries, security model, deployment shape) and match them against existing ADRs. For a significant,
+   hard-to-reverse undocumented decision, offer an ADR draft in the project's ADR format (status `Proposed`, rationale
+   unknown unless sourced); list the rest. With NEXUS, `record_memory` kind `decision` proposes it in the workspace -
+   only with the person's agreement.
 6. **Write the document** using the template and diagram conventions in reference.md. Diagrams: `flowchart` with
    subgraphs for context, containers and modules; `sequenceDiagram` for flows; `erDiagram` only for core data. Keep
    each diagram to about fifteen nodes and split larger ones. Node labels use the real names from the code so they
@@ -53,10 +60,10 @@ statement traces to files in the repository, and everything inferred is marked a
    - Check that every cited path exists (`git ls-files <path>`).
    - Check Mermaid syntax by eye: balanced brackets, labels with special characters quoted, one statement per line.
      If a Mermaid renderer or CLI is already available, offer to render the diagrams.
-8. **Freshness stamp.** Start the document with "Last verified against commit <short sha> on <date>" and list what
-   would make it stale (a new deployable, a new external system, a changed module boundary).
-9. **Record.** With NEXUS: `checkpoint` kind `done` naming the documents written, and `update_task` if a task
-   drives the work.
+8. **Freshness stamp** (new or rewritten document). Start it with "Last verified against commit <short sha> on
+   <date>" and list what would make it stale (a new deployable, a new external system, a changed module boundary).
+9. **Record.** With NEXUS: `update_task` with a log line if a task drives the work, and for a full document a
+   `checkpoint` kind `done` naming the files written.
 
 ## Exit criteria
 

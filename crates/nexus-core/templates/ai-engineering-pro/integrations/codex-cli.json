@@ -33,8 +33,8 @@
       "platform": "linux",
       "method": "install script (macOS and Linux)",
       "steps": [
-        "Read https://chatgpt.com/codex/install.sh before running it.",
-        "Run `curl -fsSL https://chatgpt.com/codex/install.sh | sh`."
+        "Download the script without running it: `curl -fsSL https://chatgpt.com/codex/install.sh -o codex-install.sh`.",
+        "Read `codex-install.sh`, then run the file you read with `sh codex-install.sh` (piping the URL straight into `sh` runs whatever the server sends at that moment)."
       ],
       "changes": "Downloads and installs Codex for the current user as described in the script; Node.js is not needed."
     },
@@ -42,8 +42,8 @@
       "platform": "windows",
       "method": "PowerShell install script",
       "steps": [
-        "Read https://chatgpt.com/codex/install.ps1 before running it.",
-        "Run `powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"`."
+        "Download the script without running it: `irm https://chatgpt.com/codex/install.ps1 -OutFile codex-install.ps1`.",
+        "Read `codex-install.ps1`, then run the file you read with `powershell -ExecutionPolicy Bypass -File codex-install.ps1`."
       ],
       "changes": "Downloads and installs Codex for the current user as described in the script; Node.js is not needed."
     }
@@ -53,7 +53,8 @@
   "security": [
     "Do not use Codex on code that an employer or client has not approved for processing by OpenAI.",
     "NEXUS never reads, copies or forwards Codex's stored sign-in or configuration.",
-    "Read the install scripts before piping them to a shell, or use npm or Homebrew instead.",
+    "Prefer npm or Homebrew. If you use an install script, download it, read it and run the file you read; do not pipe it from the network into a shell.",
+    "Codex can edit files and run commands in the project. For a second-opinion review, ask it only to read and report, and check anything it changed before keeping it.",
     "Never paste API keys into prompts, task text or repository files; configure them the way the Codex documentation describes.",
     "Treat Codex's review as a second opinion: verify each finding against the code before acting on it."
   ],

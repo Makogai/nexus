@@ -12,72 +12,64 @@ updated: {{now}}
 source: import
 ---
 
-Structural rules for modules, services, contracts, resilience and observability. Apply them when designing a feature, adding a module, service, datastore or integration, or changing how components communicate.
+Structural rules for modules, services, data ownership, contracts, resilience and observability. Apply them when designing a feature, adding a module, service, datastore or integration, or changing how components communicate; ENG covers general compatibility and configuration.
 
 ## Boundaries and dependencies
 
 Clear boundaries keep the system understandable, testable and changeable in parts.
 
-#### Keep the domain independent of frameworks and I/O
+#### Keep business logic independent of frameworks and I/O
 <!-- rule: id=ARC-1 enforcement=rule -->
-Organise code into modules with explicit public interfaces and a one-way dependency direction: UI, transport and persistence depend on the domain, never the reverse. Domain code does not import web frameworks, ORMs, HTTP clients or file APIs, so it can be tested and reused without them.
+Dependencies point one way: UI, transport and persistence depend on the business logic, never the reverse. Where code carries real business rules, keep web frameworks, ORMs, HTTP clients and file APIs out of it so it can be tested without them; simple CRUD may use the framework directly.
 
-#### Define interfaces at every boundary
+#### Put external systems behind narrow interfaces where it pays
 <!-- rule: id=ARC-2 enforcement=rule -->
-Where a module talks to a database, external service, queue or another module, define a narrow interface (port) in the consumer's terms and implement it in an adapter. Callers depend on the interface, which keeps vendors replaceable and allows fakes in tests.
+Reach databases, external services and queues through a narrow interface in the consumer's terms, implemented by an adapter, when tests need a fake or the provider may change. Do not add an interface that has one implementation and no such need (ENG-3).
 
-#### Keep one source of truth per fact
+#### Give every piece of data exactly one owner
 <!-- rule: id=ARC-3 enforcement=rule -->
-Every piece of data has exactly one authoritative owner (a module, service or store); other copies are caches or projections derived from it and rebuildable. Document which component owns which data, and never let two components write the same fact independently.
-
-#### Avoid shared mutable state across components
-<!-- rule: id=ARC-4 enforcement=rule -->
-Components communicate through explicit calls, messages or events, not by reading and writing the same tables, global variables or files. A component's database schema is private to it; other components reach its data only through its interface.
+Each fact has one authoritative owner (module, service or store); other copies are rebuildable caches or projections. Other components read or change it only through the owner's interface or events, never by sharing its tables, files or global variables. Document which component owns which data.
 
 #### Start with a modular monolith
-<!-- rule: id=ARC-5 enforcement=guideline -->
-Begin with a single deployable unit with strictly enforced module boundaries. Extract a separate service only for a concrete need such as independent scaling, a different release cadence, fault isolation or team ownership, and accept the added network, consistency and operational cost explicitly.
+<!-- rule: id=ARC-4 enforcement=guideline -->
+Begin with a single deployable unit with enforced module boundaries. Extract a separate service only for a concrete need such as independent scaling, a different release cadence, fault isolation or team ownership, and accept the added network, consistency and operational cost explicitly.
 
 ## Resilience and contracts
 
 Distributed calls fail in partial and surprising ways, and contracts outlive their authors.
 
 #### Design for the failure of every dependency
-<!-- rule: id=ARC-6 enforcement=rule -->
-Assume every remote dependency can be slow, down or wrong. Retry only transient failures, with exponential backoff, jitter and a capped number of attempts; add circuit breaking or a fallback where an outage must not cascade; and define the degraded behaviour users see.
+<!-- rule: id=ARC-5 enforcement=rule -->
+Assume every remote dependency can be slow, down or wrong. Give each call a timeout (PERF-11), retry only transient failures with exponential backoff, jitter and capped attempts, add circuit breaking or a fallback where an outage must not cascade, and define the degraded behaviour users see.
 
 #### Make retried operations idempotent
-<!-- rule: id=ARC-7 enforcement=rule -->
+<!-- rule: id=ARC-6 enforcement=rule -->
 Any operation a client, queue or scheduler may repeat must have the same effect when repeated: use idempotency keys for creates and payments, upserts or conditional writes, and deduplicate messages by id. Assume at-least-once delivery for queues and webhooks.
 
-#### Evolve contracts compatibly and version breaking changes
-<!-- rule: id=ARC-8 enforcement=rule -->
-Change APIs, events and message schemas additively: new optional fields, tolerant readers that ignore unknown fields, no repurposed fields. For an unavoidable break, run a new version beside the old one, migrate consumers, then retire the old version on an announced date. Use contract tests to catch breaks.
+#### Keep contracts between independently deployed parts tolerant
+<!-- rule: id=ARC-7 enforcement=rule -->
+Beyond ENG-9, for APIs, events and messages between independently deployed parts: readers ignore unknown fields, fields are never repurposed, and a breaking version runs beside the old one until consumers have migrated and an announced retirement date has passed. Catch breaks with contract tests.
 
 ## Operability
 
-A system that cannot be configured safely or observed in production cannot be operated.
+A service that cannot be observed in production cannot be operated.
 
-#### Externalise configuration and secrets
-<!-- rule: id=ARC-9 enforcement=rule -->
-Build one artifact and promote it unchanged through all environments. Inject everything that varies (endpoints, limits, flags) at runtime through environment or configuration, and take secrets from a secret manager or the platform's secret store, never from the artifact or the repository.
-
-#### Build observability in from the start
-<!-- rule: id=ARC-10 enforcement=rule -->
-Emit structured logs (level, timestamp, message, context fields), metrics for rate, errors and duration of every endpoint and dependency, and distributed traces. Propagate a correlation or trace id (W3C Trace Context) across every call and include it in logs; prefer OpenTelemetry for instrumentation.
+#### Build observability into services
+<!-- rule: id=ARC-8 enforcement=rule -->
+Services emit structured logs (level, timestamp, message, context fields), metrics for rate, errors and duration of each endpoint and dependency, and traces. Propagate a trace id (W3C Trace Context) across calls and include it in logs; prefer OpenTelemetry for instrumentation.
 
 ## Decisions and evolution
 
 Architecture should change on purpose, in steps that can be undone.
 
-#### Decide architecture explicitly before implementing it
-<!-- rule: id=ARC-11 enforcement=rule -->
-Before introducing a new service, datastore, framework, integration style or cross-cutting pattern, write an ADR listing the options considered, their trade-offs and the decision, and have it reviewed. Do not let significant architecture emerge implicitly from a single pull request.
+#### Decide architecture with the person before implementing it
+<!-- rule: id=ARC-9 enforcement=rule -->
+Introduce a new service, datastore, framework, messaging or integration style, or cross-cutting pattern only after presenting the options and trade-offs and getting the person's decision, recorded as an ADR (DOC-4). Significant architecture must not emerge implicitly from a single change.
 
 #### Prefer reversible, incremental change over big-bang rewrites
-<!-- rule: id=ARC-12 enforcement=rule -->
-Restructure systems incrementally (strangler fig, branch by abstraction, parallel run, feature flags) so each step is deployable and can be rolled back. Give irreversible decisions such as data models, public contracts and vendor lock-in more scrutiny than reversible ones.
+<!-- rule: id=ARC-10 enforcement=rule -->
+Restructure incrementally (strangler fig, branch by abstraction, parallel run, feature flags) so each step is deployable and can be rolled back. Give irreversible decisions such as data models, public contracts and vendor lock-in more scrutiny than reversible ones.
 
 #### Protect architectural rules with automated fitness checks
-<!-- rule: id=ARC-13 enforcement=guideline -->
-Encode important architectural properties as checks that run in CI: dependency rules between modules (e.g. ArchUnit, dependency-cruiser, import-linter), API compatibility checks, performance budgets. When a check fails, fix the code or change the rule through an ADR, never silence it.
+<!-- rule: id=ARC-11 enforcement=guideline -->
+Encode important architectural properties as CI checks: dependency rules between modules (e.g. ArchUnit, dependency-cruiser, import-linter), API compatibility checks, performance budgets. When a check fails, fix the code or change the rule deliberately with the person's agreement; never silence it.

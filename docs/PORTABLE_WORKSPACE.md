@@ -89,7 +89,7 @@ ADR-0024), and document templates are compiled into NEXUS. Folders appear only w
 
 ## 5. Milestones
 
-Status after the stage: P0–P8 implemented and verified (ROADMAP, CURRENT_STATE).
+Status after the stage: P0–P8 implemented and verified, then P9 — a quality review of the template library and of the workspace Git ignore rules (`TEMPLATE_REVIEW.md`) — before the merge (ROADMAP, CURRENT_STATE).
 
 | # | Milestone | Verification |
 | --- | --- | --- |

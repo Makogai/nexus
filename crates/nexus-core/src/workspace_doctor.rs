@@ -275,6 +275,15 @@ pub fn run(conn: &Connection, data_dir: &Path, ws: &Workspace, opts: &Options<'_
             out.push(f("projects-unregistered", "projects", Status::Info, format!("{} repository(ies) in the clone folder are not registered", new.len())).detail(new).recommend("Review and register them in Projects — nothing in them is run.").go("projects"));
         }
     }
+    let unignored: Vec<String> = manifest.projects.iter().filter_map(|p| p.path.clone()).filter(|rel| !ignored(root, rel)).collect();
+    if !unignored.is_empty() {
+        out.push(
+            f("projects-ignored", "projects", Status::Warn, "project repositories inside the workspace are not ignored by Git")
+                .detail(unignored)
+                .recommend("Independent repositories must never be committed into the workspace repository.")
+                .repair("ignore-projects", "Add them to .gitignore"),
+        );
+    }
     if manifest.schema_version >= 2 {
         let without: Vec<String> = projects.iter().filter(|p| project::context::context_rel(root, &p.id).is_none()).map(|p| p.name.clone()).collect();
         if !without.is_empty() {
@@ -315,6 +324,21 @@ pub fn run(conn: &Connection, data_dir: &Path, ws: &Workspace, opts: &Options<'_
         out.push(f("sync", "sync", Status::Info, "the workspace repository has no remote").recommend("Add a private remote to restore the workspace on another computer.").go("sync"));
     }
     Ok(finish(ws, out))
+}
+
+/// Whether Git would ignore the project folder `rel`: `git check-ignore` in a repository, else the `.gitignore` lines.
+fn ignored(root: &Path, rel: &str) -> bool {
+    let rel = rel.trim_matches('/');
+    if crate::workspace_sync::own_repository(root) {
+        let mut cmd = crate::proc::command("git");
+        cmd.current_dir(root).args(["check-ignore", "-q", "--no-index", "--", &format!("{rel}/")]);
+        return crate::proc::run(cmd, std::time::Duration::from_secs(10)).map(|o| o.success()).unwrap_or(false);
+    }
+    let text = std::fs::read_to_string(root.join(".gitignore")).unwrap_or_default();
+    text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).any(|l| {
+        let l = l.trim_start_matches('/').trim_end_matches('/');
+        rel == l || rel.starts_with(&format!("{l}/"))
+    })
 }
 
 fn invalid_count(items: &[&index::Item]) -> usize {
@@ -437,6 +461,10 @@ pub fn repair_plan(conn: &Connection, _data_dir: &Path, ws: &Workspace, id: &str
             let m = workspace::read_manifest(root)?;
             plan("Create the clone folder", vec![format!("create {}/ (ignored by Git)", m.projects_dir())], vec![])
         }
+        "ignore-projects" => {
+            let m = workspace::read_manifest(root)?;
+            plan("Ignore project repositories inside the workspace", m.projects.iter().filter_map(|p| p.path.clone()).filter(|r| !ignored(root, r)).map(|r| format!("append .gitignore — /{}/", r.trim_matches('/'))).collect(), vec![])
+        }
         "rebuild-index" => plan("Rebuild the knowledge index", vec!["re-read every knowledge document into this machine's index".into()], vec!["No workspace file changes.".into()]),
         "clone-missing" => {
             let s = project::discovery::scan(conn, ws)?;
@@ -524,6 +552,16 @@ pub fn repair(conn: &Connection, data_dir: &Path, ws: &Workspace, id: &str) -> R
             let dir = root.join(m.projects_dir());
             std::fs::create_dir_all(&dir).map_err(|e| CoreError::io("cannot create", &dir, e))?;
             done(format!("created {}/", m.projects_dir()))
+        }
+        "ignore-projects" => {
+            let m = workspace::read_manifest(root)?;
+            let mut n = 0;
+            for rel in m.projects.iter().filter_map(|p| p.path.clone()).filter(|r| !ignored(root, r)) {
+                if workspace::ensure_ignored(root, &rel)? {
+                    n += 1;
+                }
+            }
+            done(format!("added {n} folder(s) to .gitignore"))
         }
         "rebuild-index" => {
             let r = knowledge::service::rebuild(conn, data_dir, ws)?;

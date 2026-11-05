@@ -492,3 +492,58 @@ fn trusted_sync_never_forces_respects_managed_policy_and_survives_offline() {
     assert!(history::list(&c.conn, &c.ws.id, 10).unwrap().iter().any(|h| h.op == "auto-sync" && h.status == "failed"));
 }
 
+/// The generated workspace layout, and independent project repositories never entering the workspace repository: clone
+/// folders are ignored, a project registered inside the workspace is added to `.gitignore`, and any other nested
+/// repository is blocked by the commit inspection (it would otherwise be committed as a gitlink).
+#[test]
+fn generated_layout_and_independent_repositories_never_enter_the_workspace_repository() {
+    let (a, _url, _t) = origin();
+    crate::templates::apply(&a.conn, &a.data, &a.ws, "ai-engineering-pro").unwrap();
+    let mut top: Vec<String> = std::fs::read_dir(a.root()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n != ".git").collect();
+    top.sort();
+    assert_eq!(top, [".gitignore", "README.md", "constitutions", "integrations", "nexus-workspace.json", "nexus.lock.json", "projects", "skills", "workflows"]);
+    fn empty_dirs(dir: &Path, out: &mut Vec<PathBuf>) {
+        let entries: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().collect();
+        if entries.is_empty() {
+            out.push(dir.to_path_buf());
+        }
+        for e in entries {
+            if e.file_type().unwrap().is_dir() && e.file_name() != ".git" {
+                empty_dirs(&e.path(), out);
+            }
+        }
+    }
+    let mut empty = Vec::new();
+    empty_dirs(a.root(), &mut empty);
+    assert_eq!(empty, [a.root().join("projects")], "no empty folders besides the clone folder");
+    let gi = std::fs::read_to_string(a.root().join(".gitignore")).unwrap();
+    for line in ["projects/", "repos/", ".nexus-local/", "*.db", ".env", ".env.*"] {
+        assert!(gi.lines().any(|l| l == line), "{line} in {gi}");
+    }
+
+    for d in ["projects/app", "repos/old", "code/inside", "stray"] {
+        let dir = a.root().join(d);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        std::fs::write(dir.join("main.rs"), "fn main() {}\n").unwrap();
+    }
+    crate::project::register(&a.conn, &a.ws.id, a.root().join("code").join("inside").to_str().unwrap(), None).unwrap();
+    assert!(std::fs::read_to_string(a.root().join(".gitignore")).unwrap().lines().any(|l| l == "/code/inside/"), "a project inside the workspace is ignored");
+    let changed: Vec<String> = git::changed_paths(a.root()).unwrap().into_iter().map(|(_, p)| p).collect();
+    assert!(!changed.iter().any(|p| p.starts_with("projects/") || p.starts_with("repos/") || p.starts_with("code/")), "{changed:?}");
+    assert!(changed.iter().any(|p| p.trim_end_matches('/') == "stray"), "{changed:?}");
+    let r = ops::review_commit(&a.sync(), None).unwrap();
+    assert!(r.inspection.blocked, "a nested repository blocks the commit");
+    assert!(r.inspection.findings.iter().any(|f| f.path.trim_end_matches('/') == "stray" && f.kind == "submodule"), "{:?}", r.inspection.findings);
+
+    // The Doctor notices a project folder that lost its ignore line and puts it back on request.
+    let gi = std::fs::read_to_string(a.root().join(".gitignore")).unwrap();
+    std::fs::write(a.root().join(".gitignore"), gi.replace("/code/inside/\n", "")).unwrap();
+    let home = a.home.clone();
+    let report = crate::workspace_doctor::run(&a.conn, &a.data, &a.ws, &crate::workspace_doctor::Options { home: &home, probe_tools: false }).unwrap();
+    let f = report.findings.iter().find(|f| f.check == "projects-ignored").expect("reported");
+    assert_eq!(f.detail, ["code/inside"]);
+    crate::workspace_doctor::repair(&a.conn, &a.data, &a.ws, "ignore-projects").unwrap();
+    assert!(!git::changed_paths(a.root()).unwrap().iter().any(|(_, p)| p.starts_with("code/")));
+}
+

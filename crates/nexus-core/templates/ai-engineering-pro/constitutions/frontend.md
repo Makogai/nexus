@@ -13,25 +13,25 @@ updated: {{now}}
 source: import
 ---
 
-Rules for browser user interfaces: component design, state, data fetching, forms, rendering safety, styling and
-frontend tests. Apply to any frontend work; the framework documents (NG, VUE, REACT) refine them and A11Y covers
-accessibility.
+Rules for browser user interfaces: components, state, data fetching, forms, rendering safety, styling, localisation
+and component tests. Apply to any web frontend work; NG, VUE and REACT refine them, A11Y covers accessibility and
+PERF the budgets and bundle size.
 
 ## Components
 
-Small, single-purpose components keep the UI predictable, reusable and testable in isolation.
+Components that only render what they are given stay predictable, reusable and testable in isolation.
 
-#### Keep components small and split presentation from state
+#### Keep reusable components free of data access
 <!-- rule: id=FE-1 enforcement=rule -->
-Give each component one responsibility and split it when it mixes unrelated concerns. Keep presentational components
-free of data access (inputs in, events out) and let container components own state and side effects, so most of the
-UI is reusable and easy to test.
+Keep reusable UI components free of data fetching, global stores and routing (data in through props or inputs,
+changes out through events) and let route-level or feature components own state and side effects, so most of the UI
+renders and tests in isolation.
 
 #### Do not manipulate the DOM outside framework escape hatches
 <!-- rule: id=FE-2 enforcement=rule -->
 Change the UI through state and bindings, not querySelector, manual class toggling or appendChild. Use the framework's
-escape hatch (template refs, ElementRef, useRef) only for focus, measurement or third-party widgets, and remove
-listeners and instances on unmount.
+escape hatch (template refs, ElementRef, useRef) only for focus, measurement or third-party widgets, and tear down
+what you create there on unmount.
 
 ## State and data
 
@@ -45,21 +45,20 @@ a store.
 
 #### Manage server state with a caching data layer
 <!-- rule: id=FE-4 enforcement=rule -->
-Fetch remote data through a layer that caches, deduplicates, revalidates and exposes loading and error state (e.g.
-TanStack Query, SWR, framework data loaders) instead of ad-hoc fetch calls in components. After a mutation, invalidate
-the affected queries rather than patching copies by hand.
+Fetch remote data through the project's caching data layer (e.g. TanStack Query, SWR, framework loaders or resources)
+that deduplicates, revalidates and exposes loading and error state, not through ad-hoc fetch calls in components.
+After a mutation, invalidate the affected queries rather than patching copies by hand.
 
 #### Call the backend only through a typed API client
 <!-- rule: id=FE-5 enforcement=rule -->
-Route all HTTP calls through one typed client module, ideally generated from the OpenAPI or GraphQL schema, that owns
-base URL, auth headers, timeouts and error mapping. Components never build URLs or parse raw responses, so API changes
-fail at compile time.
+Route all HTTP calls through one typed client module, generated from the OpenAPI or GraphQL schema where one exists,
+that owns base URL, auth headers, timeouts and error mapping. Components never build URLs or parse raw responses, so
+API changes fail at compile time.
 
 #### Render loading, empty and error states explicitly
 <!-- rule: id=FE-6 enforcement=rule -->
 Every data-driven view shows a distinct loading state, an empty state with a next action and an error state with a
-retry; never a blank screen or endless spinner. Model the request as one discriminated value (idle, loading, success,
-error) rather than separate booleans.
+retry; never a blank screen or an endless spinner. Keep previously loaded data visible while refetching.
 
 ## Forms
 
@@ -67,52 +66,48 @@ Forms are where users and untrusted input meet the application.
 
 #### Validate on the client for UX and on the server for truth
 <!-- rule: id=FE-7 enforcement=rule -->
-Validate input in the browser for immediate feedback, ideally from a schema shared with the backend, but treat server
-validation as authoritative and map its field errors back onto the form. Client-side checks never provide security or
+Validate input in the browser for immediate feedback, ideally with a schema shared with the backend, but treat server
+validation as authoritative and show its field errors on the form. Client-side checks never provide security or
 integrity.
 
 ## Rendering safety
 
-Injecting markup is the most common way untrusted data becomes script execution in the browser.
+Injected markup and URLs are the most common way untrusted data becomes script execution in the browser.
 
-#### Never render untrusted HTML without sanitising it
+#### Never render untrusted HTML or URLs without sanitising them
 <!-- rule: id=FE-8 enforcement=mandatory -->
-Never pass user- or API-supplied HTML to innerHTML, v-html, [innerHTML], dangerouslySetInnerHTML or {@html} unless it
-was sanitised by a maintained sanitiser such as DOMPurify configured for that context. Prefer rendering text or
-structured content so no raw HTML is needed.
+Never pass user- or API-supplied HTML to innerHTML, v-html, dangerouslySetInnerHTML, {@html} or Angular's
+bypassSecurityTrust* unless a maintained sanitiser such as DOMPurify cleaned it, and allow only http(s), mailto or
+relative URLs from such data in href and src. Prefer rendering text or structured content.
 
-## Delivery and styling
-
-What ships to the browser decides load time, consistency and how easily the UI can change.
-
-#### Lazy-load routes and heavy features
+#### Never put secrets in client code
 <!-- rule: id=FE-9 enforcement=rule -->
-Split code at route level and load heavy, rarely used features (rich editors, charts, maps) on demand, so the initial
-bundle carries only what the first screen needs. Check the bundle analyser when you add a dependency.
+Everything shipped to the browser is public, including build-time variables such as VITE_*, NEXT_PUBLIC_* and
+Angular environment files. Never put API secrets, private keys or privileged tokens there; call a backend that holds
+them (SEC-1).
+
+## Styling and localisation
+
+Consistent styling and translatable text keep the UI changeable in one place.
 
 #### Style through design tokens and one styling approach
 <!-- rule: id=FE-10 enforcement=rule -->
-Use one styling approach per app (e.g. CSS modules, scoped styles or utility classes) and take colours, spacing,
-typography and radii from design tokens exposed as CSS custom properties, never literal values, so theming and dark
+Follow the app's one styling approach (e.g. CSS modules, scoped styles or utility classes) and take colours, spacing,
+typography and radii from its design tokens or CSS custom properties instead of literal values, so theming and dark
 mode change in one place.
 
-#### Keep user-facing strings ready for translation
+#### Keep user-facing text translatable and locale-aware
 <!-- rule: id=FE-11 enforcement=rule -->
-Route all visible text, including aria labels and error messages, through the i18n layer with message keys and ICU
-plurals. Never concatenate translated fragments, and format dates, numbers and currencies with the Intl APIs for the
-user's locale.
-
-#### Stay within the performance budgets
-<!-- rule: id=FE-12 enforcement=guideline -->
-Check every change that adds dependencies, images, fonts or client-side rendering against the budgets defined in PERF,
-measured on a production build rather than the dev server; do not restate or loosen the numbers here.
+In apps that are or will be localised, route all visible text, including aria labels and error messages, through the
+i18n layer with message keys and ICU plurals, and never concatenate translated fragments. Always format dates,
+numbers and currencies with Intl for the user's locale.
 
 ## Testing
 
 UI tests are valuable only when they exercise the UI the way a person uses it.
 
 #### Test components through user interactions
-<!-- rule: id=FE-13 enforcement=rule check=test -->
-Cover components with tests that render them, interact as a user would (click, type, keyboard) and assert visible
-output and emitted events, querying by role and accessible name rather than CSS classes. Cover critical journeys end
-to end with a browser runner such as Playwright.
+<!-- rule: id=FE-12 enforcement=rule check=test -->
+Test components by rendering them, interacting as a user would (click, type, keyboard) and asserting visible output
+and emitted events, querying by role and accessible name rather than CSS classes. End-to-end coverage of critical
+journeys follows TST.

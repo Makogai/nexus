@@ -1,7 +1,8 @@
 # Code review checklist
 
 Work through the passes that matter for the change; not every item applies to every diff. A "yes" to a question
-marked (B) is usually blocking.
+marked (B) is usually blocking. The rules themselves live in the on-demand constitutions (CQ-*, TST-*, SEC-*, ENG-*,
+DOC-* and the stack documents); this list holds the questions to ask of a diff.
 
 ## 1. Intent and scope
 
@@ -41,25 +42,22 @@ marked (B) is usually blocking.
 ## 4. Tests
 
 - (B) Changed behaviour in risky code (money, auth, data writes, migrations, concurrency) without tests.
-- Do the tests assert outcomes (returned values, persisted state, responses, events) rather than implementation
-  details (private calls, internal state)?
 - Would the tests fail if the new code were wrong? Look for assertions that cannot fail, over-mocking that tests
   the mock, and snapshot updates accepted without review.
 - Failure paths and edge cases covered, not only the happy path.
-- Deterministic: no real clock, randomness, network or ordering dependence; no fixed sleeps.
-- Test names describe behaviour; setup uses existing fixtures and builders.
+- Do the tests follow TST-*: outcomes rather than implementation details, deterministic, isolated, named after the
+  behaviour?
 
 ## 5. Design and readability
 
-- Names say what things are and do; no misleading names or abbreviations the codebase does not use.
-- Functions do one thing at one level of abstraction; deep nesting flattened with early returns where clearer.
+- Could a newcomer follow it without running it? Check names, function size, nesting and comments against CQ-* and
+  ENG-*; report misleading names and stale comments, not taste.
 - Responsibilities sit in the right layer and module; dependency direction follows the project's architecture
   (no domain code importing UI or framework internals, no cycles).
 - Duplication: is there an existing helper, type or pattern this should reuse?
-- Abstraction is justified by current needs, not speculative ones.
-- Comments explain why, not what; no commented-out code, no stale comments.
+- Is each new abstraction justified by a current need, not a speculative one?
 - Types encode invariants where the language allows (enums or sealed types instead of strings and flags).
-- Consistent with surrounding code; style issues that a formatter or linter would fix are not review findings.
+- Style issues that a formatter or linter would fix are not review findings.
 
 ## 6. Performance
 
@@ -89,9 +87,9 @@ marked (B) is usually blocking.
 
 ## 9. Documentation
 
-- README, user docs, API reference, changelog and configuration examples updated for user-visible changes.
-- Significant design decisions recorded (ADR) or proposed.
-- Public functions and types documented where the project documents them.
+- Docs that the change makes wrong are updated in the same change (DOC-* says which: README, API reference,
+  changelog, configuration).
+- Significant or hard-to-reverse design decisions recorded (ADR) or proposed.
 
 ## Writing findings
 

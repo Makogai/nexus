@@ -165,6 +165,10 @@ pub fn register(conn: &Connection, workspace_id: &str, raw: &str, name: Option<&
     )?;
     // Manifest first, commit second: if the manifest cannot be written nothing is registered.
     workspace::write_manifest(&ws.root_path, &manifest)?;
+    // A repository inside the workspace (outside the clone folder) must never end up in the workspace's Git repository.
+    if let Some(rel) = manifest.projects.last().and_then(|p| p.path.clone()) {
+        workspace::ensure_ignored(&ws.root_path, &rel)?;
+    }
     tx.commit()?;
     get(conn, &id)
 }

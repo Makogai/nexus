@@ -97,7 +97,9 @@ Check the crate's `rust-version` against the project's MSRV before planning an u
 | None or unknown | missing licence field, custom text | No rights granted by default; needs clarification |
 
 Distribution model matters: a dependency used only in a build tool or test suite has different obligations from
-one shipped in a binary, bundle or container image. Flag; do not conclude.
+one shipped in a binary, bundle or container image. Typical flags: strong copyleft in proprietary or distributed
+software, AGPL in a network service, LGPL with static linking, missing or custom licences, and a licence change
+between the current and the target version. Flag; do not conclude.
 
 ## Upgrade risk checklist
 

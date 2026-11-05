@@ -1038,6 +1038,10 @@ pub fn delivery(e: &Effective, budget: usize, tools: bool, level: crate::context
                 None => groups.push((r.doc_title.as_str(), vec![r])),
             }
         }
+        // When the budget cuts the listing, keep what matters most: documents with mandatory policies first, then
+        // the ones most specific to this work (task, project, stack) before workspace-wide ones.
+        let scope_of = |r: &EffectiveRule| e.documents.iter().find(|x| x.id == r.doc_id).map(|x| x.scope);
+        groups.sort_by_key(|(_, rs)| (!rs.iter().any(|r| r.enforcement == Enforcement::Mandatory), std::cmp::Reverse(scope_of(rs[0]))));
         const MAX_GROUPS: usize = 40;
         let mut example: Option<String> = None;
         let parts: Vec<String> = groups
@@ -1060,7 +1064,10 @@ pub fn delivery(e: &Effective, budget: usize, tools: bool, level: crate::context
             })
             .collect();
         let intro = if tools {
-            format!("\nOn demand — read the relevant ones with get_constitution (e.g. ids [\"{}\"]): ", example.unwrap_or_else(|| d.on_demand[0].clone()))
+            format!(
+                "\nOn demand — before work in one of these areas, read its rules with get_constitution (e.g. ids [\"{}\"]): ",
+                example.unwrap_or_else(|| d.on_demand[0].clone())
+            )
         } else {
             "\nAlso in force — ask the user for the text: ".to_string()
         };

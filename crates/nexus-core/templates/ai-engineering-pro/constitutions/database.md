@@ -13,8 +13,8 @@ updated: {{now}}
 source: import
 ---
 
-Rules for relational schema design, migrations, queries, transactions, backups and personal data. Apply when you
-change a schema, write a migration or data-access code, or touch backups and stored personal data.
+Rules for relational schema design, migrations, indexes, transactions, connections, personal data and backups. Apply
+when you change a schema, write a migration or data-access code, or touch backups; SQL covers writing the SQL itself.
 
 ## Migrations
 
@@ -23,8 +23,8 @@ Schema changes are the riskiest part of a deploy: they run against live data and
 #### Version every schema change as a reviewed migration
 <!-- rule: id=DB-1 enforcement=rule -->
 Make every schema and reference-data change a versioned migration in the repository, applied by the migration tool in
-every environment. Never alter a shared database by hand; review migrations like code, because they run against
-production data.
+each environment. Never change a shared database by hand, and never run migrations or data fixes against a shared
+environment from a session unless the person explicitly asks.
 
 #### Keep applied migrations immutable and forward-only
 <!-- rule: id=DB-2 enforcement=rule -->
@@ -33,15 +33,15 @@ migration. Rewriting history makes environments diverge silently and breaks the 
 
 #### Never run a destructive migration without backup and rollback plan
 <!-- rule: id=DB-3 enforcement=mandatory -->
-Before any DROP, TRUNCATE, column removal, type narrowing or other irreversible data change, confirm a verified,
-restorable backup of the affected data and a written rollback plan. If either is missing, stop and ask; never run it
-as a quick fix.
+Before any DROP, TRUNCATE, column removal, type narrowing or other irreversible data change on a shared or production
+database, confirm a verified, restorable backup of the affected data and a written rollback plan. If either is
+missing, stop and ask; never run it as a quick fix.
 
 #### Change schemas with expand/contract for zero downtime
 <!-- rule: id=DB-4 enforcement=rule -->
-Add the new column or table first (expand), deploy code that writes both and reads the new one, backfill in batches,
-then remove the old structure in a later release (contract). Every intermediate state must work with both the old and
-the new application version.
+When old and new application versions run side by side during a deploy, add the new structure first (expand), deploy
+code that writes both and reads the new one, backfill in batches, then remove the old structure in a later release
+(contract). Every intermediate state must work with both versions.
 
 ## Schema and integrity
 
@@ -52,10 +52,11 @@ The database is the last line of defence for correct data; constraints hold even
 Declare NOT NULL, primary keys, foreign keys, UNIQUE and CHECK constraints for every invariant the data must satisfy
 instead of relying on application validation alone; constraints also catch concurrent writes, bugs and other clients.
 
-#### Store timestamps in UTC
+#### Store timestamps in UTC with time-zone-aware types
 <!-- rule: id=DB-6 enforcement=rule -->
-Store instants in UTC, using a time-zone-aware type where the database has one, and convert to local time only for
-display. Keep a separate IANA time-zone column when the user's local wall-clock time matters, e.g. for scheduling.
+Store instants in UTC in a time-zone-aware type (timestamptz in PostgreSQL, datetimeoffset in SQL Server; in MySQL a
+DATETIME holding UTC), never as strings, and convert to local time only for display. Keep a separate IANA time-zone
+column when local wall-clock time matters, e.g. for scheduling.
 
 #### Store money as exact decimals or integer minor units
 <!-- rule: id=DB-7 enforcement=rule -->
@@ -63,44 +64,28 @@ Store amounts as DECIMAL/NUMERIC with a fixed scale or as integer minor units (c
 currency code. Never use FLOAT, REAL or DOUBLE for money: binary floating point cannot represent most decimal
 fractions and rounding errors accumulate.
 
-## Queries and performance
+## Indexes
 
-Most database incidents are slow queries and lock contention that only appear at production data volumes.
+Most database incidents are slow queries and lock contention that appear only at production data volumes.
 
-#### Design indexes from query patterns and verify them with EXPLAIN
+#### Design indexes from real query patterns
 <!-- rule: id=DB-8 enforcement=rule -->
-Index the predicates, joins and sorts the application actually runs, ordering composite columns equality-first, then
-range. Confirm with EXPLAIN on representative data that the plan uses the index, and drop unused indexes, since every
-index slows writes.
-
-#### Never SELECT * in application queries
-<!-- rule: id=DB-9 enforcement=rule -->
-List the columns each query needs. `SELECT *` transfers unneeded data, prevents index-only scans and silently changes
-the result shape when columns are added, which breaks mappers and leaks new sensitive columns.
-
-#### Avoid N+1 queries
-<!-- rule: id=DB-10 enforcement=rule -->
-Load related rows with a join, a batched IN/ANY query or the ORM's eager loading instead of one query per parent row.
-Check query counts for list endpoints in tests or logs; N+1 patterns stay invisible with small test data.
-
-#### Paginate large result sets with keyset pagination
-<!-- rule: id=DB-11 enforcement=rule -->
-For large or growing tables page with a keyset (`WHERE (created_at, id) > (:last_ts, :last_id) ORDER BY created_at,
-id LIMIT :n`) instead of OFFSET, which reads and discards every skipped row and shifts under concurrent inserts.
-Always bound the page size.
+Index the predicates, joins and sorts the application actually runs, composite columns equality-first then range,
+and every foreign key used in joins or cascading deletes (PostgreSQL does not index them automatically). Check plans
+with EXPLAIN as SQL describes, and drop unused indexes: each one slows writes.
 
 ## Transactions and connections
 
 Correctness under concurrency and stability under load depend on how transactions and connections are used.
 
 #### Use short explicit transactions and know the isolation level
-<!-- rule: id=DB-12 enforcement=rule -->
-Wrap each multi-statement unit of work in one short explicit transaction and never hold it across network calls or
-user input. Know the default isolation level (often READ COMMITTED) and prevent lost updates with row locks, version
-columns or SERIALIZABLE with retries.
+<!-- rule: id=DB-9 enforcement=rule -->
+Wrap each multi-statement unit of work in one short explicit transaction and never hold it open across network calls
+or user input. Know the database's default isolation level (often READ COMMITTED) and prevent lost updates with row
+locks, version columns or SERIALIZABLE with retries.
 
 #### Pool connections and set statement timeouts
-<!-- rule: id=DB-13 enforcement=rule -->
+<!-- rule: id=DB-10 enforcement=rule -->
 Connect through a bounded pool sized against the database's connection limit across all instances, and set statement
 and lock timeouts (e.g. PostgreSQL statement_timeout and lock_timeout) so one runaway query cannot exhaust connections
 or block a table.
@@ -110,12 +95,12 @@ or block a table.
 Stored personal data is a liability, and a backup is worth only what its last successful restore proves.
 
 #### Minimise and protect personal data
-<!-- rule: id=DB-14 enforcement=rule -->
+<!-- rule: id=DB-11 enforcement=rule -->
 Store only the personal data a feature needs, mark those columns, encrypt sensitive ones at rest where the threat model
 requires it and restrict access by role. Implement the retention period with deletion or anonymisation, and never copy
-production personal data into dev or test databases.
+production personal data into development databases.
 
 #### Test backup restores on a schedule
-<!-- rule: id=DB-15 enforcement=rule -->
+<!-- rule: id=DB-12 enforcement=rule -->
 Treat a backup as valid only after a restore succeeded: restore regularly into an isolated environment, run integrity
 and row-count checks, and record the achieved recovery time and recovery point against the agreed RTO and RPO.

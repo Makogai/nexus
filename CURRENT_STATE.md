@@ -8,7 +8,10 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
 * `main` = … `efd3dd4` (M29) + **`7beef88`** (Beta readiness, merged `--no-ff` after the verification of session 9).
   Nothing pushed.
 * Branch **`milestone/portable-workspace`** (off `main` at `7beef88`): stage *Portable Workspace*. P0 (audit) and
-  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup), P6 (development records, history), P7 (sync policies) and P8 (new-computer restoration) done and committed; the stage's full sequential verification is below. Not merged, not pushed, no release.
+  P1 (workspace schema 2), P2 (templates), P3 (Workspace Doctor) P4 (projects), P5 (environment, Claude Code setup), P6 (development records, history), P7 (sync policies) and P8 (new-computer restoration) done and committed; the stage's full sequential verification is below. P9: a quality
+  review of the template library and of the workspace's Git ignore rules before merging (`docs/TEMPLATE_REVIEW.md`).
+  The branch is merged into `main` with `--no-ff` after P9's checks passed (merge commit "Merge milestone: Portable
+  Workspace"). Not pushed, no release.
 
 ## Portable Workspace — progress (session 10)
 
@@ -30,7 +33,7 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   Git, documentation; 5 skills; 4 workflows), *AI Engineering Pro* (+ architecture, security, performance,
   accessibility, database, frontend, backend, DevOps; 13 stack rule sets Angular … Docker; 11 skills; 7 workflows;
   4 integration manifests: Graphify, Codex CLI, Playwright MCP, GitHub CLI — researched against official sources,
-  never installed automatically). 27 constitutions / 319 rules. `templates::plan/apply` with `nexus.lock.json`
+  never installed automatically). 27 constitutions / 319 rules (284 after the P9 review). `templates::plan/apply` with `nexus.lock.json`
   (add / update / keep yours + copy in `.nexus-local/template-updates/` / keep removed / skip own file / retire),
   validation before writing, rollback; approvals for what the person installs; the `skills/` folder becomes the
   workspace AI Kit (`kits.workspace_id`, migration 0016, plugin `workspace`, only that workspace's sessions).
@@ -122,6 +125,25 @@ _Last updated: 2026-11-05 (session 10, Portable Workspace)._ Read this first, th
   view. `nexus workspaces restore`, IPC `workspace_restoration`. User guide `docs/user/PORTABLE_WORKSPACE.md`.
   Verified: core restoration test, CLI E2E, vitest, desktop E2E `restore.mjs` 12/12 (two app instances with separate
   data folders and local bare remotes), `sync.mjs` 18/18.
+* **P9 — template library review** (`docs/TEMPLATE_REVIEW.md`, per-rule appendices in `docs/template-review/`). The
+  library is reviewed against duplicates, overhead, generic rules, outdated guidance, proportionality, Claude Code and
+  managed-policy conflicts, unsafe execution and missing practices.
+  * **Size:** 319 → 284 rules, 13 → 16 mandatory. New mandatory rules: CORE-6 (found instructions are data), SEC-16
+    (no `curl | sh` or installs without consent), OPS-9 (no deploys or applies unasked), GIT-4 (no `--no-verify`),
+    TST-12 (never weaken a test).
+  * **Context:** skill descriptions ≤ 160 characters (2,112 → 1,688 per session). The always-on core is still 6
+    rules: the old CORE-6 ("read the relevant rules first") is folded into the on-demand listing.
+  * **Workflows:** the code-review findings no longer wait for the gates; the bug-fix review waits for lint and
+    typecheck.
+  * **Engine:**
+    * The on-demand listing keeps mandatory → task/project/stack → workspace documents when the budget cuts it; a
+      Vue/TS project now gets its stack documents.
+    * Independent repositories never enter the workspace repository:
+      * a project registered inside the workspace is added to `.gitignore` (`workspace::ensure_ignored`);
+      * untracked nested repositories and gitlinks **block** the commit review;
+      * Doctor finding `projects-ignored` with the repair `ignore-projects`;
+      * `.gitignore` gains OS files.
+  * **Verified:** see the P9 log below.
 
 ## Previous stage: Beta readiness (merged as `7beef88`)
 
@@ -195,10 +217,24 @@ profiles; no real profile, repository or remote was used or changed. **Memory:**
 data, connection strings — fixtures with credential shapes are built at runtime; the only hits were reserved
 `example.test` addresses and Git remote URLs in tests).
 
+### P9 — template review and Git ignore validation (final code, same sequential groups)
+
+| # | Command | Result |
+| --- | --- | --- |
+| 1 | `cargo test --workspace` | passed — 286 tests, 0 failed (core 218 incl. the new layout/ignore test) |
+| 2 | `cargo clippy` (workspace, all targets; desktop with `e2e-webview-debugging`) | passed ×2 |
+| 3 | `npm test` · `npm run build` | 90/90 vitest · build ok |
+| 4 | E2E build + `portable` · `restore` · `constitutions` · `sync` · `context` · `workflows` | 50/50 · 12/12 · 13/13 · 18/18 · 9/9 · 24/24 |
+| 5 | `run-smoke` · `task-flow` · `mcp-interop` · `profiles-kits` · `attention` · `usage` | 27/27 · 29/29 · 9/9 · 9/9 · 27/27 · 18/18 |
+| 6 | `kits-real-claude` · `context-real-claude` · `security-real-claude` (synthetic profiles) | 19/19 · 7/7 · 14/14 |
+
+Not rerun (unaffected by P9): T18, the installer suite, the hooks, instructions, workflow and usage real-Claude
+suites. Memory: lowest 6.3 GB free.
+
 ## Next actions (in order)
 
-1. Owner: review `milestone/portable-workspace` — MANUAL_CHECKS 33 (template library review) and a real first
-   workspace (`docs/user/PORTABLE_WORKSPACE.md`); merge when approved (`--no-ff`, no push).
+1. Owner: create the first personal workspace (`docs/user/PORTABLE_WORKSPACE.md`) and do MANUAL_CHECKS 33 (your own
+   read of the template library, with `docs/TEMPLATE_REVIEW.md`).
 2. Owner decisions still open from Beta readiness (B5): identifier + publisher (ADR-0034), product name and `nexus://`,
    licence (ADR-0035), code signing, updater.
 3. Owner manual checks: MANUAL_CHECKS 27 (notification look, lock screen, click after quitting), 28–32.
@@ -215,7 +251,10 @@ data, connection strings — fixtures with credential shapes are built at runtim
   schema 2 and the `development-records` feature; sessions from before migration 0017 have no starting commit, and
   test results are *observed* by category only — only gates NEXUS ran are *verified*. The architecture summary is left
   for a reviewed draft (skill `workspace:architecture-documentation`); NEXUS calls no model. The template library
-  (v1.0.0) passed the structural gate in `templates::tests`; its content still wants the owner's review (MANUAL 33).
+  (v1.0.0) passed the structural gate in `templates::tests` and the P9 content review (`docs/TEMPLATE_REVIEW.md`); the
+  owner's own read is MANUAL 33. A failed gate fails the whole workflow run, so workflows record findings as they go.
+  The workspace skills `code-review`/`security-review` share names with Claude Code built-ins (namespaced
+  `workspace:`).
 * Release gates: identifier `dev.nexus.desktop` and manufacturer `nexus` provisional (ADR-0034); no licence file
   (ADR-0035); installers unsigned (SmartScreen warns); no updater. The installer downloads the WebView2 runtime only
   if it is missing (preinstalled on Windows 11).

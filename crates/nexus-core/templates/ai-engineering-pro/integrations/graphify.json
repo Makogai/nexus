@@ -46,10 +46,10 @@
       "method": "optional project hooks (review first)",
       "steps": [
         "Read what the hooks do before enabling them.",
-        "`graphify claude install` in a project adds Claude Code hooks that fire before Glob and Grep tool calls.",
+        "`graphify claude install` in a project sets up always-on graph guidance for Claude Code, including hooks that run before Claude's search and file-read tool calls (Grep, Glob, Read); in graphify's strict mode they can deny some of those calls.",
         "`graphify hook install` adds Git hooks that rebuild the graph on commit and checkout."
       ],
-      "changes": "Adds Claude Code hooks to the project (`graphify claude install`) and Git hooks to the repository (`graphify hook install`)."
+      "changes": "Adds Claude Code configuration and hooks to the project (`graphify claude install`) and Git hooks to the repository (`graphify hook install`). Inspect the changed files with `git status` and `git diff` before committing them."
     }
   ],
   "nexusDelivery": "Prefer the project-scoped install (`graphify install --project`) that the person reviews and commits to the project repository, or package the skill as a NEXUS AI Kit and enable it per profile so it reaches sessions through a session-scoped plugin directory. NEXUS never runs `graphify install` itself and never registers the skill in a Claude configuration directory.",
@@ -57,7 +57,8 @@
   "security": [
     "Install only the PyPI package `graphifyy` and check the project at https://github.com/safishamsi/graphify; similarly named packages, forks and mirrors are unaffiliated.",
     "Do not run `graphify install` without `--project`: it registers the skill in the person's assistant profile, which changes their Claude configuration outside NEXUS profile isolation.",
-    "Review `graphify claude install` before enabling it: its hooks run before every Glob and Grep call Claude makes in the project.",
+    "Review `graphify claude install` before enabling it: its hooks run before Claude's search and file-read calls in the project and, in strict mode, can deny some of them.",
+    "If organisation-managed Claude Code settings restrict hooks, skills or plugins, they win; do not work around them.",
     "Review the Git hooks added by `graphify hook install` like any other hook; they run on every commit and checkout.",
     "For employer or client code whose docs must not leave the machine, set `GRAPHIFY_BACKEND=ollama` or use code-only mode (`GRAPHIFY_BACKEND=none` or `--code-only`) before graphing docs, PDFs or images.",
     "The query log records the questions asked; set `GRAPHIFY_QUERY_LOG_DISABLE=1` when questions may contain confidential details.",

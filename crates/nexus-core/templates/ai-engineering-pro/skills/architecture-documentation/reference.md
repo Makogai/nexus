@@ -102,6 +102,8 @@ Use a blockquote directly where the claim appears:
 
 ## ADR template (proposed, written from code)
 
+Use the project's existing ADR format and numbering when it has one; otherwise this shape (DOC-* has the ADR rule).
+
 ```markdown
 # ADR-<n>: <decision in a short phrase>
 

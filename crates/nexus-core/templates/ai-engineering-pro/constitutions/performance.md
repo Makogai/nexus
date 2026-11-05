@@ -24,11 +24,11 @@ Optimise only after profiling or benchmarking shows where time or memory goes, u
 
 #### Meet Core Web Vitals budgets for web front ends
 <!-- rule: id=PERF-2 enforcement=rule -->
-Web applications meet Largest Contentful Paint at most 2.5 s, Interaction to Next Paint at most 200 ms and Cumulative Layout Shift at most 0.1, at the 75th percentile of real users, mobile and desktop separately. Track field data (RUM) and check lab results for significant changes.
+Web applications meet Largest Contentful Paint at most 2.5 s, Interaction to Next Paint at most 200 ms and Cumulative Layout Shift at most 0.1, at the 75th percentile of real users, mobile and desktop separately. Use field data (RUM) where the app collects it, and check lab results for significant changes.
 
 #### Define latency budgets per API endpoint
 <!-- rule: id=PERF-3 enforcement=rule -->
-Give each API endpoint or critical operation an explicit latency target, e.g. p95 under 300 ms for interactive reads, agreed with its consumers and monitored in production. Design data access and fan-out to fit the budget, and treat a breached budget as a defect.
+Give each interactive API endpoint or critical operation an explicit latency target, e.g. p95 under 300 ms for reads, agreed with its consumers and monitored in production. Design data access and fan-out to fit the budget, and treat a breached budget as a defect.
 
 ## Data access
 
@@ -84,7 +84,7 @@ Performance regresses silently unless something checks it.
 
 #### Load-test critical paths before launch
 <!-- rule: id=PERF-13 enforcement=rule -->
-Before launching or significantly changing a critical path, load-test it in a production-like environment at expected peak plus headroom (e.g. twice the peak) with a tool such as k6, Gatling or Locust. Verify latency budgets, error rate and resource saturation, and record the tested capacity.
+Before launching or significantly changing a critical path, load-test it at expected peak plus headroom (e.g. twice the peak) with a tool such as k6, Gatling or Locust, in a production-like environment the person designates, never against production or third-party services without approval. Verify latency, error rate and saturation.
 
 #### Catch performance regressions in CI where feasible
 <!-- rule: id=PERF-14 enforcement=guideline -->

@@ -13,7 +13,8 @@ updated: {{now}}
 source: import
 ---
 
-Rules for Laravel applications (Laravel 11 and later conventions). Apply to Laravel code; they refine BE, DB and PHP.
+Rules for Laravel applications (Laravel 11 and later conventions). Apply to Laravel code; they refine BE, DB and PHP,
+which also covers Pint and Larastan.
 
 ## HTTP layer
 
@@ -52,12 +53,12 @@ unchecked input lets clients set columns such as is_admin or user_id.
 #### Write reversible migrations
 <!-- rule: id=LRV-6 enforcement=rule -->
 Implement down() for every reversible migration and run migrate:rollback locally before merging; for irreversible
-changes, make down() throw and follow DB-3. Never edit a migration that has run outside your machine; add a new one.
+changes, make down() throw and follow DB-3.
 
 #### Never interpolate values into raw queries
 <!-- rule: id=LRV-7 enforcement=rule -->
-Prefer Eloquent and the query builder. Where raw SQL is needed (DB::select, whereRaw, orderByRaw, selectRaw), pass
-values as bindings, e.g. whereRaw('price > ?', [$min]), and allowlist column names. String interpolation there is SQL
+Prefer Eloquent and the query builder. In raw fragments (DB::select, DB::raw, whereRaw, orderByRaw, selectRaw) pass
+values as bindings, e.g. whereRaw('price > ?', [$min]), and allowlist column names; interpolating input there is SQL
 injection (SEC-4).
 
 ## Configuration and background work
@@ -69,23 +70,18 @@ Cached configuration and queues behave differently from local development unless
 Read environment variables with env() only in config/*.php and use config('services.x.key') everywhere else. After
 php artisan config:cache, env() calls outside config files return null.
 
-#### Queue slow work
+#### Queue slow work and dispatch it after commit
 <!-- rule: id=LRV-9 enforcement=rule -->
-Dispatch mail, notifications, webhooks and exports as queued jobs (ShouldQueue) with $tries, backoff() and a failed()
-handler, run workers under a process supervisor (Horizon for Redis), and make jobs idempotent because they may run
-more than once.
+Dispatch mail, notifications, webhooks and exports as idempotent queued jobs (ShouldQueue) with $tries, backoff() and
+a failed() handler. Dispatch jobs raised inside a database transaction with afterCommit() so workers never see
+uncommitted data, and run workers under a supervisor or Horizon.
 
 ## Quality
 
-Laravel ships first-party tools for tests and style; use them in CI.
+Laravel's testing helpers make feature tests cheap; use them for every route.
 
 #### Write feature tests with Pest or PHPUnit
 <!-- rule: id=LRV-10 enforcement=rule check=test -->
-Cover each route with feature tests using RefreshDatabase, factories and actingAs(), asserting status, JSON structure
-and authorisation failures. Fake side effects with Queue::fake(), Mail::fake() and Http::fake() instead of calling
-real services.
-
-#### Format with Laravel Pint
-<!-- rule: id=LRV-11 enforcement=rule check=lint -->
-Format with Laravel Pint using the project's pint.json and run pint --test in CI; run Larastan (PHPStan with Laravel
-support) at the level the project defines alongside it.
+Cover each route with feature tests in the project's framework (Pest for new projects) using RefreshDatabase,
+factories and actingAs(), asserting status, JSON structure and authorisation failures. Fake side effects with
+Queue::fake(), Mail::fake() and Http::fake() instead of calling real services.

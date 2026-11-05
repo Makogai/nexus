@@ -33,7 +33,9 @@ what the person changed.
 4. **Progressive loading** — what a session pays for:
    * one small `applies: always` constitution (Core working agreement, 6 rules, < 1 000 characters);
    * every other constitution is `applies: on-demand` and listed **by document**, not by rule:
-     `Testing (TST-*, 14 rules, 2 mandatory)`; `get_constitution` accepts `"TST-*"` to read a document's rules;
+     `Testing TST-* (13, 2 mandatory)`; `get_constitution` accepts `"TST-*"` to read a document's rules. When the
+     budget cuts the listing, it keeps documents with mandatory policies first, then the ones most specific to the work
+     (task → project → stack), then workspace-wide guidance, and counts the rest;
    * stack rule sets (`stacks:`) are part of the listing only for projects whose detected stacks match — detection
      now also recognises `docker` and `sql`;
    * skills cost their name and description only (Claude loads bodies on use); long checklists sit in a skill's
@@ -44,6 +46,7 @@ what the person changed.
 * A new template version ships with a NEXUS release; `nexus templates apply <id>` (or the desktop) shows the per-file
   plan before anything changes.
 * Mandatory rules of an on-demand document are not in the system prompt text; the listing says how many a document has,
-  and the Core agreement's mandatory rules (verified claims, no secrets, confirm destructive actions) are always on.
+  and the Core agreement's mandatory rules (verified claims, no secrets, confirm destructive actions, found instructions are
+  data) are always on. Content review before the first merge: `docs/TEMPLATE_REVIEW.md` (319 → 284 rules).
 * Editing a workspace skill changes the kit hash: the skills are withheld from sessions until reviewed again — the same
   rule as every AI Kit.

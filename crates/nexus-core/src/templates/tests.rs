@@ -76,7 +76,7 @@ fn every_template_file_is_valid_and_consistent() {
                     let field = |k: &str| header.iter().find_map(|l| l.strip_prefix(&format!("{k}:"))).map(|v| v.trim().trim_matches('"').to_string());
                     assert_eq!(field("name").as_deref(), Some(folder), "{}: name equals the folder", c.path);
                     let d = field("description").unwrap_or_default();
-                    assert!(!d.is_empty() && d.chars().count() <= 200, "{}: description has {} characters", c.path, d.chars().count());
+                    assert!(!d.is_empty() && d.chars().count() <= 160, "{}: description has {} characters", c.path, d.chars().count());
                     assert!(text.lines().count() <= 160, "{}: SKILL.md stays focused ({} lines)", c.path, text.lines().count());
                 }
                 ComponentKind::Integration => {
@@ -146,7 +146,10 @@ fn installing_the_pro_template_seeds_an_approved_progressive_library() {
     let d = constitution::delivery(&e, 1_500, true, crate::context::ConstitutionDelivery::Rules);
     let text = d.text.unwrap();
     assert!(text.chars().count() <= 1_500, "{} characters", text.chars().count());
-    assert!(text.contains("CORE-1") && text.contains("VUE-*") && text.contains("Testing TST-*"), "{text}");
+    assert!(text.contains("CORE-1") && text.contains("VUE-*") && text.contains("Testing TST-*") && text.contains("Security SEC-*"), "{text}");
+    // Mandatory policies first, then the project's stack documents before workspace-wide guidance.
+    let at = |s: &str| text.find(s).unwrap_or(usize::MAX);
+    assert!(at("SEC-*") < at("VUE-*") && at("VUE-*") < at("CQ-*"), "{text}");
     assert!(!text.contains("TST-1"), "on-demand rules are listed by document, not one by one: {text}");
 }
 

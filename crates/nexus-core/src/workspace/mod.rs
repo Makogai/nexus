@@ -209,6 +209,10 @@ repos/
 # Local-only knowledge stays on this machine.
 .nexus-local/
 
+# Operating-system files.
+.DS_Store
+Thumbs.db
+
 # Machine-local runtime data never belongs in a workspace repository.
 *.db
 *.db-wal
@@ -320,6 +324,33 @@ pub fn create(conn: &Connection, root_raw: &str, name: &str, description: &str) 
 
     insert_row(conn, &manifest, &root)?;
     get(conn, &manifest.id)
+}
+
+/// Make sure Git ignores `rel` (a folder inside the workspace that holds an independent project repository): appends
+/// `/<rel>/` to `.gitignore` unless a line already covers it or it lies in a clone folder (`projects/`, `repos/`).
+/// Returns whether the file changed.
+pub fn ensure_ignored(root: &Path, rel: &str) -> Result<bool> {
+    let rel = rel.trim_matches('/');
+    if rel.is_empty() || rel.split('/').next().is_some_and(|first| first == PROJECTS_DIR || first == LEGACY_PROJECTS_DIR) {
+        return Ok(false);
+    }
+    ensure_writable(root)?;
+    let path = root.join(".gitignore");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let covered = text.lines().map(str::trim).any(|l| {
+        let l = l.trim_start_matches('/').trim_end_matches('/');
+        !l.is_empty() && !l.starts_with('#') && (rel == l || rel.starts_with(&format!("{l}/")))
+    });
+    if covered {
+        return Ok(false);
+    }
+    let mut out = text;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!("\n# A project repository registered inside the workspace (independent; never committed here)\n/{rel}/\n"));
+    write_atomic(&path, out.as_bytes())?;
+    Ok(true)
 }
 
 /// A schema 2 manifest for a new workspace.

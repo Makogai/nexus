@@ -24,10 +24,10 @@ Edition, MSRV, lockfile and features decide whether a crate builds the same way 
 Set edition = "2024" and rust-version (the MSRV) in every Cargo.toml, build the MSRV in CI and raise it deliberately.
 With resolver 3, the edition 2024 default, Cargo then prefers dependency versions compatible with that MSRV.
 
-#### Commit Cargo.lock for binaries
+#### Commit Cargo.lock and build with --locked
 <!-- rule: id=RS-2 enforcement=rule -->
-Commit Cargo.lock for binaries and applications so builds are reproducible, and build in CI with --locked so an
-outdated lockfile fails the build instead of being rewritten silently.
+Commit Cargo.lock (Cargo's current default for libraries as well as binaries) so builds are reproducible, and build in
+CI with --locked so an outdated lockfile fails the build instead of being rewritten silently.
 
 #### Keep Cargo features additive
 <!-- rule: id=RS-3 enforcement=rule -->
@@ -47,9 +47,9 @@ library crates.
 
 #### Use typed errors in libraries and contextual errors in binaries
 <!-- rule: id=RS-5 enforcement=rule -->
-Define error enums with thiserror in library crates so callers can match on causes; in binaries use anyhow or similar
-and add context at each layer with .context(...). Do not return String or `Box<dyn Error>` errors from public library
-APIs.
+Define error enums (e.g. with thiserror) in library crates so callers can match on causes; in binaries use the
+project's error crate (e.g. anyhow) and add context at each layer with .context(...). Do not return String or
+`Box<dyn Error>` errors from public library APIs.
 
 #### Deny unsafe code unless audited and documented
 <!-- rule: id=RS-6 enforcement=mandatory -->
@@ -62,28 +62,18 @@ possible) and a reviewer sign-off.
 Take &str, &[T] or impl AsRef parameters and borrow data rather than calling clone() to satisfy the borrow checker; in
 hot paths each clone of a String, Vec or map is an allocation. Use Cow or Arc when ownership is genuinely shared.
 
-#### Prefer iterators over index loops
-<!-- rule: id=RS-8 enforcement=guideline -->
-Use iterator adapters (iter, map, filter, zip, enumerate) and for x in &items instead of indexing over 0..len(); they
-state intent and avoid off-by-one errors and bounds checks. Use an explicit loop when it is clearer, e.g. with complex
-early exits.
-
 ## Tooling
 
 clippy, rustfmt and cargo test are the standard gates for every Rust change.
 
-#### Keep clippy clean with warnings denied
-<!-- rule: id=RS-9 enforcement=rule check=lint -->
-Run cargo clippy --all-targets --all-features -- -D warnings in CI and fix findings rather than allowing them. When an
-exception is justified, put #[expect(clippy::name, reason = "...")] on the smallest item.
-
-#### Format with rustfmt
-<!-- rule: id=RS-10 enforcement=rule check=lint -->
-Format all code with rustfmt and run cargo fmt --all --check in CI; keep rustfmt.toml minimal so formatting stays
-close to the community default.
+#### Keep rustfmt and clippy clean with warnings denied
+<!-- rule: id=RS-8 enforcement=rule check=lint -->
+Run cargo fmt --all --check and cargo clippy --all-targets --all-features -- -D warnings in CI and fix findings rather
+than allowing them. When an exception is justified, put #[expect(clippy::name, reason = "...")] on the smallest item;
+keep rustfmt.toml minimal.
 
 #### Test with cargo test, including doc tests
-<!-- rule: id=RS-11 enforcement=rule check=test -->
+<!-- rule: id=RS-9 enforcement=rule check=test -->
 Put unit tests in #[cfg(test)] modules next to the code, integration tests in tests/ and runnable examples in doc
 comments, and run cargo test --workspace so doc tests execute too. cargo-nextest skips doc tests: add cargo test --doc
 when you use it.

@@ -21,7 +21,7 @@ Native HTML semantics give assistive technology most of what it needs for free.
 
 #### Meet WCAG 2.2 Level AA
 <!-- rule: id=A11Y-1 enforcement=rule -->
-All user-facing UI meets WCAG 2.2 Level AA, including the 2.2 criteria on focus not obscured, dragging alternatives, target size, consistent help, accessible authentication and redundant entry. Treat a violation as a defect with the same priority as a functional bug of similar impact.
+All user-facing UI meets WCAG 2.2 Level AA, including the newer criteria on focus not obscured, consistent help, accessible authentication and redundant entry (target size and dragging: A11Y-6). Treat a violation as a defect with the same priority as a functional bug of similar impact.
 
 #### Use semantic HTML first
 <!-- rule: id=A11Y-2 enforcement=rule -->
@@ -75,6 +75,6 @@ Disable or reduce non-essential animation, parallax, smooth scrolling and autopl
 
 Automated checks catch only part of the issues, so they are combined with manual testing.
 
-#### Test with axe automatically and with a screen reader manually
+#### Test with axe automatically and list the manual checks
 <!-- rule: id=A11Y-12 enforcement=rule check=test -->
-Run axe-core checks in component or end-to-end tests (e.g. `@axe-core/playwright`, `vitest-axe`, `jest-axe`) for each page and key state, failing on violations. Also test key flows by hand with keyboard only and with a screen reader (NVDA or JAWS on Windows, VoiceOver on macOS and iOS).
+Run axe-core checks in component or end-to-end tests (e.g. `@axe-core/playwright`, `vitest-axe`, `jest-axe`) for each page and key state, failing on violations. Key flows also need keyboard-only and screen-reader passes (NVDA or JAWS, VoiceOver); list them as open unless a person did them.

@@ -1,6 +1,6 @@
 ---
 name: test-generation
-description: Adds meaningful, deterministic tests for untested risk in the project's own framework and proves each one catches breakage. Use when asked to add tests, raise coverage or harden existing code.
+description: Adds deterministic tests for untested risk in the project's framework and proves each one can fail. Use when asked to add tests or close coverage gaps.
 ---
 
 # Test generation
@@ -10,52 +10,48 @@ Coverage numbers are a hint about where to look, never the goal.
 
 ## Ground rules
 
-- Test behaviour through public interfaces: returned values, persisted state, responses, emitted events. Do not
-  assert private calls, internal state or call counts on internal collaborators unless that is the contract.
-- Every new test must be seen failing against deliberately broken behaviour before it counts (step 6).
-- Do not change production code to make a test pass. Adding a seam (injectable clock, interface at a boundary) is
-  a design change: ask first and list it in the report.
+- TST-* says how tests are written (behaviour through public interfaces, determinism, isolation, naming, test data);
+  read it first. This skill adds what is specific to adding tests to existing code.
+- A new test counts only after it was seen failing against deliberately broken behaviour (step 6).
+- Do not change production code to make a test pass. Adding a seam (an injectable clock, an interface at a boundary)
+  is a design change: ask first and list it in the report.
 - If a test exposes a bug, keep the evidence and report it; do not fix it silently. Mark the test with the
   framework's expected-failure or skip mechanism, with a reason, only when the person agrees.
-- Report results only from runs in this session.
 
 ## Procedure
 
 1. **Target.** The module, change or PR in scope. If the NEXUS tools are available: `get_constitution` with
-   `["TST-*"]` plus the stack prefix, and `get_task` for acceptance criteria that need tests.
-2. **Learn the conventions.** Framework and runner (Vitest/Jest, pytest, `cargo test`, PHPUnit/Pest,
-   `flutter_test`, JUnit, ...), file locations and naming, fixtures, factories and builders, mocking style, how
-   integration tests get a database or services. Copy the structure of the closest existing test. Do not add a new
-   test framework or library without consent.
-3. **Find untested risk.** Read the code and its tests; use the project's coverage command when it has one (ask
-   first if it is slow or needs services). Rank by impact x likelihood:
-   - critical paths: money, authentication and authorization, data writes, migrations, external contracts;
-   - complex branching and state machines;
-   - error handling and recovery, timeouts, partial failure;
+   `["TST-*"]` plus the stack documents listed for this project, and `get_task` for acceptance criteria that need
+   tests.
+2. **Learn the conventions.** Framework and runner (Vitest or Jest, pytest, `cargo test`, Pest or PHPUnit,
+   `flutter_test`, JUnit, ...), file locations and naming, fixtures, factories and builders, mocking style, and how
+   integration tests get a database or services. Copy the structure of the closest existing test. Do not add a test
+   framework or library without consent.
+3. **Find untested risk.** Read the code and its tests; use the project's coverage command when it has one (ask first
+   if it is slow or needs services). Rank by impact x likelihood:
+   - critical paths: money, authentication and authorisation, data writes, migrations, external contracts;
+   - complex branching and state machines; error handling, timeouts, partial failure;
    - boundaries: empty, one, many, maximum, off-by-one, unicode, timezones and DST, very large inputs;
    - concurrency and ordering; input validation; recent fixes without regression tests.
-4. **Plan the test list.** For each test: a name that states the behaviour ("rejects an expired token with 401"),
-   the lowest level that gives real confidence (unit, integration, end to end), and both happy and failure paths.
-   Present the list first when it exceeds about fifteen tests or needs new seams or fixtures.
-5. **Write the tests.**
-   - Arrange-Act-Assert, one behaviour per test, minimal setup through existing builders.
-   - Assert specific values, not truthiness; for errors assert the type or code and the meaningful part of the
-     message.
-   - Determinism: fake or inject the clock, seed or inject randomness, no real network (stub at the boundary or use
-     a local fake server), temporary directories, no shared mutable state, no order dependence, no fixed sleeps
-     (wait for a condition), stable ordering before comparing collections, explicit locale and timezone.
-   - Snapshots only for small, stable, reviewable outputs (a serialized format, CLI help). Never as a substitute
-     for assertions on large component trees or responses.
+4. **Plan the test list.** For each test: a name that states the behaviour ("rejects an expired token with 401"), the
+   lowest level that gives real confidence (unit, integration, end to end), and both happy and failure paths. Present
+   the list first when it exceeds about fifteen tests or needs new seams or fixtures.
+5. **Write the tests** following TST-* and the closest existing test, plus:
+   - Assert specific values, not truthiness; for errors, the type or code and the meaningful part of the message.
+   - Sort collections before comparing them when order is not the contract; set locale and timezone explicitly.
+   - Snapshots only for small, stable, reviewable outputs (a serialized format, CLI help), never instead of
+     assertions on large component trees or responses.
    - Property-based tests for invariants (round trips, idempotence, ordering) when the project already uses a
      property-testing library.
-6. **Prove each test bites.** For each new test, temporarily break the behaviour it protects (invert a condition,
-   return early, drop a validation, shift a boundary by one), run the test, confirm it fails with a clear message,
-   and restore the code. Confirm with `git diff` that production code is back to its original state. A test that
-   cannot be made to fail is rewritten or deleted. If the project already has a mutation-testing tool (Stryker,
-   `cargo-mutants`, mutmut, Infection), you may run it on the scope with consent.
-7. **Run.** Run the new tests several times (the runner's repeat option, or a loop) to expose flakiness, then the
-   full suite, plus lint and typecheck for the test code.
-8. **Record.** With NEXUS: `update_task` with a log line, `checkpoint` kind `progress` or `done`.
+6. **Prove each test bites.** Temporarily break the behaviour a test protects (invert a condition, return early, drop
+   a validation, shift a boundary by one), run it, confirm it fails with a clear message, and restore the code; one
+   break may prove several tests at once. Confirm with `git diff` that production code is back to its original
+   state. A test that cannot be made to fail is rewritten or deleted. If the project already has a mutation-testing
+   tool (Stryker, `cargo-mutants`, mutmut, Infection, PIT), you may run it on the scope instead, with consent.
+7. **Run.** The new tests several times (the runner's repeat option, or a loop) to expose flakiness, then the full
+   suite, plus lint and typecheck for the test code.
+8. **Record.** With NEXUS: `update_task` with a log line, and `checkpoint` kind `progress` or `done`. Create tasks for
+   bugs found when the person agrees or a workflow step asks for it.
 
 ## Exit criteria
 

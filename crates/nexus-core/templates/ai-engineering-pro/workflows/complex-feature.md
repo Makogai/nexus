@@ -57,12 +57,12 @@ A person reviews the design note and the risk analysis before any implementation
 ## Implement in slices
 <!-- step: id=implement kind=claude needs=approve-design gates=test -->
 
-Implement the slices in the approved order. Per slice: write tests for its acceptance criteria and risk mitigations first, then the code, then refactor while green; keep each slice a reviewable commit that leaves the main branch releasable. Record a progress checkpoint after each slice. If the implementation has to depart from the approved design, stop and report needs-input instead of diverging silently. Report tests as passing only if they ran and passed in this session.
+Implement the slices in the approved order. Per slice: write tests for its acceptance criteria and risk mitigations first, then the code, then refactor while green; keep each slice separately reviewable with the test suite green after it (one commit per slice when the person asks for commits). Record a progress checkpoint after each slice. If the implementation has to depart from the approved design, stop and report needs-input instead of diverging silently. Report tests as passing only if they ran and passed in this session.
 
 ### Acceptance
 
 - Every acceptance criterion and security mitigation is covered by an automated test
-- Each slice is a separate commit on which the test suite passes
+- The test suite passed after each slice in this session
 - Departures from the approved design are recorded and were confirmed by the person
 
 ## Static checks
@@ -84,7 +84,7 @@ Cover the critical user journeys from discovery end to end against a running bui
 ## Documentation and architecture update
 <!-- step: id=docs kind=claude needs=implement -->
 
-Use the architecture-documentation skill. Move the ADR from proposed to accepted and record any departures from the approved design. Update architecture descriptions and diagrams for new components and data flows, the API reference, configuration and operations notes (new settings, migrations, feature flags and how to remove them, monitoring and alerts), user-facing documentation and the changelog.
+Use the architecture-documentation skill. Mark the ADR accepted, as the person approved it at the design review, and record any departures from the approved design. Update architecture descriptions and diagrams for new components and data flows, the API reference, configuration and operations notes (new settings, migrations, feature flags and how to remove them, monitoring and alerts), user-facing documentation and the changelog.
 
 ### Acceptance
 

@@ -18,7 +18,7 @@ refine BE and TS.
 
 ## Runtime and modules
 
-A pinned runtime, one module system and a frozen dependency tree make builds identical everywhere.
+A pinned runtime, one module system and the platform's own APIs keep Node projects small and identical everywhere.
 
 #### Pin a supported LTS version
 <!-- rule: id=NODE-1 enforcement=rule -->
@@ -32,10 +32,11 @@ Set "type": "module" for new packages and use import syntax with explicit file e
 mix require and import within a package. Import built-ins with the node: prefix (import { readFile } from
 'node:fs/promises').
 
-#### Commit the lockfile and install with npm ci
-<!-- rule: id=NODE-3 enforcement=rule -->
-Commit package-lock.json (or the pnpm or Yarn lockfile) and install in CI and images with npm ci or the equivalent
-frozen-lockfile command, so builds use exactly the reviewed dependency tree and fail when the lockfile is out of date.
+#### Prefer built-in Node APIs to new dependencies
+<!-- rule: id=NODE-3 enforcement=guideline -->
+Before adding a package for new code, use what the LTS runtime ships: global fetch with AbortSignal.timeout(),
+node:test with node --test, --watch, --env-file, util.parseArgs, crypto.randomUUID() and fs/promises. Keep the
+libraries a project already uses.
 
 ## Asynchronous code
 
@@ -47,11 +48,11 @@ Await or return every promise, or handle it explicitly with .catch(); enable @ty
 and no-misused-promises. An unhandled rejection terminates the process by default, and a missing await loses errors
 and ordering.
 
-#### Never block the event loop
+#### Keep synchronous and CPU-heavy work off request paths
 <!-- rule: id=NODE-5 enforcement=rule -->
-Keep CPU-heavy work (hashing or compressing large data, image processing, huge JSON parsing) and synchronous fs or
-crypto calls off the request path; move it to worker_threads (e.g. a Piscina pool) or a background job. One blocked
-tick stalls every concurrent request.
+Do not call synchronous fs, zlib or crypto APIs (readFileSync, pbkdf2Sync) or run CPU-heavy work (large JSON parsing,
+image processing) on request paths; use the async APIs, worker_threads (e.g. a Piscina pool) or a background job. One
+blocked tick stalls every concurrent request.
 
 #### Stream large data
 <!-- rule: id=NODE-6 enforcement=rule -->
@@ -63,17 +64,17 @@ without error handling.
 
 A Node service must start with valid configuration and stop without dropping work.
 
-#### Validate configuration at startup
+#### Read process.env in one validated config module
 <!-- rule: id=NODE-7 enforcement=rule -->
-Read process.env once in a config module that validates and types every variable with a schema at startup and exits
-with a clear message when one is missing or invalid; the rest of the code imports the typed config instead of reading
-process.env.
+Read process.env only in one config module that validates and types it at startup and exits with a clear message when
+a value is missing; everything else imports that config. For local development load a git-ignored .env with node
+--env-file instead of adding dotenv.
 
 #### Shut down gracefully on SIGTERM
 <!-- rule: id=NODE-8 enforcement=rule -->
-Handle SIGTERM and SIGINT: stop accepting connections with server.close(), close idle keep-alive connections, finish
-in-flight work, close pools, then exit, forcing exit after a timeout. Start node directly in containers, not via npm
-start, so signals reach the process.
+On SIGTERM and SIGINT call server.close() and server.closeIdleConnections(), let in-flight work finish, close pools,
+then exit, forcing exit after a timeout. Start node directly in containers, not via npm start, so signals reach the
+process.
 
 #### Spawn processes without a shell
 <!-- rule: id=NODE-9 enforcement=rule -->
@@ -82,5 +83,5 @@ input, because any unescaped character becomes command injection. The mandatory 
 
 #### Log with a structured logger
 <!-- rule: id=NODE-10 enforcement=rule -->
-Log through a structured JSON logger such as pino, with a child logger per request carrying the request id and
-redaction configured for sensitive fields; do not use console.log in server code. Pretty-print only in development.
+Log through the project's structured JSON logger (pino for new services) with a child logger per request carrying the
+request id and redaction for sensitive fields; no console.log in server code. Pretty-print only in development.

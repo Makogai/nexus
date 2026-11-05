@@ -29,7 +29,7 @@ Identify the release: the version to be released, the previous release tag and t
 ## Dependency and vulnerability check
 <!-- step: id=deps kind=claude needs=scope -->
 
-Use the dependency-analysis skill. Compare the lockfiles with the previous release and check every added or upgraded dependency for licence compatibility and maintenance state. Run the audit tool of each ecosystem the project uses (for example `npm audit`, `pip-audit`, `cargo audit`, `composer audit`, `govulncheck`) and record findings by severity, together with whether the vulnerable code is reachable from this project. Known exploitable vulnerabilities block the release unless the person accepts the risk at the approval step.
+Use the dependency-analysis skill. Compare the lockfiles with the previous release and check every added or upgraded dependency for licence compatibility and maintenance state. With the person's consent (the tools use the network), run the audit tool of each ecosystem the project uses (for example `npm audit`, `pip-audit`, `cargo audit`, `composer audit`, `govulncheck`); never apply bulk fixes such as `npm audit fix --force`. Record findings by severity, together with whether the vulnerable code is reachable from this project. Known exploitable vulnerabilities block the release unless the person accepts the risk at the approval step.
 
 ### Acceptance
 
@@ -45,7 +45,7 @@ NEXUS runs the project's build, lint, typecheck and test gates on the frozen com
 ## Changelog and version bump
 <!-- step: id=version kind=claude needs=verify gates=build -->
 
-Update the changelog from the classified change list in the project's format: user-visible changes only, breaking changes first with migration steps, security fixes with their advisory identifiers. Bump the version everywhere the project declares it (manifests, lockfiles, application metadata, documentation that quotes it) in one commit. Do not create a tag. NEXUS runs the build gate again to confirm the bump.
+Update the changelog from the classified change list in the project's format: user-visible changes only, breaking changes first with migration steps, security fixes with their advisory identifiers. Bump the version everywhere the project declares it (manifests, application metadata, documentation that quotes it) as one change, updating lockfiles through the package manager rather than by hand. Commit only when the person asks, and do not create a tag. NEXUS runs the build gate again to confirm the bump.
 
 ### Acceptance
 
@@ -72,7 +72,7 @@ A person reviews the verification results, the dependency and audit findings, th
 ## Post-release verification and rollback readiness
 <!-- step: id=post kind=claude needs=approve -->
 
-First write the rollback procedure, before it is needed: the previous version identifier, how to redeploy or republish it, whether the data migrations can be reversed or need a fix-forward, and who decides. Then report needs-input until the person confirms that the release is live. Once it is, run smoke checks of the critical journeys against the released version, confirm that the published artifacts carry the new version, and compare error rates and key metrics with the previous release where the person gives you access to them. If any check fails, report blocked with the evidence and a recommendation: roll back or fix forward.
+First write the rollback procedure, before it is needed: the previous version identifier, how to redeploy or republish it, whether the data migrations can be reversed or need a fix-forward, and who decides. Then report needs-input until the person confirms that the release is live. Once it is, run read-only smoke checks of the critical journeys that the person approves against the released version (never with personal credentials, never changing production data), confirm that the published artifacts carry the new version, and compare error rates and key metrics with the previous release where the person gives you access to them. If any check fails, report blocked with the evidence and a recommendation: roll back or fix forward.
 
 ### Acceptance
 

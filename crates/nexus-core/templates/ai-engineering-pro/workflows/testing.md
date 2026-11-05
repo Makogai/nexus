@@ -28,7 +28,7 @@ Rank untested or weakly tested behaviour by risk: the impact of a failure times 
 ## Add tests
 <!-- step: id=tests kind=claude needs=gaps -->
 
-Use the test-generation skill and work through the list in order. Test behaviour through public interfaces, one behaviour per test, with names that state the condition and the expected outcome. Keep tests deterministic: no real clock, network or shared state, and fixed seeds for randomness. Follow the project's existing test style and helpers. Do not change production code beyond a minimal seam needed for testing. If a test reveals a bug, do not fix it here: create a task with the failing test as its reproduction and keep that test out of this change, or mark it with the project's convention for known failures.
+Use the test-generation skill and work through the list in order. Test behaviour through public interfaces, one behaviour per test, with names that state the condition and the expected outcome. Keep tests deterministic: no real clock, network or shared state, and fixed seeds for randomness. Follow the project's existing test style and helpers. Do not change production code; if a test needs a seam (an injectable clock, an interface at a boundary), report needs-input and add it only after the person agrees. If a test reveals a bug, do not fix it here: create a task with the failing test as its reproduction and keep that test out of this change, or mark it with the project's convention for known failures.
 
 ### Acceptance
 
@@ -45,7 +45,7 @@ Prove that each new test can fail. Temporarily break the behaviour it covers (in
 
 - Every new test was observed failing against a deliberate break of its behaviour
 - Tests that did not fail were strengthened or removed
-- The diff contains no changes to production code
+- Production code is unchanged apart from seams the person approved
 
 ## Run the suite
 <!-- step: id=suite kind=check needs=mutate gates=test -->

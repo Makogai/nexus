@@ -48,7 +48,7 @@ Write an automated test at the lowest level that exercises the root cause: a uni
 ## Fix
 <!-- step: id=fix kind=claude needs=regression gates=test -->
 
-Fix the root cause, not the symptom: no special-casing of the reproduction input, no swallowed errors. Keep the change minimal and scoped to the defect. Fix the other occurrences found during root-cause analysis, or create a task for each one you leave. The regression test must pass now and stay in the suite; change an existing test only if it encoded the buggy behaviour, and say so.
+Fix the root cause, not the symptom: no special-casing of the reproduction input, no swallowed errors. Keep the change minimal and scoped to the defect. Fix other occurrences found during root-cause analysis only when they share the root cause and the fix stays small; create a task for each one you leave. The regression test must pass now and stay in the suite; change an existing test only if it encoded the buggy behaviour, and say so.
 
 ### Acceptance
 
@@ -64,7 +64,7 @@ NEXUS runs the project's lint and typecheck gates on the fix.
 ## Record the root cause
 <!-- step: id=record kind=claude needs=fix -->
 
-Write a short note for future maintainers: symptom, root cause, why it was not caught earlier (missing test, unclear contract, unhandled input), the fix, and follow-up work such as monitoring, hardening or similar code. Store it as a checkpoint (decision) and put the essentials in the commit message or pull request description. If the bug affected released versions or stored data, state that explicitly and who needs to know.
+Write a short note for future maintainers: symptom, root cause, why it was not caught earlier (missing test, unclear contract, unhandled input), the fix, and follow-up work such as monitoring, hardening or similar code. Store it as a checkpoint (decision), without secrets or personal data from logs, and include the essentials in the commit message or pull request description when the person asks for one. If the bug affected released versions or stored data, state that explicitly and who needs to know.
 
 ### Acceptance
 
@@ -73,6 +73,6 @@ Write a short note for future maintainers: symptom, root cause, why it was not c
 - Impact on released versions and stored data is stated
 
 ## Review
-<!-- step: id=review kind=review needs=fix,record rigor=professional -->
+<!-- step: id=review kind=review needs=fix,checks,record rigor=professional -->
 
-A person confirms the root-cause explanation, the regression test and the fix. Approve to finish; request changes with a note to send the fix back to Claude.
+A person confirms the root-cause explanation, the regression test and the fix, together with the gate results. Approve to finish; request changes with a note to send the fix back to Claude.

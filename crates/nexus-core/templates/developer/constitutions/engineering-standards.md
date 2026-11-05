@@ -12,76 +12,60 @@ updated: {{now}}
 source: import
 ---
 
-How to approach any change in any project: understand the problem, keep the change small and simple, handle errors and configuration deliberately, and protect public interfaces. Read it before starting or reviewing non-trivial work.
+How to approach a change in any project: understand and verify before relying on anything, keep scope and design small, handle logging, configuration and dependencies deliberately, and protect public interfaces. Read it before starting or reviewing non-trivial work.
 
-## Understanding before changing
+## Understanding and verification
 
-Most wasted work comes from solving the wrong problem or one that was never stated.
+Most wasted work comes from solving the wrong problem or building on something that is not true.
 
-#### Restate the problem and your assumptions before coding
+#### Restate the problem and your assumptions before non-trivial work
 <!-- rule: id=ENG-1 enforcement=rule -->
-Before a non-trivial change, state in one or two sentences the problem, the expected outcome and every assumption about inputs, environment or existing behaviour. Verify assumptions against the code before relying on them, and label the ones you could not verify.
+For a non-trivial change, state the problem, the expected outcome and the assumptions it rests on, and check those assumptions against the code. When you must ask (CORE-4), offer the concrete options and their consequences; decide trivially reversible details yourself and say which you chose.
 
-#### Ask when requirements are ambiguous instead of guessing
+#### Verify generated code and APIs before relying on them
 <!-- rule: id=ENG-2 enforcement=rule -->
-When a requirement has two or more plausible readings that lead to different behaviour, data or interfaces, stop and ask with the concrete options and their consequences. Choose a default yourself only for trivially reversible details, and say which one you chose.
+Confirm that every library function, CLI flag, configuration key and framework feature you use exists in the version the project has installed (lock file, types, source or versioned docs), not from memory. Review code from generators, other AI tools, subagents or the web like a contributor's pull request before building on it.
 
 ## Scope and simplicity
 
 Small, simple changes are easier to review, test and revert.
 
-#### Make the smallest change that solves the problem
-<!-- rule: id=ENG-3 enforcement=rule -->
-Change only what the task requires. Do not bundle unrelated fixes, renames or reformatting into the same change; record them as follow-ups. Every line of the diff should be explainable by the stated goal.
-
 #### Build for today's requirements, not imagined ones
+<!-- rule: id=ENG-3 enforcement=rule -->
+Do not add configuration options, extension points or abstraction layers for needs nobody has stated. Prefer the plainest construct that works, and introduce an abstraction when a second real use case or a test seam needs it, not in anticipation of one.
+
+#### Limit clean-ups to the lines you are already changing
 <!-- rule: id=ENG-4 enforcement=rule -->
-Do not add configuration options, extension points, generic layers or abstractions for needs nobody has stated (YAGNI). Prefer the plainest construct that works and introduce an abstraction when a second real use case exists, not in anticipation of one.
+CORE-5 has one exception: in code you already change, fix a misleading name, a missing guard or a stale comment when the fix is small and safe. Do not reformat, rename or tidy anything beyond that; record larger clean-ups as follow-ups instead of growing the change silently.
 
-#### Leave touched code better, within the scope of the task
-<!-- rule: id=ENG-5 enforcement=guideline -->
-In code you are already changing, fix a misleading name, a missing guard or an outdated comment when the fix is small and low risk. Larger cleanups outside the task become a separate change or a recorded follow-up, never silent scope growth.
+## Logging and configuration
 
-#### Delete dead code instead of commenting it out
-<!-- rule: id=ENG-6 enforcement=rule -->
-Remove unused functions, unreachable branches, fully rolled-out feature flags and commented-out code once a search confirms nothing references them, including configuration, templates and reflection-based uses. Version control keeps the history.
+Failures must be diagnosable, and what differs between environments must not be hidden in code.
 
-## Errors and logging
-
-Failures must be visible and diagnosable, never silently absorbed.
-
-#### Decide explicitly what happens on every failure path
-<!-- rule: id=ENG-7 enforcement=rule -->
-Every error is either recovered from deliberately, propagated with added context, or reported to the user with an actionable message. Never return a default value, an empty result or a success status to hide a failure. If ignoring an error is correct, say why in a comment at that spot.
-
-#### Log what helps diagnosis, at the right level, without noise
-<!-- rule: id=ENG-8 enforcement=rule -->
-Log significant state changes, failed external calls and decisions that explain later behaviour: error = needs action, warn = degraded, info = notable event, debug = detail. Do not log in tight loops, do not log and rethrow the same error, and keep personal data and credentials out of log messages.
-
-## Configuration and dependencies
-
-What varies between environments and what you import become long-term liabilities if handled casually.
+#### Log what helps diagnosis, at the right level
+<!-- rule: id=ENG-5 enforcement=rule -->
+Log significant state changes, failed external calls and decisions that explain later behaviour: error = needs action, warn = degraded, info = notable event, debug = detail. Do not log in tight loops or log and rethrow the same error, and keep personal data out of log messages.
 
 #### Keep environment-specific values out of code
-<!-- rule: id=ENG-9 enforcement=rule -->
-Read values that differ between environments (URLs, hosts, limits, feature flags, credentials) from configuration or environment variables in one place at startup, validate them, and fail fast when a required value is missing. Do not branch on environment names inside business logic.
+<!-- rule: id=ENG-6 enforcement=rule -->
+Read values that differ between environments (URLs, hosts, limits, feature flags, credentials) from configuration or the environment in one place at startup, validate them and fail fast when a required one is missing, so one build runs everywhere. Never branch on environment names in business logic.
 
-#### Justify every new dependency
-<!-- rule: id=ENG-10 enforcement=rule -->
-Before adding a dependency, check whether the standard library or an existing dependency already covers the need. If not, prefer an actively maintained, widely used package with a compatible licence, and state in the change why it was added and which alternatives were rejected.
+## Dependencies
 
-#### Commit lock files and upgrade dependencies deliberately
-<!-- rule: id=ENG-11 enforcement=rule -->
-Commit the package manager's lock file and change it only through the package manager, never by hand. Upgrade dependencies in dedicated changes, read the changelog before a major version upgrade, and run the full test suite afterwards.
+Every dependency is code you ship, maintain and are liable for.
 
-## Interfaces and naming
+#### Justify every new dependency and agree it with the person
+<!-- rule: id=ENG-7 enforcement=rule -->
+First check whether the standard library or an existing dependency covers the need. Otherwise propose a maintained, widely used package whose licence fits the project (watch copyleft such as GPL or AGPL), say why and which alternatives you rejected, and add it only with the person's agreement.
 
-Names and contracts are what other people and programs come to depend on.
+#### Keep lock files authoritative and upgrade deliberately
+<!-- rule: id=ENG-8 enforcement=rule -->
+Keep the package manager's lock file under version control and change it only through the package manager, never by hand. Upgrade dependencies in dedicated changes, read the changelog before a major upgrade, and run the full test suite afterwards.
+
+## Interfaces
+
+Contracts are what other people and programs come to depend on.
 
 #### Keep public interfaces backwards compatible
-<!-- rule: id=ENG-12 enforcement=rule -->
+<!-- rule: id=ENG-9 enforcement=rule -->
 Do not remove, rename or change the meaning of a public API, CLI flag, configuration key, file format or event schema in a non-major change. Add the new form beside the old one, deprecate the old one with a removal plan, and call out any unavoidable breaking change in the change description.
-
-#### Choose names that reveal intent
-<!-- rule: id=ENG-13 enforcement=rule -->
-Name variables, functions and types after their meaning in the domain, not their implementation (`overdueInvoices`, not `list2`; `isEligibleForRefund`, not `check`). Put units in names when the type does not carry them (`timeoutMs`) and avoid abbreviations the codebase does not already use.

@@ -15,7 +15,8 @@ computer from their recorded remotes.
 2. **Claude profiles** → add your profile(s); **Claude Code setup** helps if Claude Code is not installed yet.
 3. **Projects → Add project** for each repository. NEXUS creates its portable context under
    `project-context/<project>/` from the project's own files (nothing is invented). Clones you keep inside the
-   workspace go to `projects/` (ignored by Git).
+   workspace go to `projects/` (ignored by Git). A project you register from another folder inside the workspace is
+   added to `.gitignore` too, and NEXUS refuses to commit any other repository nested in the workspace.
 4. Make the workspace a Git repository with a **private** remote (in your Git tool: `git init`, add the remote), then
    **Sync → Review & commit → Push**. NEXUS inspects every commit and push for credentials and private data.
 5. Work as usual. When a Claude session that changed something ends, NEXUS writes a **development record** into the
@@ -41,6 +42,6 @@ notifications), approvals and gate commands, and your Claude sign-ins. The Resto
 ## Keep it healthy
 
 **Workspace → Workspace Doctor** checks the workspace and this computer and offers repairs that show their plan first
-(migrate an older workspace, missing `.gitignore` lines, template updates that never overwrite files you changed,
+(migrate an older workspace, missing `.gitignore` lines — including project folders inside the workspace —, template updates that never overwrite files you changed,
 missing projects, project context, workspace skills). The CLI has the same: `nexus workspaces doctor`,
 `nexus workspaces restore`, `nexus templates`, `nexus projects scan|clone|env|history`, `nexus sync policy`.

@@ -1,9 +1,9 @@
 # Security review checklist
 
-Sections follow the OWASP Top 10 categories (2025 edition; server-side request forgery, a separate category in
-2021, is covered under access control there). Search hints are starting points for reading code, not verdicts:
-every hit needs a trace from an untrusted source before it becomes a finding. When a search hits a secret, record
-the location only.
+Sections follow the OWASP Top 10:2025 categories (server-side request forgery, a separate category in 2021, is
+covered under access control there). The rules live in SEC-*; these are the questions to ask. Search hints are
+starting points for reading code, not verdicts: every hit needs a trace from an untrusted source before it becomes a
+finding. When a search hits a secret, record the location only.
 
 ## A01 Broken access control (including SSRF)
 
@@ -94,7 +94,7 @@ the location only.
 - Updates, plugins and downloaded code verified (signature or checksum) before execution.
 - Serialized state the server trusts (cookies, hidden fields) is signed or kept server-side.
 
-## A09 Logging and alerting failures
+## A09 Security logging and alerting failures
 
 - Security-relevant events logged: logins, failed authorization, privilege changes, sensitive data exports.
 - Logs exclude secrets, tokens, full card numbers, passwords and unnecessary personal data.
