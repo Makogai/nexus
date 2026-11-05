@@ -163,6 +163,7 @@ pub fn run() {
             commands::projects::project_get,
             commands::projects::project_inspect_path,
             commands::projects::project_register,
+            commands::projects::project_clone_new,
             commands::projects::project_unregister,
             commands::projects::project_locate,
             commands::projects::project_refresh,

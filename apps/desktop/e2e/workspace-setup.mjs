@@ -166,6 +166,25 @@ try {
   check('the reviewed first push publishes the workspace to the prepared repository', !!upToDate && pushDialog.includes('whole history travels') && published.includes('nexus-workspace.json') && published.includes('knowledge/README.md'), published.split('\n').length + ' files')
   check('…and nothing machine-local or ignored travels', !/\.db|\.nexus-local|^projects\//m.test(published))
 
+  // Projects → Add project → Clone from Git: cloned into projects/<name>, registered, its page opens.
+  await cdp.evaluate(`location.hash = '#/projects'; true`)
+  await cdp.waitFor(`document.querySelector('[data-add-project-open]')`, 15000)
+  await click('[data-add-project-open]')
+  await cdp.waitFor(`document.querySelector('[data-add-project-mode="git"]')`, 5000)
+  await click('[data-add-project-mode="git"]')
+  await setValue('[data-add-project-url]', fileUrl(project))
+  const cloneTarget = await textOf('[data-add-project-target]')
+  check('the clone target is shown before cloning (the workspace projects/ folder)', cloneTarget === join(wsDir, 'projects', 'project'), cloneTarget)
+  await click('[data-add-project-clone]')
+  const onPage = await until(async () => ((await cdp.evaluate(`location.hash`)).startsWith('#/projects/') ? true : null), 60000)
+  const projectsNow = await inv('project_list', { workspaceId: ws.id }).catch(() => [])
+  check(
+    'a project cloned from Git is registered with its context and its page opens',
+    !!onPage && existsSync(join(wsDir, 'projects', 'project', 'package.json')) && existsSync(join(wsDir, 'project-context', 'project', 'overview.md')) && projectsNow.some((p) => p.name === 'project'),
+    projectsNow.map((p) => p.name).join(','),
+  )
+  check('…and the clone itself stays out of the workspace repository', !git(wsDir, 'status', '--porcelain').includes('projects/'))
+
   // Settings → New workspace in an existing folder: project files are refused, a host-scaffolded clone is accepted.
   const code = join(root, 'code')
   mkdirSync(code)

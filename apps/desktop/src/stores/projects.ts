@@ -47,6 +47,14 @@ export const useProjectStore = defineStore('projects', () => {
     return p
   }
 
+  /** Clone a new project from Git and register it. */
+  async function cloneNew(url: string, name: string | null, folder: string | null) {
+    if (!workspaceId.value) throw new Error('no active workspace')
+    const p = await api.projectCloneNew(workspaceId.value, url, name, folder)
+    upsert(p)
+    return p
+  }
+
   async function unregister(id: string) {
     await api.projectUnregister(id)
     list.value = list.value.filter((p) => p.id !== id)
@@ -81,5 +89,5 @@ export const useProjectStore = defineStore('projects', () => {
     return entry
   }
 
-  return { list, byId, loading, git, load, reload, register, unregister, locate, refresh, gitStatus }
+  return { list, byId, loading, git, load, reload, register, cloneNew, unregister, locate, refresh, gitStatus }
 })

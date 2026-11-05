@@ -184,6 +184,66 @@ pub fn clone_missing(conn: &Connection, data_dir: &Path, ws: &Workspace, project
     Ok(bound)
 }
 
+/// The folder name a repository URL suggests (`…/team/invoices.git` → `invoices`).
+pub fn repo_name(url: &str) -> String {
+    url.trim().trim_end_matches('/').rsplit(['/', ':', '\\']).next().unwrap_or("").trim_end_matches(".git").to_string()
+}
+
+/// Add a **new** project from Git: clone `url` into `dest` (a new or empty folder anywhere) or, by default, into the
+/// workspace's clone folder (`projects/<name>`, ignored by Git and restored by id on other computers), then register it
+/// with its portable context. A remote that already belongs to a project of this workspace is refused, and a failed
+/// clone or registration leaves nothing behind. Nothing in the repository is executed (no submodules, no prompts).
+pub fn clone_new(conn: &Connection, data_dir: &Path, ws: &Workspace, url: &str, name: Option<&str>, dest: Option<&str>) -> Result<project::Project> {
+    let url = url.trim();
+    if !git::clone_url_allowed(url) {
+        return Err(CoreError::invalid("only https://, ssh://, git@host:path and file:// Git URLs are supported"));
+    }
+    workspace::ensure_writable(&ws.root_path)?;
+    let wanted = normalize_remote(url);
+    if let Some(p) = project::list(conn, &ws.id)?.into_iter().find(|p| p.remote_url.as_deref().is_some_and(|r| normalize_remote(r) == wanted)) {
+        return Err(CoreError::Conflict(format!("this repository is already in the workspace as “{}”", p.name)));
+    }
+    let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| repo_name(url));
+    let dest = match dest.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => paths::validate_user_path(d, paths::Expect::DirOrCreatable)?,
+        None => {
+            let m = workspace::read_manifest(&ws.root_path)?;
+            let slug = crate::project::context::slug(if name.is_empty() { "project" } else { &name });
+            paths::resolve_within(&ws.root_path, &format!("{}/{slug}", m.projects_dir()))?
+        }
+    };
+    let existed = dest.exists();
+    if existed && std::fs::read_dir(&dest).map(|mut d| d.next().is_some()).unwrap_or(true) {
+        return Err(CoreError::Conflict(format!("{} already exists and is not empty — choose another folder", dest.display())));
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| CoreError::io("cannot create", parent, e))?;
+    }
+    let cleanup = |dest: &Path| {
+        if existed {
+            if let Ok(rd) = std::fs::read_dir(dest) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+                }
+            }
+        } else {
+            let _ = std::fs::remove_dir_all(dest);
+        }
+    };
+    if let Err(e) = git::clone_full(url, &dest) {
+        cleanup(&dest);
+        return Err(CoreError::External { program: "git clone".into(), message: e.explain() });
+    }
+    match project::register_with_context(conn, data_dir, &ws.id, &dest.to_string_lossy(), (!name.is_empty()).then_some(name.as_str())) {
+        Ok(p) => Ok(p),
+        Err(e) => {
+            cleanup(&dest);
+            Err(e)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +361,51 @@ mod tests {
         assert_eq!(normalize_remote("ssh://git@github.com/me/app"), a);
         assert_eq!(normalize_remote("https://user@github.com/me/app/"), a);
         assert_ne!(normalize_remote("https://github.com/me/other"), a);
+    }
+
+    /// A new project added from Git: cloned into the clone folder (or a folder of the person's choice), registered with
+    /// its context; the same repository twice, bad URLs, occupied folders and failed clones change nothing.
+    #[test]
+    fn a_new_project_is_cloned_from_git_and_registered_with_its_context() {
+        let t = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(t.path()).unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        let data = base.join("data");
+        let ws = workspace::create(&conn, base.join("ws").to_str().unwrap(), "W", "").unwrap();
+        let (_work, url) = project_repo(&base, "invoices");
+        assert_eq!(repo_name(&url), "invoices");
+        assert_eq!(repo_name("git@github.com:team/Billing-API.git"), "Billing-API");
+
+        let p = clone_new(&conn, &data, &ws, &url, None, None).unwrap();
+        assert_eq!(p.name, "invoices");
+        let dest = ws.root_path.join("projects").join("invoices");
+        assert_eq!(p.local_path.as_deref(), Some(dest.as_path()));
+        assert!(dest.join("package.json").is_file() && p.stack.stacks.iter().any(|s| s == "vue"), "{:?}", p.stack);
+        assert!(crate::project::context::context_dir(&ws, &p.id).unwrap().join("overview.md").is_file(), "context created");
+        let m = workspace::read_manifest(&ws.root_path).unwrap();
+        assert_eq!(m.projects.iter().find(|x| x.id == p.id).and_then(|x| x.path.as_deref()), Some("projects/invoices"));
+
+        // The same repository again (any spelling of its URL): refused before anything is cloned.
+        let again = url.trim_end_matches(".git").to_string() + "/";
+        let e = clone_new(&conn, &data, &ws, &again, Some("Copy"), None).unwrap_err().to_string();
+        assert!(e.contains("already in the workspace as “invoices”"), "{e}");
+        assert!(clone_new(&conn, &data, &ws, "ext::sh -c touch% /tmp/x", None, None).is_err());
+
+        // Another repository into a folder of the person's choice outside the workspace; an occupied folder is refused.
+        let (_w2, url2) = project_repo(&base, "billing");
+        let busy = base.join("code").join("busy");
+        std::fs::create_dir_all(&busy).unwrap();
+        std::fs::write(busy.join("x"), "").unwrap();
+        assert!(clone_new(&conn, &data, &ws, &url2, None, busy.to_str().unwrap().into()).unwrap_err().to_string().contains("not empty"));
+        let outside = base.join("code").join("billing");
+        let p2 = clone_new(&conn, &data, &ws, &url2, Some("Billing"), Some(outside.to_str().unwrap())).unwrap();
+        assert_eq!((p2.name.as_str(), p2.local_path.as_deref()), ("Billing", Some(outside.as_path())));
+
+        // A clone that fails (no such repository) leaves no folder and registers nothing.
+        let missing = file_url(&base).trim_end_matches('/').to_string() + "/nothing-here.git";
+        let before = project::list(&conn, &ws.id).unwrap().len();
+        assert!(clone_new(&conn, &data, &ws, &missing, None, None).is_err());
+        assert!(!ws.root_path.join("projects").join("nothing-here").exists());
+        assert_eq!(project::list(&conn, &ws.id).unwrap().len(), before);
     }
 }

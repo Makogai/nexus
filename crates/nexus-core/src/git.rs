@@ -135,12 +135,19 @@ pub fn clone_url_allowed(url: &str) -> bool {
 }
 
 fn git_long(repo: Option<&Path>, args: &[&str]) -> Result<proc::Output> {
+    git_long_for(repo, args, Duration::from_secs(180))
+}
+
+fn git_long_for(repo: Option<&Path>, args: &[&str], timeout: Duration) -> Result<proc::Output> {
     let mut cmd = git_cmd(repo)?;
     // Never execute transports that run commands, never prompt.
     cmd.args(["-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never"]);
     cmd.args(args);
-    proc::run(cmd, Duration::from_secs(180))
+    proc::run(cmd, timeout)
 }
+
+/// A full clone can take a while for a real project (history, large files): it gets more time than other remote calls.
+const CLONE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 
 /// Shallow clone of `url` (one branch, no submodules) into `dest` (must not exist).
 pub fn clone_shallow(url: &str, dest: &Path, git_ref: Option<&str>) -> Result<()> {
@@ -391,7 +398,15 @@ pub fn clone_full(url: &str, dest: &Path) -> std::result::Result<(), RemoteError
         return Err(RemoteError { kind: RemoteFailure::Other, message: "only https://, ssh://, git@host:path and file:// Git URLs are supported".into() });
     }
     let dest_s = dest.to_string_lossy().into_owned();
-    remote_cmd(None, &["clone", "--quiet", "--no-recurse-submodules", "--", url, &dest_s]).map(|_| ())
+    let args = ["clone", "--quiet", "--no-recurse-submodules", "--", url, &dest_s];
+    match git_long_for(None, &args, CLONE_TIMEOUT) {
+        Ok(out) if out.success() => Ok(()),
+        Ok(out) => Err(remote_error(&out.stderr_str())),
+        Err(e) => {
+            let m = e.to_string();
+            Err(RemoteError { kind: if m.contains("timed out") { RemoteFailure::Timeout } else { RemoteFailure::Other }, message: redact_url(&m) })
+        }
+    }
 }
 
 /// A commit for review: id, time, author name (no e-mail) and summary — summaries are untrusted text, cleaned.

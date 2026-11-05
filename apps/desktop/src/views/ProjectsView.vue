@@ -39,7 +39,7 @@ async function locate(p: Project) {
           <Search />
           <input v-model="query" class="input" placeholder="Filter by name, stack or path" />
         </div>
-        <button class="btn btn-primary" @click="adding = true"><Plus /> Add project</button>
+        <button class="btn btn-primary" data-add-project-open @click="adding = true"><Plus /> Add project</button>
       </div>
     </div>
 
@@ -53,7 +53,7 @@ async function locate(p: Project) {
       <FolderGit2 class="empty-icon" />
       <h3>Register your first project</h3>
       <p>Choose a local folder — usually a Git repository. NEXUS inspects it deterministically and never runs its scripts.</p>
-      <button class="btn btn-primary" @click="adding = true"><Plus /> Add project</button>
+      <button class="btn btn-primary" data-add-project-open @click="adding = true"><Plus /> Add project</button>
     </div>
 
     <AddProjectDialog :open="adding" @close="adding = false" />

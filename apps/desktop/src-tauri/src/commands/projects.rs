@@ -39,6 +39,25 @@ fn own_conn(ctx: &Ctx) -> IpcResult<nexus_core::db::Connection> {
     Ok(nexus_core::db::open(&ctx.data_dir.join(nexus_core::db::DB_FILE))?)
 }
 
+/// Add a new project from Git: clone (into `projects/<name>` or `folder`), register, create its context. A clone can
+/// take minutes, so it runs on its own connection.
+#[tauri::command]
+pub async fn project_clone_new(
+    ctx: State<'_, Ctx>,
+    workspace_id: String,
+    url: String,
+    name: Option<String>,
+    folder: Option<String>,
+) -> IpcResult<Project> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = nexus_core::workspace::get(&c, &workspace_id)?;
+        Ok(project::discovery::clone_new(&c, &ctx.data_dir, &ws, &url, name.as_deref(), folder.as_deref())?)
+    })
+    .await
+}
+
 /// Repositories in the workspace's clone folder and projects missing on this computer (Portable Workspace P4).
 #[tauri::command]
 pub async fn project_scan(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResult<project::discovery::Scan> {

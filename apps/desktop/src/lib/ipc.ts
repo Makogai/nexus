@@ -178,6 +178,9 @@ export const api = {
     call<PathInspection>('project_inspect_path', { workspaceId, path }),
   projectRegister: (workspaceId: string, path: string, name?: string) =>
     call<Project>('project_register', { workspaceId, path, name }),
+  /** A new project from Git: cloned into `projects/<name>` (or `folder`), registered with its context. */
+  projectCloneNew: (workspaceId: string, url: string, name: string | null, folder: string | null) =>
+    call<Project>('project_clone_new', { workspaceId, url, name, folder }),
   projectUnregister: (id: string) => call<void>('project_unregister', { id }),
   projectLocate: (id: string, path: string) => call<Project>('project_locate', { id, path }),
   projectRefresh: (id: string) => call<Project>('project_refresh', { id }),
