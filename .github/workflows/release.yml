@@ -115,7 +115,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: System dependencies (Tauri, WebKitGTK)
-        timeout-minutes: 10
+        # A slow mirror may finish (one was still downloading after 10 min); a silent one fails after 30 s per request.
+        timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |

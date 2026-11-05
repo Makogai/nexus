@@ -29,7 +29,8 @@ jobs:
           components: clippy
       - name: Linux system dependencies (Tauri)
         if: runner.os == 'Linux'
-        timeout-minutes: 10
+        # A slow mirror may finish (one was still downloading after 10 min); a silent one fails after 30 s per request.
+        timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
