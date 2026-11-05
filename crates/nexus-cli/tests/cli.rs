@@ -385,7 +385,9 @@ fn hook_handler_records_activity_and_never_fails_claude() {
     for _ in 0..2 {
         assert!(hook(&e, sid, "stop", "{}").status.success());
     }
-    let edit = format!(r#"{{"tool_name":"Edit","tool_input":{{"file_path":"{repo}\\src\\main.rs"}}}}"#);
+    // The platform's own separators (on Linux/macOS a backslash is part of a file name, not a separator).
+    let edited = e.repo.join("src").join("main.rs").display().to_string().replace('\\', "\\\\");
+    let edit = format!(r#"{{"tool_name":"Edit","tool_input":{{"file_path":"{edited}"}}}}"#);
     assert!(hook(&e, sid, "post-tool-use", &edit).status.success());
     let prompt = hook(&e, sid, "user-prompt", r#"{"prompt":"do not store me"}"#);
     assert!(prompt.status.success() && prompt.stdout.is_empty(), "UserPromptSubmit stdout would be injected: stay silent");
