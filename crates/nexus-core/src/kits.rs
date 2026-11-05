@@ -22,6 +22,8 @@ use crate::{git, new_id, now_ms, paths, proc};
 /// A kit larger than this starts with no skills selected for a profile (the user chooses).
 pub const AUTO_SELECT_MAX_SKILLS: usize = 10;
 pub const AUTO_SELECT_MAX_TOKENS: usize = 1500;
+/// Plugin name of a workspace's own skills in its sessions: skills are `workspace:<skill>` (ADR-0037).
+pub const WORKSPACE_KIT: &str = "workspace";
 const MAX_HASH_FILES: usize = 2000;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -40,6 +42,8 @@ pub struct Kit {
     pub commit_sha: Option<String>,
     pub registered_at: i64,
     pub updated_at: i64,
+    /// Set for a workspace's own skills kit: it reaches only that workspace's sessions (ADR-0037).
+    pub workspace_id: Option<String>,
 }
 
 impl Kit {
@@ -126,7 +130,7 @@ pub fn hash_dir(dir: &Path) -> String {
 }
 
 const SELECT: &str = "SELECT id, name, source_kind, location, git_ref, subdir, kind, version, content_hash, approved_hash, commit_sha,
-    registered_at, updated_at FROM kits";
+    registered_at, updated_at, workspace_id FROM kits";
 
 fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Kit> {
     Ok(Kit {
@@ -143,6 +147,7 @@ fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Kit> {
         commit_sha: r.get(10)?,
         registered_at: r.get(11)?,
         updated_at: r.get(12)?,
+        workspace_id: r.get(13)?,
     })
 }
 
@@ -182,25 +187,71 @@ fn resolve_subdir(root: &Path, subdir: Option<&str>, plugin_name: Option<&str>) 
     Ok(String::new())
 }
 
-fn insert(conn: &Connection, data_dir: &Path, mut k: Kit) -> Result<Kit> {
+fn insert(conn: &Connection, data_dir: &Path, mut k: Kit, approve: bool) -> Result<Kit> {
     let dir = content_dir(data_dir, &k);
     let inv = plugin::inventory(&dir);
     if inv.kind == "skills" && inv.skills.is_empty() {
         return Err(CoreError::invalid(inv.problems.first().cloned().unwrap_or_else(|| "nothing to use in this folder".into())));
     }
-    if !plugin::valid_plugin_name(&inv.name) {
-        return Err(CoreError::invalid(format!("“{}” is not a usable plugin name (letters, digits, '-' or '_')", inv.name)));
+    if k.name.is_empty() {
+        k.name = inv.name.clone();
     }
-    k.name = inv.name.clone();
+    if !plugin::valid_plugin_name(&k.name) {
+        return Err(CoreError::invalid(format!("“{}” is not a usable plugin name (letters, digits, '-' or '_')", k.name)));
+    }
     k.kind = inv.kind.clone();
     k.version = inv.version.clone();
     k.content_hash = hash_dir(&dir);
+    let approved = approve.then(|| k.content_hash.clone());
     conn.execute(
-        "INSERT INTO kits(id, name, source_kind, location, git_ref, subdir, kind, version, content_hash, approved_hash, commit_sha, registered_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?11)",
-        params![k.id, k.name, k.source_kind, k.location, k.git_ref, k.subdir, k.kind, k.version, k.content_hash, k.commit_sha, k.registered_at],
+        "INSERT INTO kits(id, name, source_kind, location, git_ref, subdir, kind, version, content_hash, approved_hash, commit_sha, registered_at, updated_at, workspace_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13)",
+        params![k.id, k.name, k.source_kind, k.location, k.git_ref, k.subdir, k.kind, k.version, k.content_hash, approved, k.commit_sha, k.registered_at, k.workspace_id],
     )?;
     get(conn, &k.id)
+}
+
+/// The workspace's own skills kit, if registered on this machine.
+pub fn workspace_kit(conn: &Connection, workspace_id: &str) -> Result<Option<Kit>> {
+    Ok(conn.query_row(&format!("{SELECT} WHERE workspace_id = ?1"), [workspace_id], from_row).optional()?)
+}
+
+/// Register (or re-bind after the folder moved) the workspace's `skills/` folder as its AI Kit. `approve` is true only
+/// when the person put the content there through NEXUS (a template install); synced content is reviewed first.
+pub fn register_workspace(conn: &Connection, data_dir: &Path, ws: &crate::workspace::Workspace, approve: bool) -> Result<Kit> {
+    let location = ws.root_path.to_string_lossy().into_owned();
+    if let Some(k) = workspace_kit(conn, &ws.id)? {
+        let dir = ws.root_path.join("skills");
+        let inv = plugin::inventory(&dir);
+        let hash = hash_dir(&dir);
+        conn.execute(
+            "UPDATE kits SET location = ?2, subdir = 'skills', kind = ?3, content_hash = ?4,
+                approved_hash = CASE WHEN ?5 THEN ?4 ELSE approved_hash END, updated_at = ?6 WHERE id = ?1",
+            params![k.id, location, inv.kind, hash, approve, now_ms()],
+        )?;
+        return get(conn, &k.id);
+    }
+    let mut k = blank("local", location);
+    k.subdir = "skills".into();
+    k.name = WORKSPACE_KIT.into();
+    k.workspace_id = Some(ws.id.clone());
+    insert(conn, data_dir, k, approve)
+}
+
+/// The workspace kit as a session use: all its skills (agents and commands too), never hooks or MCP servers.
+fn workspace_use(conn: &Connection, data_dir: &Path, workspace_id: &str, policy: &PolicySummary) -> Result<Option<KitUse>> {
+    let Some(k) = workspace_kit(conn, workspace_id)? else { return Ok(None) };
+    let v = view(conn, data_dir, &k)?;
+    let blocked = blocked_by(policy).map(str::to_string).or_else(|| match v.status {
+        "approved" => None,
+        "changed" => Some("the workspace skills changed since they were approved — review them again".into()),
+        "missing" => Some("the workspace skills folder is missing".into()),
+        _ => Some("the workspace skills have not been reviewed and approved yet".into()),
+    });
+    let mut inv = effective(&v.inventory, &Selection::default());
+    inv.hooks.clear();
+    inv.mcp_servers.clear();
+    Ok(Some(KitUse { kit_id: k.id, inventory: inv, blocked }))
 }
 
 fn blank(source_kind: &str, location: String) -> Kit {
@@ -218,6 +269,7 @@ fn blank(source_kind: &str, location: String) -> Kit {
         commit_sha: None,
         registered_at: now_ms(),
         updated_at: now_ms(),
+        workspace_id: None,
     }
 }
 
@@ -226,7 +278,7 @@ pub fn register_local(conn: &Connection, data_dir: &Path, folder: &str, subdir: 
     let root = paths::validate_user_path(folder, paths::Expect::ExistingDir)?;
     let mut k = blank("local", root.to_string_lossy().into_owned());
     k.subdir = resolve_subdir(&root, subdir, plugin_name)?;
-    insert(conn, data_dir, k)
+    insert(conn, data_dir, k, false)
 }
 
 /// Register a kit from a Git repository: NEXUS clones it (shallow) into its own data folder.
@@ -239,7 +291,7 @@ pub fn register_git(conn: &Connection, data_dir: &Path, url: &str, git_ref: Opti
     let result = (|| {
         k.subdir = resolve_subdir(&checkout, subdir, plugin_name)?;
         k.commit_sha = git::head(&checkout);
-        insert(conn, data_dir, k.clone())
+        insert(conn, data_dir, k.clone(), false)
     })();
     if result.is_err() {
         let _ = std::fs::remove_dir_all(kits_dir(data_dir).join(&k.id));
@@ -431,7 +483,7 @@ pub struct KitLaunch {
 
 /// Plugin folders for a profile's session: one overlay per enabled, approved kit with exactly the selected parts.
 pub fn session_plugin_dirs(conn: &Connection, data_dir: &Path, profile_id: &str, policy: &PolicySummary) -> Result<(Vec<PathBuf>, Vec<KitLaunch>)> {
-    let (dirs, launches, _) = session_plugin_dirs_with(conn, data_dir, profile_id, policy, &[])?;
+    let (dirs, launches, _) = session_plugin_dirs_with(conn, data_dir, profile_id, None, policy, &[])?;
     Ok((dirs, launches))
 }
 
@@ -443,6 +495,7 @@ pub fn session_plugin_dirs_with(
     conn: &Connection,
     data_dir: &Path,
     profile_id: &str,
+    workspace_id: Option<&str>,
     policy: &PolicySummary,
     extra: &[String],
 ) -> Result<(Vec<PathBuf>, Vec<KitLaunch>, Vec<String>)> {
@@ -450,6 +503,14 @@ pub fn session_plugin_dirs_with(
     let mut launches = Vec::new();
     let mut refused = Vec::new();
     let mut uses = uses_for_profile(conn, data_dir, profile_id, policy)?;
+    // A workspace kit never reaches another workspace's sessions, even when a profile enabled it (ADR-0037).
+    uses.retain(|u| get(conn, &u.kit_id).map(|k| k.workspace_id.is_none() || k.workspace_id.as_deref() == workspace_id).unwrap_or(false));
+    if let Some(w) = workspace_id
+        && let Some(u) = workspace_use(conn, data_dir, w, policy)?
+        && !uses.iter().any(|x| x.kit_id == u.kit_id)
+    {
+        uses.push(u);
+    }
     let mut variant: std::collections::HashMap<String, Vec<String>> = Default::default();
     for r in extra {
         let Some((kit, skill)) = r.split_once(':') else {

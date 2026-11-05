@@ -41,6 +41,216 @@ export interface Workspace {
   lastOpenedAt: number | null
   projectCount: number
   available: boolean
+  /** Schema, writability and migration state (ADR-0036); null when the manifest cannot be read. */
+  compat: WorkspaceCompat | null
+  template: { id: string; version: string } | null
+}
+
+export interface WorkspaceCompat {
+  schemaVersion: number
+  writable: boolean
+  reason: string | null
+  needsMigration: boolean
+}
+
+export interface MigrationChange {
+  path: string
+  action: 'update' | 'append' | 'create'
+  description: string
+}
+
+export interface MigrationPlan {
+  workspaceId: string
+  from: number
+  to: number
+  changes: MigrationChange[]
+  notes: string[]
+}
+
+export interface TemplateSummary {
+  id: string
+  version: string
+  title: string
+  summary: string
+  extends: string | null
+  features: string[]
+  highlights: string[]
+  constitutions: number
+  stackRuleSets: number
+  skills: number
+  workflows: number
+  integrations: number
+  alwaysOnChars: number
+}
+
+export type TemplateAction = 'add' | 'update' | 'unchanged' | 'keep-customized' | 'keep-removed' | 'skip-existing' | 'retire'
+
+export interface TemplatePlan {
+  template: { id: string; version: string }
+  installed: { id: string; version: string } | null
+  items: { path: string; kind: 'constitution' | 'skill' | 'workflow' | 'integration' | 'file'; template: string; action: TemplateAction }[]
+  notes: string[]
+}
+
+export interface TemplateApplied {
+  plan: TemplatePlan
+  written: string[]
+  savedForReview: string[]
+  kitId: string | null
+}
+
+export interface ProjectScan {
+  projectsDir: string
+  found: { path: string; rel: string; name: string; remoteUrl: string | null; stacks: string[]; status: 'registered' | 'known' | 'new'; projectId: string | null }[]
+  missing: { id: string; name: string; remoteUrl: string | null; cloneTo: string | null; canClone: boolean; reason: string | null }[]
+  external: string[]
+}
+
+export interface ContextInitialized {
+  dir: string
+  created: string[]
+  updated: string[]
+  kept: string[]
+}
+
+export interface EnvRequirement {
+  tool: string
+  constraint: string
+  source: string
+}
+
+export interface EnvCheckItem extends EnvRequirement {
+  name: string
+  installed: string | null
+  foundAt: string | null
+  status: 'ok' | 'missing' | 'mismatch' | 'unknown'
+  installUrl: string | null
+  installCommand: string[] | null
+}
+
+export interface EnvironmentReport {
+  environment: {
+    nexus: number
+    requirements: EnvRequirement[]
+    containers: { dockerfile: string | null; composeFile: string | null; composeServices: string[]; devcontainer: string | null; devcontainerImage: string | null }
+    envVars: { name: string; source: string }[]
+    setupSection: string | null
+    commands: { kind: string; command: string; source: string }[]
+  }
+  from: 'repository' | 'workspace record'
+  checks: EnvCheckItem[]
+}
+
+export interface ClaudeSetupMethod {
+  id: string
+  title: string
+  command: string
+  shell: 'powershell' | 'cmd' | 'bash' | 'any'
+  recommended: boolean
+  autoUpdates: boolean
+  notes: string
+}
+
+export interface ClaudeSetupStatus {
+  installations: Installation[]
+  ready: boolean
+  version: string | null
+  profiles: number
+  gitForWindows: boolean | null
+  node: string | null
+  methods: ClaudeSetupMethod[]
+  docsUrl: string
+  verified: string
+  next: string[]
+}
+
+export interface DevHistory {
+  records: { id: string | null; title: string; path: string; created: string | null; branch: string | null; commit: string | null; sync: 'local' | 'committed' | 'synced' | 'no-repository' }[]
+  sessions: { id: string; title: string; startedAt: number; endedAt: number | null; state: string; record: string | null }[]
+  /** [id, title, status] */
+  tasks: [string, string, string][]
+  /** [title, status] */
+  decisions: [string, string][]
+  /** [oid, summary, timestamp] */
+  commits: [string, string, number][]
+  /** [gate, status, startedAt] */
+  gates: [string, string, number][]
+  /** [summary, createdAt] */
+  blockers: [string, number][]
+}
+
+export type SyncPolicyMode = 'manual' | 'review' | 'trusted'
+
+export interface SyncPolicyView {
+  policy: { mode: SyncPolicyMode; trust: { remote: string; branch: string; authorizedAt: number } | null }
+  managed: { trustedAllowed: boolean; reviewAllowed: boolean; source: string | null }
+  allowlist: string[]
+  trustedUnavailable: string | null
+  remote: string | null
+  branch: string | null
+}
+
+export interface RestorationStep {
+  id: string
+  title: string
+  status: 'done' | 'todo' | 'optional' | 'blocked'
+  summary: string
+  detail: string[]
+  repair: string | null
+  navigate: string | null
+}
+
+export interface Restoration {
+  workspaceId: string
+  name: string
+  steps: RestorationStep[]
+  restored: {
+    constitutions: number
+    rules: number
+    workflows: number
+    skills: number
+    projects: number
+    tasks: number
+    decisions: number
+    notes: number
+    developmentRecords: number
+    template: string | null
+  }
+  notRecoverable: string[]
+  done: number
+  total: number
+}
+
+export type DoctorStatus = 'ok' | 'info' | 'warn' | 'error'
+
+export interface DoctorFinding {
+  check: string
+  area: 'workspace' | 'knowledge' | 'skills' | 'integrations' | 'projects' | 'tools' | 'sync'
+  status: DoctorStatus
+  summary: string
+  detail: string[]
+  recommendation: string | null
+  repair: { id: string; title: string } | null
+  navigate: string | null
+}
+
+export interface DoctorReport {
+  workspaceId: string
+  findings: DoctorFinding[]
+  counts: { ok: number; info: number; warn: number; error: number }
+  checkedAt: number
+}
+
+export interface RepairPlan {
+  id: string
+  title: string
+  changes: string[]
+  notes: string[]
+}
+
+export interface Migrated {
+  plan: MigrationPlan
+  backupDir: string | null
 }
 
 export interface ScriptHint {
@@ -956,6 +1166,8 @@ export interface KitView {
   commitSha: string | null
   registeredAt: number
   updatedAt: number
+  /** Set for a workspace's own skills kit: only that workspace's sessions get it (ADR-0037). */
+  workspaceId: string | null
   status: 'approved' | 'needs-review' | 'changed' | 'missing'
   contentDir: string
   inventory: KitInventory

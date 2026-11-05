@@ -538,7 +538,7 @@ fn find_kits(root: &Path, dir: &Path, depth: usize, out: &mut Vec<String>) {
             continue;
         }
         let name = e.file_name().to_string_lossy().into_owned();
-        if depth == 0 && matches!(name.as_str(), "repos" | ".git" | ".nexus-local" | "node_modules") || name == ".git" {
+        if depth == 0 && matches!(name.as_str(), "repos" | "projects" | ".git" | ".nexus-local" | "node_modules") || name == ".git" {
             continue;
         }
         let p = e.path();

@@ -293,6 +293,10 @@ fn commit_inspection_blocks_secrets_sensitive_files_and_private_knowledge() {
     let token = format!("{}{}", "ghp_", "Z".repeat(36));
     std::fs::write(a.root().join("notes.md"), format!("deploy with {token}\n")).unwrap();
     std::fs::write(a.root().join("deploy.pem"), "not read").unwrap();
+    // New workspaces ignore .nexus-local/ (ADR-0036); an older .gitignore without that line is still caught.
+    let gi = std::fs::read_to_string(a.root().join(".gitignore")).unwrap();
+    assert!(gi.lines().any(|l| l == ".nexus-local/"));
+    std::fs::write(a.root().join(".gitignore"), gi.lines().filter(|l| *l != ".nexus-local/").collect::<Vec<_>>().join("\n")).unwrap();
     std::fs::create_dir_all(a.root().join(".nexus-local").join("knowledge")).unwrap();
     std::fs::write(a.root().join(".nexus-local").join("knowledge").join("mine.md"), "private").unwrap();
     std::fs::write(a.root().join("paths.md"), format!("log: {}\n", a.home.join("x.log").display())).unwrap();
@@ -371,3 +375,175 @@ fn failed_commits_roll_back_staging_and_remote_failures_are_explained() {
     assert!(ops::clone_workspace(&conn, &root.join("x-data"), &h, "file:///x", root.join("busy").to_str().unwrap()).unwrap_err().to_string().contains("new or empty folder"));
     assert!(ops::clone_workspace(&conn, &root.join("x-data"), &h, "ext::sh -c touch% /tmp/pwned", root.join("y").to_str().unwrap()).is_err(), "command transports are refused");
 }
+
+// ---- sync policies (Portable Workspace P7, ADR-0039) ----------------------------------------------------------------
+
+fn record(m: &Machine, project: &str, name: &str, body: &str) -> String {
+    let rel = format!("project-context/{project}/development/{name}.md");
+    let path = m.root().join(&rel);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, body).unwrap();
+    rel
+}
+
+fn allowed() -> policy::Managed {
+    policy::Managed { trusted_allowed: true, review_allowed: true, source: None }
+}
+
+fn remote_has(url: &str, rel: &str) -> bool {
+    let bare = PathBuf::from(url.trim_start_matches("file://").trim_start_matches('/').replace('/', std::path::MAIN_SEPARATOR_STR));
+    let bare = if cfg!(windows) { bare } else { PathBuf::from(format!("/{}", bare.display())) };
+    std::process::Command::new("git").args(["--git-dir", bare.to_str().unwrap(), "cat-file", "-e", &format!("HEAD:{rel}")]).status().map(|s| s.success()).unwrap_or(false)
+}
+
+#[test]
+fn policies_are_machine_local_and_trusted_publishes_only_allowlisted_records() {
+    let (a, url, _t) = origin();
+    a.commit_all("init");
+    a.push();
+    assert_eq!(policy::get(&a.conn, &a.ws.id).unwrap().mode, policy::Mode::Manual, "manual by default");
+    assert!(policy::allowlisted("project-context/shop/development/2026-11-05-x.md") && policy::allowlisted("project-context/shop/current-state.md"));
+    assert!(!policy::allowlisted("project-context/shop/tasks/t.md") && !policy::allowlisted("tasks/t.md") && !policy::allowlisted("project-context/shop/memory/m.md"));
+
+    // Manual: nothing happens.
+    let rel = record(&a, "shop", "2026-11-05-a", "Record A\n");
+    assert_eq!(policy::apply(&a.sync(), &allowed()).unwrap().action, "none");
+
+    // Review: a notification asks; nothing is committed.
+    policy::set(&a.conn, &a.ws, policy::Mode::Review, false, &allowed()).unwrap();
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!((o.action, o.files), ("notified", 1));
+    assert!(crate::notify::list(&a.conn, &Default::default()).unwrap().iter().any(|n| n.title.contains("ready to sync")));
+    assert!(!remote_has(&url, &rel));
+
+    // Trusted needs the explicit confirmation; then only the record travels — the person's task stays local.
+    assert!(policy::set(&a.conn, &a.ws, policy::Mode::Trusted, false, &allowed()).is_err());
+    let p = policy::set(&a.conn, &a.ws, policy::Mode::Trusted, true, &allowed()).unwrap();
+    assert_eq!(p.trust.as_ref().unwrap().branch, "main");
+    std::fs::create_dir_all(a.root().join("project-context").join("shop").join("tasks")).unwrap();
+    std::fs::write(a.root().join("project-context").join("shop").join("tasks").join("t.md"), "my task\n").unwrap();
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "pushed", "{o:?}");
+    assert!(remote_has(&url, &rel), "the record is published");
+    assert!(!remote_has(&url, "project-context/shop/tasks/t.md"), "the task is not");
+    let hist = history::list(&a.conn, &a.ws.id, 10).unwrap();
+    assert!(hist.iter().any(|h| h.op == "auto-sync" && h.status == "ok"), "audited: {hist:?}");
+
+    // A record with a credential-shaped value stops the automatic path and asks instead.
+    let token = format!("{}{}", "ghp_", "Q".repeat(36));
+    let bad = record(&a, "shop", "2026-11-05-b", &format!("deploy key {token}\n"));
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "paused", "{o:?}");
+    assert!(o.message.contains("finding") && !o.message.contains("QQQQ"), "{}", o.message);
+    assert!(!remote_has(&url, &bad));
+    std::fs::remove_file(a.root().join(&bad)).unwrap();
+
+    // The person's own unpushed commit is never published along with records.
+    git(a.root(), &["add", "project-context/shop/tasks/t.md"]);
+    git(a.root(), &["commit", "-qm", "my task"]);
+    record(&a, "shop", "2026-11-05-c", "Record C\n");
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "paused");
+    assert!(o.message.contains("other unpushed commits"), "{}", o.message);
+    assert!(!remote_has(&url, "project-context/shop/tasks/t.md"));
+}
+
+#[test]
+fn trusted_sync_never_forces_respects_managed_policy_and_survives_offline() {
+    let (a, url, t) = origin();
+    a.commit_all("init");
+    a.push();
+    policy::set(&a.conn, &a.ws, policy::Mode::Trusted, true, &allowed()).unwrap();
+    // Someone else pushed: the remote is ahead — the record is committed locally, never force-pushed.
+    let (b, _) = second_machine(&t, &url, "b");
+    std::fs::write(b.root().join("README.md"), "changed on B\n").unwrap();
+    b.commit_all("B");
+    b.push();
+    let rel = record(&a, "shop", "2026-11-05-a", "Record A\n");
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "paused");
+    assert!(o.message.contains("never force-pushes"), "{}", o.message);
+    assert!(!remote_has(&url, &rel));
+
+    // An organisation can forbid it: setting is refused, an existing trusted policy only asks.
+    let forbid = policy::Managed { trusted_allowed: false, review_allowed: true, source: Some("policy.json".into()) };
+    assert_eq!(policy::set(&a.conn, &a.ws, policy::Mode::Trusted, true, &forbid).unwrap_err().code(), "unsupported");
+    let o = policy::apply(&a.sync(), &forbid).unwrap();
+    assert!(o.action == "notified" || o.action == "none", "{o:?}");
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("policy.json"), r#"{"workspaceSync":{"trustedAutoSync":false}}"#).unwrap();
+    assert!(!policy::managed(&dir.path().join("policy.json")).trusted_allowed);
+    std::fs::write(dir.path().join("broken.json"), "{").unwrap();
+    assert!(!policy::managed(&dir.path().join("broken.json")).trusted_allowed, "an unreadable policy forbids");
+    assert!(policy::managed(&dir.path().join("missing.json")).trusted_allowed);
+
+    // Offline: a new machine C with a trusted policy commits locally and publishes later.
+    let (c, _) = second_machine(&t, &url, "c");
+    policy::set(&c.conn, &c.ws, policy::Mode::Trusted, true, &allowed()).unwrap();
+    let bare = PathBuf::from(url.trim_start_matches("file://").trim_start_matches('/'));
+    let moved = bare.with_file_name("remote-offline.git");
+    let bare = if cfg!(windows) { bare } else { PathBuf::from(format!("/{}", bare.display())) };
+    let moved = if cfg!(windows) { moved } else { PathBuf::from(format!("/{}", moved.display())) };
+    std::fs::rename(&bare, &moved).unwrap();
+    record(&c, "shop", "2026-11-05-c", "Record C\n");
+    let o = policy::apply(&c.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "committed", "{o:?}");
+    std::fs::rename(&moved, &bare).unwrap();
+    assert!(history::list(&c.conn, &c.ws.id, 10).unwrap().iter().any(|h| h.op == "auto-sync" && h.status == "failed"));
+}
+
+/// The generated workspace layout, and independent project repositories never entering the workspace repository: clone
+/// folders are ignored, a project registered inside the workspace is added to `.gitignore`, and any other nested
+/// repository is blocked by the commit inspection (it would otherwise be committed as a gitlink).
+#[test]
+fn generated_layout_and_independent_repositories_never_enter_the_workspace_repository() {
+    let (a, _url, _t) = origin();
+    crate::templates::apply(&a.conn, &a.data, &a.ws, "ai-engineering-pro").unwrap();
+    let mut top: Vec<String> = std::fs::read_dir(a.root()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n != ".git").collect();
+    top.sort();
+    assert_eq!(top, [".gitignore", "README.md", "constitutions", "integrations", "nexus-workspace.json", "nexus.lock.json", "projects", "skills", "workflows"]);
+    fn empty_dirs(dir: &Path, out: &mut Vec<PathBuf>) {
+        let entries: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().collect();
+        if entries.is_empty() {
+            out.push(dir.to_path_buf());
+        }
+        for e in entries {
+            if e.file_type().unwrap().is_dir() && e.file_name() != ".git" {
+                empty_dirs(&e.path(), out);
+            }
+        }
+    }
+    let mut empty = Vec::new();
+    empty_dirs(a.root(), &mut empty);
+    assert_eq!(empty, [a.root().join("projects")], "no empty folders besides the clone folder");
+    let gi = std::fs::read_to_string(a.root().join(".gitignore")).unwrap();
+    for line in ["projects/", "repos/", ".nexus-local/", "*.db", ".env", ".env.*"] {
+        assert!(gi.lines().any(|l| l == line), "{line} in {gi}");
+    }
+
+    for d in ["projects/app", "repos/old", "code/inside", "stray"] {
+        let dir = a.root().join(d);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        std::fs::write(dir.join("main.rs"), "fn main() {}\n").unwrap();
+    }
+    crate::project::register(&a.conn, &a.ws.id, a.root().join("code").join("inside").to_str().unwrap(), None).unwrap();
+    assert!(std::fs::read_to_string(a.root().join(".gitignore")).unwrap().lines().any(|l| l == "/code/inside/"), "a project inside the workspace is ignored");
+    let changed: Vec<String> = git::changed_paths(a.root()).unwrap().into_iter().map(|(_, p)| p).collect();
+    assert!(!changed.iter().any(|p| p.starts_with("projects/") || p.starts_with("repos/") || p.starts_with("code/")), "{changed:?}");
+    assert!(changed.iter().any(|p| p.trim_end_matches('/') == "stray"), "{changed:?}");
+    let r = ops::review_commit(&a.sync(), None).unwrap();
+    assert!(r.inspection.blocked, "a nested repository blocks the commit");
+    assert!(r.inspection.findings.iter().any(|f| f.path.trim_end_matches('/') == "stray" && f.kind == "submodule"), "{:?}", r.inspection.findings);
+
+    // The Doctor notices a project folder that lost its ignore line and puts it back on request.
+    let gi = std::fs::read_to_string(a.root().join(".gitignore")).unwrap();
+    std::fs::write(a.root().join(".gitignore"), gi.replace("/code/inside/\n", "")).unwrap();
+    let home = a.home.clone();
+    let report = crate::workspace_doctor::run(&a.conn, &a.data, &a.ws, &crate::workspace_doctor::Options { home: &home, probe_tools: false }).unwrap();
+    let f = report.findings.iter().find(|f| f.check == "projects-ignored").expect("reported");
+    assert_eq!(f.detail, ["code/inside"]);
+    crate::workspace_doctor::repair(&a.conn, &a.data, &a.ws, "ignore-projects").unwrap();
+    assert!(!git::changed_paths(a.root()).unwrap().iter().any(|(_, p)| p.starts_with("code/")));
+}
+

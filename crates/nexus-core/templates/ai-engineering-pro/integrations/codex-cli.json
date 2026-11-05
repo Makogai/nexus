@@ -1,0 +1,66 @@
+{
+  "nexus": 1,
+  "id": "codex-cli",
+  "name": "OpenAI Codex CLI",
+  "kind": "cli-tool",
+  "summary": "OpenAI's coding agent that runs locally in a terminal; in NEXUS it is useful as an independent second-opinion reviewer of a change or a design.",
+  "homepage": "https://github.com/openai/codex",
+  "license": "Apache-2.0",
+  "verifiedAt": "2026-11-05",
+  "enabled": false,
+  "requires": ["node"],
+  "provides": "codex",
+  "stacks": [],
+  "install": [
+    {
+      "platform": "any",
+      "method": "npm (global)",
+      "steps": [
+        "Install Node.js.",
+        "Run `npm install -g @openai/codex`."
+      ],
+      "changes": "Installs the `codex` command into the global npm prefix. Node.js is required only for this method."
+    },
+    {
+      "platform": "macos",
+      "method": "Homebrew",
+      "steps": [
+        "Run `brew install --cask codex`."
+      ],
+      "changes": "Installs Codex through Homebrew; Node.js is not needed."
+    },
+    {
+      "platform": "linux",
+      "method": "install script (macOS and Linux)",
+      "steps": [
+        "Download the script without running it: `curl -fsSL https://chatgpt.com/codex/install.sh -o codex-install.sh`.",
+        "Read `codex-install.sh`, then run the file you read with `sh codex-install.sh` (piping the URL straight into `sh` runs whatever the server sends at that moment)."
+      ],
+      "changes": "Downloads and installs Codex for the current user as described in the script; Node.js is not needed."
+    },
+    {
+      "platform": "windows",
+      "method": "PowerShell install script",
+      "steps": [
+        "Download the script without running it: `irm https://chatgpt.com/codex/install.ps1 -OutFile codex-install.ps1`.",
+        "Read `codex-install.ps1`, then run the file you read with `powershell -ExecutionPolicy Bypass -File codex-install.ps1`."
+      ],
+      "changes": "Downloads and installs Codex for the current user as described in the script; Node.js is not needed."
+    }
+  ],
+  "nexusDelivery": "NEXUS does not install, configure or sign in Codex. The person installs it and signs in themselves, then runs it in the project on the same branch as a second reviewer and records its findings in the NEXUS task next to Claude's. Nothing is added to a Claude configuration, and NEXUS never reads, copies or forwards Codex's sign-in or configuration.",
+  "dataFlow": "The code, files and prompts Codex reads are sent to OpenAI and processed under the person's OpenAI account terms. Codex keeps its own configuration and sign-in in the person's home folder (see the Codex documentation).",
+  "security": [
+    "Do not use Codex on code that an employer or client has not approved for processing by OpenAI.",
+    "NEXUS never reads, copies or forwards Codex's stored sign-in or configuration.",
+    "Prefer npm or Homebrew. If you use an install script, download it, read it and run the file you read; do not pipe it from the network into a shell.",
+    "Codex can edit files and run commands in the project. For a second-opinion review, ask it only to read and report, and check anything it changed before keeping it.",
+    "Never paste API keys into prompts, task text or repository files; configure them the way the Codex documentation describes.",
+    "Treat Codex's review as a second opinion: verify each finding against the code before acting on it."
+  ],
+  "usage": [
+    "Sign in by running `codex` and choosing \"Sign in with ChatGPT\" (recommended for Plus, Pro, Business, Edu and Enterprise plans), or configure an API key.",
+    "Second-opinion review: run Codex in the project with the change checked out, ask it to review the diff against the base branch, and record its findings in the task log labelled with their source.",
+    "Documentation: https://developers.openai.com/codex"
+  ]
+}

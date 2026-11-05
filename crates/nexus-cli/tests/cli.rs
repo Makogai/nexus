@@ -377,7 +377,11 @@ fn hook_handler_records_activity_and_never_fails_claude() {
 
     let out = hook(&e, sid, "session-start", &format!(r#"{{"session_id":"{csid}","source":"startup","cwd":"{repo}"}}"#));
     assert!(out.status.success());
-    assert!(out.stdout.is_empty(), "nothing to recover on a first start: no injection");
+    let first = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        first.is_empty() || (first.contains("\"additionalContext\":\"NEXUS knowledge:") && first.len() < 400),
+        "nothing to recover on a first start — at most the one-line knowledge pointer: {first}"
+    );
     for _ in 0..2 {
         assert!(hook(&e, sid, "stop", "{}").status.success());
     }
@@ -534,7 +538,9 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     let task = e.json(&["tasks", "add", "Ship login", "--priority", "high", "--project", "repo"]);
     let id = task["id"].as_str().unwrap().to_string();
     let path = PathBuf::from(task["path"].as_str().unwrap());
-    assert!(path.starts_with(ws_dir(&e).join("tasks")) && path.ends_with(format!("{id}.md")), "file name = id");
+    // A project's tasks live in its portable context folder (schema 2, Portable Workspace P4).
+    let tasks_dir = ws_dir(&e).join("project-context").join("repo").join("tasks");
+    assert!(path.starts_with(&tasks_dir) && path.ends_with(format!("{id}.md")), "file name = id: {}", path.display());
 
     let moved = e.ok(&["tasks", "move", &id[id.len() - 8..], "in-progress", "--log", "Started on the form"]);
     assert!(moved.contains("in-progress"), "{moved}");
@@ -560,13 +566,13 @@ fn knowledge_and_tasks_round_trip_through_files_and_the_index() {
     assert_eq!(leaked.status.code(), Some(1));
 
     // Index health: a broken file and a duplicated id are reported, not hidden or guessed.
-    std::fs::write(ws_dir(&e).join("tasks").join("broken.md"), "---\nnexus: 1\nkind: task\n---\n").unwrap();
-    std::fs::copy(&path, ws_dir(&e).join("tasks").join("copy-of-task.md")).unwrap();
+    std::fs::write(tasks_dir.join("broken.md"), "---\nnexus: 1\nkind: task\n---\n").unwrap();
+    std::fs::copy(&path, tasks_dir.join("copy-of-task.md")).unwrap();
     let all = e.json(&["knowledge", "list", "--invalid"]);
     let problems = all.as_array().unwrap().iter().filter(|i| i["valid"] == false || !i["conflict"].is_null()).count();
     assert_eq!(problems, 3, "the broken file and both copies of the duplicated id: {all:#}");
     assert_eq!(e.run(&["tasks", "move", &id, "done"]).status.code(), Some(1), "a duplicated id is a conflict");
-    std::fs::remove_file(ws_dir(&e).join("tasks").join("copy-of-task.md")).unwrap();
+    std::fs::remove_file(tasks_dir.join("copy-of-task.md")).unwrap();
 
     // Index recovery: the index is rebuilt from the files alone.
     let before = e.json(&["knowledge", "list"]).as_array().unwrap().len();
@@ -865,6 +871,199 @@ fn backup_and_restore_keep_everything_recoverable() {
     assert!(e.run(&["backup", "restore", "../outside", "--yes"]).status.code() == Some(1), "ids are names, not paths");
 }
 
+/// ADR-0036: a schema 1 workspace is migrated only after the plan was shown and confirmed, with a backup; a workspace
+/// from a newer NEXUS opens read-only and refuses changes.
+#[test]
+fn workspace_schema_migration_and_read_only_compatibility() {
+    let e = Env::new();
+    let old = e.home().join("old-ws");
+    std::fs::create_dir_all(old.join("repos")).unwrap();
+    std::fs::write(old.join(".gitignore"), "repos/\n").unwrap();
+    let manifest = r#"{"schemaVersion":1,"id":"0192f2a4-0000-7000-8000-00000000aa01","name":"Old","projects":[]}"#;
+    std::fs::write(old.join("nexus-workspace.json"), manifest).unwrap();
+    e.ok(&["workspaces", "open", old.to_str().unwrap()]);
+    let info = e.json(&["workspaces", "info"]);
+    assert_eq!(info["schemaVersion"], 1);
+    assert_eq!(info["compat"]["needsMigration"], true);
+    assert_eq!(info["projectsDir"], "repos");
+
+    // Without --yes: the plan, nothing changed.
+    let dry = e.run(&["workspaces", "migrate"]);
+    assert_eq!(dry.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&dry.stdout);
+    assert!(text.contains("update nexus-workspace.json") && text.contains("append .gitignore") && text.contains("Repeat with --yes"), "{text}");
+    assert_eq!(std::fs::read_to_string(old.join("nexus-workspace.json")).unwrap(), manifest);
+
+    let done = e.json(&["workspaces", "migrate", "--yes"]);
+    assert_eq!(done["applied"], true);
+    let backup = PathBuf::from(done["backupDir"].as_str().unwrap());
+    assert!(backup.starts_with(&e.data), "backups live in the NEXUS data folder: {}", backup.display());
+    assert_eq!(std::fs::read_to_string(backup.join("nexus-workspace.json")).unwrap(), manifest);
+    let info = e.json(&["workspaces", "info"]);
+    assert_eq!((info["schemaVersion"].as_i64(), info["projectsDir"].as_str()), (Some(2), Some("repos")));
+    assert!(e.ok(&["workspaces", "migrate"]).contains("nothing to migrate"));
+
+    // New workspaces start on schema 2 with projects/.
+    e.ok(&["workspaces", "create", e.home().join("new-ws").to_str().unwrap(), "--name", "New"]);
+    let info = e.json(&["workspaces", "info"]);
+    assert_eq!((info["schemaVersion"].as_i64(), info["projectsDir"].as_str()), (Some(2), Some("projects")));
+    assert!(e.home().join("new-ws").join("projects").is_dir());
+
+    // A workspace from a newer NEXUS: readable, not writable.
+    let future = e.home().join("future-ws");
+    std::fs::create_dir_all(&future).unwrap();
+    std::fs::write(future.join("nexus-workspace.json"), r#"{"schemaVersion":9,"id":"0192f2a4-0000-7000-8000-00000000aa02","name":"Future","projects":[]}"#).unwrap();
+    e.ok(&["workspaces", "open", future.to_str().unwrap()]);
+    assert!(e.ok(&["workspaces", "info"]).contains("READ-ONLY"));
+    let add = e.run(&["projects", "add", e.repo.to_str().unwrap()]);
+    assert!(!add.status.success());
+    assert!(String::from_utf8_lossy(&add.stderr).contains("read-only"), "{}", String::from_utf8_lossy(&add.stderr));
+    assert!(!e.run(&["workspaces", "migrate", "--yes"]).status.success(), "a newer schema is never migrated backwards");
+}
+
+/// ADR-0037: a template installs through the stores after a reviewed plan; its skills reach this workspace's sessions
+/// (and no other workspace's) as the `workspace` kit; the constitution reaches Claude progressively — the core text plus
+/// one entry per on-demand document, stack rules only for the project's stacks.
+#[test]
+fn templates_install_a_progressive_library_scoped_to_its_workspace() {
+    let e = Env::new();
+    e.setup();
+    let list = e.json(&["templates", "list"]);
+    assert_eq!(list.as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect::<Vec<_>>(), ["minimal", "developer", "ai-engineering-pro"]);
+    let dry = e.run(&["templates", "apply", "ai-engineering-pro"]);
+    assert_eq!(dry.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&dry.stdout).contains("Repeat with --yes"));
+    assert!(!ws_dir(&e).join("constitutions").exists(), "nothing written before --yes");
+    let done = e.json(&["templates", "apply", "ai-engineering-pro", "--yes"]);
+    assert!(done["written"].as_array().unwrap().len() > 40, "{done}");
+    assert!(e.ok(&["templates", "apply", "ai-engineering-pro"]).contains("nothing to change"));
+    assert_eq!(e.json(&["workspaces", "info"])["template"]["id"], "ai-engineering-pro");
+    assert!(ws_dir(&e).join("nexus.lock.json").is_file());
+
+    let (report, session) = launch_report(&e, &[], "template-launch.json");
+    let args: Vec<String> = serde_json::from_value(report["args"].clone()).unwrap();
+    let plugin = args.windows(2).find(|w| w[0] == "--plugin-dir").map(|w| PathBuf::from(&w[1])).expect("the workspace kit is delivered");
+    let manifest: Value = serde_json::from_slice(&std::fs::read(plugin.join(".claude-plugin").join("plugin.json")).unwrap()).unwrap();
+    assert_eq!(manifest["name"], "workspace");
+    assert!(plugin.join("skills").join("feature-development").join("SKILL.md").is_file());
+    assert!(session["integrations"]["kits"].as_array().unwrap().iter().any(|k| k["name"] == "workspace" && k["blocked"].is_null()), "{}", session["integrations"]);
+    let prompt = args.windows(2).find(|w| w[0] == "--append-system-prompt").map(|w| w[1].clone()).unwrap();
+    assert!(prompt.contains("CORE-1") && prompt.contains("TST-*") && prompt.contains("RS-*"), "{prompt}");
+    assert!(!prompt.contains("VUE-*") && !prompt.contains("TST-1 "), "stack rules follow the project; documents, not rule ids: {prompt}");
+
+    // A different workspace's sessions never get these skills.
+    let other = e.home().join("other-repo");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("Cargo.toml"), "[package]\nname = \"other\"\n").unwrap();
+    assert!(Command::new("git").args(["init", "-q", "-b", "main"]).current_dir(&other).status().unwrap().success());
+    e.ok(&["workspaces", "create", e.home().join("ws2").to_str().unwrap(), "--name", "Other"]);
+    e.ok(&["projects", "add", other.to_str().unwrap()]);
+    let report2 = e.home().join("other-launch.json");
+    let out = e.cmd(&["launch", "--project", "other-repo", "-q"]).env("FAKE_CLAUDE_REPORT", &report2).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let args2: Vec<String> = serde_json::from_value(read_report(&report2)["args"].clone()).unwrap();
+    assert!(!args2.iter().any(|a| a == "--plugin-dir"), "workspace skills stay in their workspace: {args2:?}");
+
+    // A new workspace can start from a template directly; an unknown template creates nothing.
+    e.ok(&["workspaces", "create", e.home().join("ws3").to_str().unwrap(), "--name", "Third", "--template", "minimal"]);
+    assert!(e.home().join("ws3").join("constitutions").join("core.md").is_file());
+    assert!(!e.run(&["workspaces", "create", e.home().join("ws4").to_str().unwrap(), "--name", "Fourth", "--template", "nope"]).status.success());
+    assert!(!e.home().join("ws4").exists());
+}
+
+/// Portable Workspace P3: the Workspace Doctor reports with recommendations; a repair shows its plan and changes
+/// nothing without --yes.
+#[test]
+fn workspace_doctor_reports_and_repairs_after_review() {
+    let e = Env::new();
+    e.setup();
+    let ws = ws_dir(&e);
+    std::fs::remove_file(ws.join("README.md")).unwrap();
+    std::fs::create_dir_all(ws.join("rules")).unwrap();
+    std::fs::write(ws.join("rules").join("broken.md"), "---\nnexus: 1\nkind: rule\n---\n").unwrap();
+    let r = e.json(&["workspaces", "doctor"]);
+    let find = |check: &str| r["findings"].as_array().unwrap().iter().find(|f| f["check"] == check).cloned();
+    assert_eq!(find("readme").unwrap()["repair"]["id"], "readme");
+    assert!(find("knowledge-invalid").unwrap()["detail"][0].as_str().unwrap().starts_with("rules/broken.md"));
+    assert_eq!(find("projects").unwrap()["status"], "ok");
+    let text = e.ok(&["workspaces", "doctor"]);
+    assert!(text.contains("repair: nexus workspaces doctor --repair readme"), "{text}");
+
+    let dry = e.run(&["workspaces", "doctor", "--repair", "readme"]);
+    assert_eq!(dry.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&dry.stdout).contains("create README.md"));
+    assert!(!ws.join("README.md").exists(), "a plan changes nothing");
+    e.ok(&["workspaces", "doctor", "--repair", "readme", "--yes"]);
+    assert!(ws.join("README.md").is_file());
+    assert!(!e.run(&["workspaces", "doctor", "--repair", "format-disk", "--yes"]).status.success(), "only known repairs");
+}
+
+/// Portable Workspace P4: `projects add` gives a project its portable context; `projects scan` reports projects outside
+/// the workspace and repositories in the clone folder without registering them; `projects context` keeps the person's
+/// documents.
+#[test]
+fn projects_get_a_portable_context_and_scanning_registers_nothing() {
+    let e = Env::new();
+    e.setup(); // the repo lives outside the workspace folder
+    let ctx = ws_dir(&e).join("project-context").join("repo");
+    for f in ["project.json", "overview.md", "architecture.md", "current-state.md"] {
+        assert!(ctx.join(f).is_file(), "{f}");
+    }
+    let stray = ws_dir(&e).join("projects").join("stray");
+    std::fs::create_dir_all(&stray).unwrap();
+    assert!(Command::new("git").args(["init", "-q"]).current_dir(&stray).status().unwrap().success());
+    let scan = e.json(&["projects", "scan"]);
+    assert_eq!(scan["external"], serde_json::json!(["repo"]));
+    assert_eq!(scan["found"][0]["rel"], "projects/stray");
+    assert_eq!(scan["found"][0]["status"], "new");
+    assert_eq!(e.json(&["projects", "list"]).as_array().unwrap().len(), 1, "scanning registers nothing");
+    std::fs::write(ctx.join("overview.md"), std::fs::read_to_string(ctx.join("overview.md")).unwrap() + "\nMy notes.\n").unwrap();
+    let r = e.json(&["projects", "context", "repo"]);
+    assert!(r["kept"].as_array().unwrap().iter().any(|k| k.as_str().unwrap().ends_with("overview.md")), "{r}");
+    assert!(std::fs::read_to_string(ctx.join("overview.md")).unwrap().contains("My notes."));
+    assert!(!e.run(&["projects", "clone", "repo"]).status.success(), "an available project is not cloned again");
+}
+
+/// Portable Workspace P5: environment requirements come from the project's files and are recorded in the workspace;
+/// `--check` compares them with this computer; `nexus setup` reports Claude Code and the official methods.
+#[test]
+fn environment_requirements_and_claude_code_setup() {
+    let e = Env::new();
+    std::fs::write(e.repo.join("Cargo.toml"), "[package]\nname = \"demo\"\nrust-version = \"1.70\"\n").unwrap();
+    std::fs::write(e.repo.join(".env.example"), "DATABASE_URL=postgres://localhost/db\n").unwrap();
+    e.setup();
+    let recorded = std::fs::read_to_string(ws_dir(&e).join("project-context").join("repo").join("environment.json")).unwrap();
+    assert!(recorded.contains("Cargo.toml rust-version") && recorded.contains("DATABASE_URL") && !recorded.contains("postgres://"), "{recorded}");
+    let r = e.json(&["projects", "env", "repo", "--check"]);
+    assert_eq!(r["from"], "repository");
+    let rustc = r["checks"].as_array().unwrap().iter().find(|c| c["tool"] == "rustc").cloned().unwrap();
+    assert_eq!((rustc["constraint"].as_str(), rustc["status"].as_str()), (Some(">=1.70"), Some("ok")), "the Rust that runs this test meets 1.70: {rustc}");
+    let s = e.cmd(&["--json", "setup"]).output().unwrap();
+    let v: Value = serde_json::from_slice(&s.stdout).unwrap();
+    assert_eq!(s.status.code(), Some(if v["ready"] == true { 0 } else { 1 }));
+    assert!(v["methods"].as_array().unwrap().iter().any(|m| m["recommended"] == true));
+    assert_eq!(v["docsUrl"], "https://code.claude.com/docs/en/setup");
+}
+
+/// Portable Workspace P8: `nexus workspaces restore` lists every step with its state, what came with the workspace and
+/// what cannot be recovered from it.
+#[test]
+fn workspace_restoration_plan_on_this_computer() {
+    let e = Env::new();
+    e.setup();
+    e.ok(&["templates", "apply", "developer", "--yes"]);
+    let r = e.json(&["workspaces", "restore"]);
+    let status = |id: &str| r["steps"].as_array().unwrap().iter().find(|s| s["id"] == id).map(|s| s["status"].as_str().unwrap().to_string());
+    assert_eq!(status("schema").as_deref(), Some("done"));
+    assert_eq!(status("projects").as_deref(), Some("done"));
+    assert_eq!(status("profiles").as_deref(), Some("done"), "setup added a profile");
+    assert_eq!(status("approvals").as_deref(), Some("done"), "installed here, so approved here");
+    assert_eq!((r["restored"]["constitutions"].as_u64(), r["restored"]["skills"].as_u64()), (Some(6), Some(5)));
+    assert!(r["notRecoverable"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("transcripts")));
+    let text = e.ok(&["workspaces", "restore"]);
+    assert!(text.contains("steps done") && text.contains("Not recoverable from the workspace"), "{text}");
+}
+
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {
@@ -1077,7 +1276,7 @@ fn mcp_knowledge_is_scoped_to_the_sessions_workspace() {
     assert_eq!(r[2]["isError"], true);
     assert_eq!(r[3]["isError"], true);
     let created = &r[4]["structuredContent"]["created"];
-    let file = ws_dir(&e).join("tasks").join(format!("{}.md", created["id"].as_str().unwrap()));
+    let file = ws_dir(&e).join("project-context").join("repo").join("tasks").join(format!("{}.md", created["id"].as_str().unwrap()));
     let text = std::fs::read_to_string(file).unwrap();
     assert!(text.contains("source: claude") && text.contains("project: "), "Claude's task is attributed and bound to the session project");
     assert_eq!(r[5]["structuredContent"]["summary"]["openTasks"], 2);
@@ -1415,7 +1614,8 @@ fn session_end_proposes_memories_and_only_approval_makes_knowledge() {
     let csid = session["claudeSessionId"].as_str().unwrap();
     hook(&e, &sid, "session-end", &format!(r#"{{"hook_event_name":"SessionEnd","reason":"prompt_input_exit","session_id":"{csid}"}}"#));
 
-    assert!(e.json(&["knowledge", "list"]).as_array().unwrap().is_empty(), "nothing becomes knowledge on its own");
+    let memory: Vec<Value> = e.json(&["knowledge", "list"]).as_array().unwrap().iter().filter(|i| i["kind"] == "note" || i["kind"] == "decision").cloned().collect();
+    assert!(memory.is_empty(), "nothing becomes knowledge on its own: {memory:?}");
     let pending = e.json(&["knowledge", "proposals", "list"]);
     let pending = pending.as_array().unwrap();
     assert_eq!(pending.len(), 2, "decision + blocker; routine progress is not memory: {pending:#?}");

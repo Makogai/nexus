@@ -48,7 +48,7 @@ function inventory(skills: number): KitInventory {
 function kit(over: Partial<KitView> = {}): KitView {
   return {
     id: 'k1', name: 'probe-kit', sourceKind: 'local', location: '/kits/probe-kit', gitRef: null, subdir: '', kind: 'plugin', version: '1.0.0',
-    contentHash: 'h', approvedHash: null, commitSha: null, registeredAt: 0, updatedAt: 0, status: 'needs-review', contentDir: '/kits/probe-kit',
+    contentHash: 'h', approvedHash: null, commitSha: null, registeredAt: 0, updatedAt: 0, workspaceId: null, status: 'needs-review', contentDir: '/kits/probe-kit',
     inventory: inventory(12), profiles: [], ...over,
   }
 }

@@ -139,3 +139,31 @@ pub async fn sync_restore(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResul
     })
     .await
 }
+
+/// The workspace's sync policy on this machine (ADR-0039).
+#[tauri::command]
+pub async fn sync_policy_get(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResult<sync::policy::PolicyView> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = conn(&ctx)?;
+        let w = workspace::get(&c, &workspace_id)?;
+        Ok(sync::policy::view(&c, &w, &sync::policy::default_managed_path())?)
+    })
+    .await
+}
+
+/// Change the policy: trusted needs `remote_is_private` (the person's confirmation) and the managed policy's consent.
+#[tauri::command]
+pub async fn sync_policy_set(app: AppHandle, ctx: State<'_, Ctx>, workspace_id: String, mode: sync::policy::Mode, remote_is_private: bool) -> IpcResult<sync::policy::PolicyView> {
+    let ctx = ctx.inner().clone();
+    let r = blocking(move || {
+        let c = conn(&ctx)?;
+        let w = ws(&c, &workspace_id)?;
+        let path = sync::policy::default_managed_path();
+        sync::policy::set(&c, &w, mode, remote_is_private, &sync::policy::managed(&path))?;
+        Ok(sync::policy::view(&c, &w, &path)?)
+    })
+    .await;
+    let _ = app.emit(SYNC_EVENT, ());
+    r
+}

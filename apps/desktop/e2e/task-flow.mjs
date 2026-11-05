@@ -218,7 +218,8 @@ try {
   check('the effective-instructions panel renders', !!inspector)
 
   // 5. Proposed memory (ADR-0022): reviewed and approved before it becomes knowledge.
-  const decisionsDir = join(wsDir, 'knowledge', 'decisions')
+  // A project's decisions live in its portable context folder (Portable Workspace P4).
+  const decisionsDir = join(wsDir, 'project-context', 'repo', 'decisions')
   const decisionFiles = () => (existsSync(decisionsDir) ? readdirSync(decisionsDir) : [])
   check('the proposal is not knowledge before review', decisionFiles().length === 0)
   await cdp.evaluate(`location.hash = '#/knowledge', true`)

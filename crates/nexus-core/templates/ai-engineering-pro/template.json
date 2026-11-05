@@ -1,0 +1,14 @@
+{
+  "id": "ai-engineering-pro",
+  "version": "1.0.0",
+  "title": "AI Engineering Pro",
+  "summary": "A complete engineering library: 14 constitutions, 13 technology rule sets, 11 skills, 7 workflows and optional integration manifests — loaded progressively.",
+  "extends": "developer",
+  "features": ["project-context", "development-records", "integrations"],
+  "highlights": [
+    "Constitutions for architecture, security, performance, accessibility, databases, frontend, backend and DevOps",
+    "Stack rules for Angular, Vue, React, TypeScript, Node.js, Laravel, PHP, Python, Rust, Flutter, Dart, SQL and Docker — only for projects that use them",
+    "Skills for refactoring, test generation, security review, architecture documentation, Playwright testing and dependency analysis",
+    "Optional integration manifests: Graphify, OpenAI Codex CLI, Playwright MCP, GitHub CLI — never installed automatically"
+  ]
+}

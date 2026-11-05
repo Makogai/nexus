@@ -2,10 +2,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { ArrowRight, FolderInput, FolderPlus, GitBranch, ShieldCheck, Sparkles, TriangleAlert } from '@lucide/vue'
 import CloneWorkspaceForm from '../components/CloneWorkspaceForm.vue'
-import type { SyncCloned } from '../lib/types'
+import type { SyncCloned, TemplateSummary } from '../lib/types'
 import { router } from '../router'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { toIpcError } from '../lib/ipc'
+import { api, toIpcError } from '../lib/ipc'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
 import { useProjectStore } from '../stores/projects'
@@ -21,6 +21,9 @@ const name = ref('Personal')
 const parentDir = ref<string | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
+const templates = ref<TemplateSummary[]>([])
+/** Starter template (ADR-0037); null = an empty workspace. */
+const template = ref<string | null>('developer')
 
 const sep = computed(() => (app.info?.platform === 'windows' ? '\\' : '/'))
 const slug = computed(() => name.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'workspace')
@@ -28,6 +31,7 @@ const targetPath = computed(() => (parentDir.value ? `${parentDir.value}${sep.va
 
 onMounted(() => {
   profiles.detect().catch(() => undefined)
+  api.templateList().then((t) => (templates.value = t)).catch(() => undefined)
 })
 
 async function pickParent() {
@@ -40,7 +44,7 @@ async function create() {
   busy.value = true
   error.value = null
   try {
-    const ws = await workspaces.create(targetPath.value, name.value.trim())
+    const ws = await workspaces.create(targetPath.value, name.value.trim(), undefined, template.value)
     await projects.load(ws.id)
     app.toast('success', `Workspace “${ws.name}” created`)
   } catch (e) {
@@ -52,7 +56,7 @@ async function create() {
 
 async function cloned(r: SyncCloned) {
   app.toast('success', `Workspace “${r.workspace.name}” opened from Git`)
-  await router.push({ name: 'sync', query: { restore: '1' } })
+  await router.push({ name: 'restore' })
 }
 
 async function importExisting() {
@@ -138,6 +142,33 @@ async function importExisting() {
             <button class="btn" @click="pickParent">Browse…</button>
           </div>
         </div>
+        <div v-if="templates.length" class="field">
+          <label>Starter template</label>
+          <div class="templates" role="radiogroup" aria-label="Starter template">
+            <button
+              v-for="t in templates"
+              :key="t.id"
+              class="template"
+              :class="{ selected: template === t.id }"
+              role="radio"
+              :aria-checked="template === t.id"
+              :data-template="t.id"
+              @click="template = t.id"
+            >
+              <strong>{{ t.title }}</strong>
+              <span class="muted">{{ t.summary }}</span>
+              <span class="counts">
+                {{ t.constitutions }} constitutions<template v-if="t.stackRuleSets"> · {{ t.stackRuleSets }} stack rule sets</template
+                ><template v-if="t.skills"> · {{ t.skills }} skills</template><template v-if="t.workflows"> · {{ t.workflows }} workflows</template>
+              </span>
+            </button>
+            <button class="template" :class="{ selected: template === null }" role="radio" :aria-checked="template === null" data-template="none" @click="template = null">
+              <strong>Empty</strong>
+              <span class="muted">Only the workspace manifest — add constitutions, skills and workflows yourself.</span>
+            </button>
+          </div>
+          <span class="hint">Only a small core agreement is always in Claude's context; the rest is read when relevant. You can add or update a template later.</span>
+        </div>
         <div class="row">
           <button class="btn btn-ghost" @click="mode = 'choose'">Back</button>
           <span class="spacer" />
@@ -161,6 +192,39 @@ async function importExisting() {
 </template>
 
 <style scoped>
+.templates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.template {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+.template:hover {
+  border-color: var(--border-strong);
+}
+.template.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.template .muted {
+  font-size: 12px;
+  line-height: 1.45;
+}
+.template .counts {
+  font-size: 11px;
+  color: var(--text-faint);
+}
 .onboarding {
   height: 100%;
   overflow: auto;

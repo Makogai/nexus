@@ -248,7 +248,12 @@ pub fn inventory(dir: &Path) -> Inventory {
         inv.problems.push("larger than 2,000 files / 20 MB".into());
     }
 
-    for skills_dir in manifest_paths(&manifest, "skills", dir, "skills", &mut inv.problems) {
+    let mut skills_dirs = manifest_paths(&manifest, "skills", dir, "skills", &mut inv.problems);
+    // A folder of skills itself (`<dir>/<name>/SKILL.md`, e.g. a workspace's `skills/`, ADR-0037).
+    if inv.kind == "skills" && !dir.join("skills").is_dir() && sorted_dirs(dir).iter().any(|e| e.join("SKILL.md").is_file()) {
+        skills_dirs = vec![dir.to_path_buf()];
+    }
+    for skills_dir in skills_dirs {
         for e in sorted_dirs(&skills_dir) {
             if let Some(t) = read_small(&e.join("SKILL.md")) {
                 let (n, d) = front(&t);

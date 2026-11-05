@@ -126,3 +126,14 @@ pub fn launch_options() -> LaunchOptions {
         effort_levels: EFFORT_LEVELS,
     }
 }
+
+/// Claude Code setup: installation, version, profiles and the official installation methods (Portable Workspace P5).
+#[tauri::command]
+pub async fn claude_setup_status(ctx: State<'_, Ctx>) -> IpcResult<nexus_core::claude::setup::Status> {
+    let ctx = ctx.inner().clone();
+    crate::error::blocking(move || {
+        let c = nexus_core::db::open(&ctx.data_dir.join(nexus_core::db::DB_FILE))?;
+        Ok(nexus_core::claude::setup::status(&c, &ctx.home, true)?)
+    })
+    .await
+}

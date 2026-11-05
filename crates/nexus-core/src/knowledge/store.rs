@@ -55,6 +55,17 @@ pub fn create(workspace_dir: &Path, new: NewDoc) -> Result<Written> {
 
 /// Create a document in an explicit root (global knowledge lives in the NEXUS data dir).
 pub fn create_in(root: &Path, new: NewDoc) -> Result<Written> {
+    let folder = new.kind.folder();
+    create_in_folder(root, folder, new)
+}
+
+/// Create a document in `folder` (relative to `root`) instead of the kind's conventional folder — e.g.
+/// `constitutions/` or `project-context/<project>/tasks` in schema 2 workspaces (ADR-0036).
+pub fn create_in_folder(root: &Path, folder: &str, new: NewDoc) -> Result<Written> {
+    if folder.is_empty() || crate::paths::resolve_within(root, folder).is_err() {
+        return Err(CoreError::invalid(format!("`{folder}` is not a folder inside the knowledge root")));
+    }
+    crate::workspace::ensure_writable_at(&root.join(folder).join("x"))?;
     let id = uuid::Uuid::now_v7().to_string();
     let now = timestamp(now_ms());
     let mut fm = Frontmatter::default();
@@ -80,7 +91,7 @@ pub fn create_in(root: &Path, new: NewDoc) -> Result<Written> {
     let doc = Doc { fm, body: new.body };
     let root_privacy = if root.ends_with(LOCAL_DIR) || new.privacy == Privacy::LocalOnly { Privacy::LocalOnly } else { Privacy::Shared };
     doc.validate(root_privacy).map_err(CoreError::Invalid)?;
-    let dir = root.join(new.kind.folder());
+    let dir = root.join(folder);
     std::fs::create_dir_all(&dir).map_err(|e| CoreError::io("cannot create", &dir, e))?;
     let path = dir.join(format!("{id}.md"));
     let text = doc.render();
@@ -91,6 +102,7 @@ pub fn create_in(root: &Path, new: NewDoc) -> Result<Written> {
 /// Read–modify–write with optimistic concurrency: when `expected_hash` is given and the file changed since the
 /// caller read it, nothing is written and `conflict` is returned. `id`, `kind`, `created` and `nexus` cannot change.
 pub fn update(path: &Path, expected_hash: Option<&str>, root_privacy: Privacy, edit: impl FnOnce(&mut Doc) -> Result<()>) -> Result<Written> {
+    crate::workspace::ensure_writable_at(path)?;
     let (mut doc, hash) = read(path)?;
     if let Some(expected) = expected_hash
         && expected != hash

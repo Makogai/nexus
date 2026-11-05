@@ -2,11 +2,13 @@
 import { computed, onActivated, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
+import { ArrowLeft, BookMarked, Boxes, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
 import { relativeTime } from '../lib/format'
-import { api } from '../lib/ipc'
+import { api, toIpcError } from '../lib/ipc'
+import { useWorkspaceStore } from '../stores/workspaces'
+import { typeIntoTerminal } from '../lib/terminal'
 import { STATUS_LABELS } from '../lib/knowledge'
-import type { Checkpoint, KnowledgeItem, ProjectKnowledge, TaskStatus } from '../lib/types'
+import type { Checkpoint, ContextInitialized, EnvCheckItem, EnvironmentReport, KnowledgeItem, ProjectKnowledge, TaskStatus } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
@@ -23,6 +25,45 @@ const router = useRouter()
 const refreshing = ref(false)
 
 const project = computed(() => projects.byId[props.id] ?? null)
+const workspaces = useWorkspaceStore()
+const contextResult = ref<ContextInitialized | null>(null)
+const env = ref<EnvironmentReport | null>(null)
+const envBusy = ref(false)
+/** Environment requirements from the project's files (Portable Workspace P5); `check` probes this computer. */
+async function loadEnv(check: boolean) {
+  const ws = workspaces.active
+  if (!ws) return
+  envBusy.value = true
+  try {
+    env.value = await api.projectEnvironment(ws.id, props.id, check)
+  } catch (e) {
+    app.toast('error', `Could not read the environment: ${toIpcError(e).message}`)
+  } finally {
+    envBusy.value = false
+  }
+}
+const ENV_STATUS: Record<string, string> = { ok: 'badge-ok', missing: 'badge-error', mismatch: 'badge-warn', unknown: '' }
+/** One row per requirement; checked rows carry what this computer has. */
+const envRows = computed(() => {
+  const e = env.value
+  if (!e) return []
+  if (e.checks.length) return e.checks
+  return e.environment.requirements.map((r) => ({ ...r, name: r.tool, installed: null, foundAt: null, status: null as EnvCheckItem['status'] | null, installUrl: null, installCommand: null as string[] | null }))
+})
+const contextBusy = ref(false)
+/** Create or refresh the project's portable context in the workspace (Portable Workspace P4). */
+async function initContext() {
+  const ws = workspaces.active
+  if (!ws) return
+  contextBusy.value = true
+  try {
+    contextResult.value = await api.projectContextInit(ws.id, props.id)
+  } catch (e) {
+    app.toast('error', `Could not write the project context: ${toIpcError(e).message}`)
+  } finally {
+    contextBusy.value = false
+  }
+}
 const git = computed(() => projects.git[props.id])
 const projectSessions = computed(() => sessions.list.filter((s) => s.projectId === props.id && !s.archivedAt))
 const checkpoints = ref<Checkpoint[]>([])
@@ -114,6 +155,7 @@ async function unregister() {
         <button class="btn" :disabled="!project.available" @click="reveal"><FolderOpen /> Open folder</button>
         <button class="btn" :disabled="!project.available" @click="openShell"><SquareTerminal /> Shell</button>
         <button class="btn" data-resume-project @click="router.push(`/projects/${project.id}/resume`)"><History /> Resume project</button>
+        <button class="btn btn-ghost" data-open-history @click="router.push(`/projects/${project.id}/history`)"><NotebookPen /> Development history</button>
         <button class="btn" data-project-context @click="router.push({ name: 'context', query: { project: project.id } })"><Gauge /> Context</button>
         <button class="btn" data-project-workflow @click="router.push({ name: 'workflows', query: { start: '1', project: project.id } })"><Workflow /> Run workflow</button>
         <button class="btn btn-primary" :disabled="!project.available" @click="app.openLaunch(project.id)"><Sparkles /> Launch Claude</button>
@@ -169,6 +211,45 @@ async function unregister() {
             </li>
           </ul>
         </template>
+      </section>
+
+      <section class="card" data-project-environment>
+        <h2 class="card-title"><Boxes /> Environment</h2>
+        <p class="faint">What this project needs, read from its own files (they stay authoritative). Checking asks each tool for its version only; installing is always your step in a terminal.</p>
+        <div class="row-actions">
+          <button class="btn btn-sm" :disabled="envBusy" data-env-load @click="loadEnv(false)">Show requirements</button>
+          <button class="btn btn-sm" :disabled="envBusy" data-env-check @click="loadEnv(true)">Check this computer</button>
+        </div>
+        <template v-if="env">
+          <p class="faint">From the {{ env.from }}.</p>
+          <table class="env-table" data-env-table>
+            <tbody>
+              <tr v-for="(r, i) in envRows" :key="r.tool + r.source + i" :data-env-row="r.tool">
+                <td><strong>{{ r.name }}</strong></td>
+                <td class="mono">{{ r.constraint || 'any' }}</td>
+                <td class="faint">{{ r.source }}</td>
+                <td v-if="r.status">
+                  <span class="badge" :class="ENV_STATUS[r.status]">{{ r.status }}</span>
+                  <span v-if="r.installed" class="faint"> {{ r.installed }}</span>
+                  <button v-if="r.installCommand" class="btn btn-sm btn-ghost" :data-env-install="r.tool" @click="typeIntoTerminal(r.installCommand.join(' '))">Type install command</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="env.environment.containers.composeServices.length" class="faint">Local services ({{ env.environment.containers.composeFile }}): {{ env.environment.containers.composeServices.join(', ') }}</p>
+          <p v-if="env.environment.containers.devcontainer" class="faint">Dev container: {{ env.environment.containers.devcontainer }} <span v-if="env.environment.containers.devcontainerImage" class="mono">{{ env.environment.containers.devcontainerImage }}</span></p>
+          <p v-if="env.environment.envVars.length" class="faint">Environment variables (names only): <span class="mono">{{ env.environment.envVars.map((v) => v.name).join(', ') }}</span></p>
+          <p v-if="env.environment.setupSection" class="faint">Setup instructions: README.md — “{{ env.environment.setupSection }}”</p>
+        </template>
+      </section>
+
+      <section class="card" data-project-context-card>
+        <h2 class="card-title"><BookMarked /> Portable context</h2>
+        <p class="faint">An overview, architecture notes, the current state and this project's tasks, decisions and memory live in the workspace repository (<span class="mono">project-context/</span>), so they travel with the workspace. Facts are read from the project's files and Git; nothing is invented, and documents you edit are never overwritten.</p>
+        <button class="btn btn-sm" :disabled="contextBusy || !workspaces.active?.compat?.writable" data-project-context-init @click="initContext">Create or refresh</button>
+        <p v-if="contextResult" class="faint" data-project-context-result>
+          <span class="mono">{{ contextResult.dir }}/</span> — {{ contextResult.created.length }} created, {{ contextResult.updated.length }} updated, {{ contextResult.kept.length }} kept
+        </p>
       </section>
     </div>
 
@@ -237,6 +318,21 @@ async function unregister() {
 </template>
 
 <style scoped>
+.row-actions {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+}
+.env-table {
+  width: 100%;
+  font-size: 12.5px;
+  border-collapse: collapse;
+}
+.env-table td {
+  padding: 4px 6px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
 .back {
   margin: -8px 0 10px -8px;
 }

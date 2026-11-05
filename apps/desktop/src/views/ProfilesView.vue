@@ -82,6 +82,7 @@ async function archive(p: ClaudeProfile) {
         <p>Each profile is a separate Claude Code configuration — its own account, settings, plugins and history.</p>
       </div>
       <div class="page-actions">
+        <RouterLink :to="{ name: 'claude-setup' }" class="btn btn-ghost" data-open-setup>Claude Code setup</RouterLink>
         <button class="btn btn-ghost btn-icon" title="Refresh" @click="refreshAll"><RefreshCw /></button>
         <button class="btn" @click="openDialog('register')"><FolderOpen /> Register existing</button>
         <button class="btn btn-primary" @click="openDialog('create')"><Plus /> New profile</button>

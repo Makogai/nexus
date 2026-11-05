@@ -1,7 +1,10 @@
 //! Project registry. A project is an independent Git repository registered in a workspace.
 //! Portable fields go to the workspace manifest, the machine-local path to SQLite (ADR-0005).
 
+pub mod context;
 pub mod detect;
+pub mod discovery;
+pub mod environment;
 
 use std::path::{Path, PathBuf};
 
@@ -142,6 +145,7 @@ pub fn register(conn: &Connection, workspace_id: &str, raw: &str, name: Option<&
         name: name.clone(),
         remote_url: remote_url.clone(),
         path: rel,
+        context: None,
         extra: Default::default(),
     });
 
@@ -161,8 +165,25 @@ pub fn register(conn: &Connection, workspace_id: &str, raw: &str, name: Option<&
     )?;
     // Manifest first, commit second: if the manifest cannot be written nothing is registered.
     workspace::write_manifest(&ws.root_path, &manifest)?;
+    // A repository inside the workspace (outside the clone folder) must never end up in the workspace's Git repository.
+    if let Some(rel) = manifest.projects.last().and_then(|p| p.path.clone()) {
+        workspace::ensure_ignored(&ws.root_path, &rel)?;
+    }
     tx.commit()?;
     get(conn, &id)
+}
+
+/// Register a folder and, in a schema 2 workspace, set up its portable context (`project-context/<slug>/`). A context
+/// that cannot be written does not undo the registration — the Workspace Doctor reports it and offers to retry.
+pub fn register_with_context(conn: &Connection, data_dir: &std::path::Path, workspace_id: &str, raw: &str, name: Option<&str>) -> Result<Project> {
+    let p = register(conn, workspace_id, raw, name)?;
+    let ws = workspace::get(conn, workspace_id)?;
+    if workspace::read_manifest(&ws.root_path).map(|m| m.schema_version >= 2).unwrap_or(false)
+        && let Err(e) = context::init(conn, data_dir, &ws, &p.id)
+    {
+        tracing::warn!(project = %p.id, error = %e, "project context could not be created");
+    }
+    get(conn, &p.id)
 }
 
 /// Bind a manifest project that has no local path on this machine to a folder.

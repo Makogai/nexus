@@ -1,0 +1,76 @@
+{
+  "nexus": 1,
+  "id": "graphify",
+  "name": "Graphify",
+  "kind": "claude-skill",
+  "summary": "Turns a codebase plus its docs, SQL, configuration files and PDFs into a queryable knowledge graph that Claude explores through the /graphify skill; code is parsed locally with tree-sitter.",
+  "homepage": "https://github.com/safishamsi/graphify",
+  "license": "Apache-2.0 OR MIT",
+  "verifiedAt": "2026-11-05",
+  "enabled": false,
+  "requires": ["python", "uv"],
+  "provides": "graphify",
+  "stacks": [],
+  "install": [
+    {
+      "platform": "any",
+      "method": "uv tool (recommended)",
+      "steps": [
+        "Confirm you are looking at the canonical project, https://github.com/safishamsi/graphify; forks and mirrors exist.",
+        "Install Python 3.10 or newer and uv.",
+        "Run `uv tool install graphifyy` (the PyPI package is `graphifyy` with a double y; other graphify* packages are unaffiliated)."
+      ],
+      "changes": "Adds the `graphify` command to uv's per-user tool environment. Does not touch any project or Claude configuration."
+    },
+    {
+      "platform": "any",
+      "method": "pipx",
+      "steps": [
+        "Install Python 3.10 or newer and pipx.",
+        "Run `pipx install graphifyy`."
+      ],
+      "changes": "Adds the `graphify` command to pipx's per-user tool environment. Does not touch any project or Claude configuration."
+    },
+    {
+      "platform": "any",
+      "method": "project-scoped skill (reviewable in Git)",
+      "steps": [
+        "In the project root, run `graphify install --project`.",
+        "Review the written `.claude/skills/graphify/SKILL.md` and the `references/` folder, then commit them to the project repository.",
+        "Add `graphify-out/` to the project's .gitignore unless the team wants the graph committed."
+      ],
+      "changes": "Writes `.claude/skills/graphify/SKILL.md` and a `references/` folder into the current project, visible in Git. The person's Claude configuration is not changed."
+    },
+    {
+      "platform": "any",
+      "method": "optional project hooks (review first)",
+      "steps": [
+        "Read what the hooks do before enabling them.",
+        "`graphify claude install` in a project sets up always-on graph guidance for Claude Code, including hooks that run before Claude's search and file-read tool calls (Grep, Glob, Read); in graphify's strict mode they can deny some of those calls.",
+        "`graphify hook install` adds Git hooks that rebuild the graph on commit and checkout."
+      ],
+      "changes": "Adds Claude Code configuration and hooks to the project (`graphify claude install`) and Git hooks to the repository (`graphify hook install`). Inspect the changed files with `git status` and `git diff` before committing them."
+    }
+  ],
+  "nexusDelivery": "Prefer the project-scoped install (`graphify install --project`) that the person reviews and commits to the project repository, or package the skill as a NEXUS AI Kit and enable it per profile so it reaches sessions through a session-scoped plugin directory. NEXUS never runs `graphify install` itself and never registers the skill in a Claude configuration directory.",
+  "dataFlow": "Code is parsed locally with tree-sitter and stays on the machine. Docs, PDFs and images are sent to the assistant's model or a configured backend for extraction; `GRAPHIFY_BACKEND=none` or the `--code-only` option keeps the graph code-only, and `GRAPHIFY_BACKEND=ollama` keeps everything local. Query calls are logged to `~/.cache/graphify-queries.log` unless `GRAPHIFY_QUERY_LOG_DISABLE=1` is set. The project states that it collects no telemetry.",
+  "security": [
+    "Install only the PyPI package `graphifyy` and check the project at https://github.com/safishamsi/graphify; similarly named packages, forks and mirrors are unaffiliated.",
+    "Do not run `graphify install` without `--project`: it registers the skill in the person's assistant profile, which changes their Claude configuration outside NEXUS profile isolation.",
+    "Review `graphify claude install` before enabling it: its hooks run before Claude's search and file-read calls in the project and, in strict mode, can deny some of them.",
+    "If organisation-managed Claude Code settings restrict hooks, skills or plugins, they win; do not work around them.",
+    "Review the Git hooks added by `graphify hook install` like any other hook; they run on every commit and checkout.",
+    "For employer or client code whose docs must not leave the machine, set `GRAPHIFY_BACKEND=ollama` or use code-only mode (`GRAPHIFY_BACKEND=none` or `--code-only`) before graphing docs, PDFs or images.",
+    "The query log records the questions asked; set `GRAPHIFY_QUERY_LOG_DISABLE=1` when questions may contain confidential details.",
+    "`graphify-out/` can contain content extracted from docs; keep it in .gitignore unless the team has decided to commit it."
+  ],
+  "usage": [
+    "`/graphify .` builds the graph for the current project.",
+    "`/graphify ./docs --update` updates the graph for the docs folder after changes.",
+    "`/graphify query \"<question>\"` answers a question from the graph.",
+    "`/graphify path \"A\" \"B\"` shows how two components or concepts are connected.",
+    "`/graphify explain \"X\"` explains one node and its relationships.",
+    "Outputs land in `graphify-out/`: graph.html (interactive view), GRAPH_REPORT.md (report) and graph.json (machine-readable graph).",
+    "Uninstall with `graphify uninstall` (`--purge` also deletes graphify-out/); `graphify claude uninstall` removes the project's Claude Code hooks."
+  ]
+}

@@ -141,6 +141,14 @@ check('opting in to MCP makes the kit’s server appear in Work only', (withMcp?
 w(join(kit, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: changed upstream\n---\n')
 check('a changed kit is withheld until it is reviewed again', nexusPluginDirs('Work').length === 0)
 
+// ---- C. the workspace's own skills (Portable Workspace P2, ADR-0037) ------------------------------------------------
+cli(['workspaces', 'create', join(root, 'ws'), '--name', 'Portable', '--template', 'developer'])
+cli(['projects', 'add', proj])
+const wsInit = init(cfgPersonal, nexusPluginDirs('Personal'))
+const wsSkills = (wsInit?.skills ?? []).filter((s) => s.startsWith('workspace:'))
+check('a real session in the workspace gets the template skills as workspace:<skill>', wsSkills.length === 5 && wsSkills.includes('workspace:feature-development'), JSON.stringify(wsSkills))
+check('…from NEXUS’s overlay', (wsInit?.plugins ?? []).some((p) => p.name === 'workspace' && p.path.startsWith(data)))
+
 console.log(failures === 0 ? '\nREAL-CLAUDE KITS OK' : `\nREAL-CLAUDE KITS FAILED (${failures})`)
 process.exitCode = failures === 0 ? 0 : 1
 try {

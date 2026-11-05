@@ -9,6 +9,7 @@ import { useProjectStore } from '../stores/projects'
 import { useWorkspaceStore } from '../stores/workspaces'
 import AddProjectDialog from '../components/AddProjectDialog.vue'
 import ProjectCard from '../components/ProjectCard.vue'
+import ProjectDiscovery from '../components/ProjectDiscovery.vue'
 
 const app = useAppStore()
 const projects = useProjectStore()
@@ -41,6 +42,8 @@ async function locate(p: Project) {
         <button class="btn btn-primary" @click="adding = true"><Plus /> Add project</button>
       </div>
     </div>
+
+    <ProjectDiscovery />
 
     <div v-if="filtered.length" class="grid grid-3">
       <ProjectCard v-for="p in filtered" :key="p.id" :project="p" @locate="locate" />

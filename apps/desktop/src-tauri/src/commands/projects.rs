@@ -32,7 +32,75 @@ pub async fn project_register(
     name: Option<String>,
 ) -> IpcResult<Project> {
     let ctx = ctx.inner().clone();
-    blocking(move || Ok(project::register(&ctx.db(), &workspace_id, &path, name.as_deref())?)).await
+    blocking(move || Ok(project::register_with_context(&ctx.db(), &ctx.data_dir, &workspace_id, &path, name.as_deref())?)).await
+}
+
+fn own_conn(ctx: &Ctx) -> IpcResult<nexus_core::db::Connection> {
+    Ok(nexus_core::db::open(&ctx.data_dir.join(nexus_core::db::DB_FILE))?)
+}
+
+/// Repositories in the workspace's clone folder and projects missing on this computer (Portable Workspace P4).
+#[tauri::command]
+pub async fn project_scan(ctx: State<'_, Ctx>, workspace_id: String) -> IpcResult<project::discovery::Scan> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = nexus_core::workspace::get(&c, &workspace_id)?;
+        Ok(project::discovery::scan(&c, &ws)?)
+    })
+    .await
+}
+
+/// Clone a missing project from its recorded remote (network: own connection, the shared one stays free).
+#[tauri::command]
+pub async fn project_clone(ctx: State<'_, Ctx>, workspace_id: String, id: String, dest: Option<String>) -> IpcResult<Project> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = nexus_core::workspace::get(&c, &workspace_id)?;
+        Ok(project::discovery::clone_missing(&c, &ctx.data_dir, &ws, &id, dest.as_deref())?)
+    })
+    .await
+}
+
+/// The project's environment requirements (from its files, or the workspace record when it is not here) and, with
+/// `check`, how this computer compares (tools probed by their own version command; nothing installed).
+#[tauri::command]
+pub async fn project_environment(ctx: State<'_, Ctx>, workspace_id: String, id: String, check: bool) -> IpcResult<Option<project::environment::Report>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = nexus_core::workspace::get(&c, &workspace_id)?;
+        let p = project::get(&c, &id)?;
+        Ok(project::environment::report(&ws, &p, check))
+    })
+    .await
+}
+
+/// A project's development history (records with their sync state, sessions, tasks, decisions, commits, gate results,
+/// blockers). Records still owed for ended sessions are written first.
+#[tauri::command]
+pub async fn project_history(ctx: State<'_, Ctx>, workspace_id: String, id: String) -> IpcResult<nexus_core::devrecord::History> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = nexus_core::workspace::get(&c, &workspace_id)?;
+        let _ = nexus_core::devrecord::finalize_pending(&c, &ctx.data_dir);
+        Ok(nexus_core::devrecord::history(&c, &ctx.data_dir, &ws, &id)?)
+    })
+    .await
+}
+
+/// Create or refresh a project's portable context folder.
+#[tauri::command]
+pub async fn project_context_init(ctx: State<'_, Ctx>, workspace_id: String, id: String) -> IpcResult<project::context::Initialized> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let c = own_conn(&ctx)?;
+        let ws = nexus_core::workspace::get(&c, &workspace_id)?;
+        Ok(project::context::init(&c, &ctx.data_dir, &ws, &id)?)
+    })
+    .await
 }
 
 #[tauri::command]

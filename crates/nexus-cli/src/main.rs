@@ -14,6 +14,7 @@ mod mcp;
 mod notifications;
 mod out;
 mod sync;
+mod templates;
 mod usage;
 mod workflow;
 
@@ -48,6 +49,9 @@ struct Cli {
 enum Command {
     /// Check NEXUS, Git, Claude installations, profiles and the active workspace.
     Doctor,
+    /// Claude Code setup: is it installed and startable, which version, and the official ways to install it here.
+    /// NEXUS never installs it for you.
+    Setup,
     /// Workspaces (portable folders with a nexus-workspace.json manifest).
     #[command(subcommand)]
     Workspaces(WorkspaceCmd),
@@ -85,6 +89,9 @@ enum Command {
     /// Backups of NEXUS's machine-local state (database, global knowledge) and a safe restore (ADR-0032).
     #[command(subcommand)]
     Backup(backup::BackupCmd),
+    /// Workspace starter templates: Minimal, Developer, AI Engineering Pro (ADR-0037).
+    #[command(subcommand)]
+    Templates(templates::TemplateCmd),
     /// Constitutions: structured rules (articles, sections, rules with ids and enforcement) by scope.
     #[command(subcommand)]
     Constitution(constitution::ConstitutionCmd),
@@ -121,6 +128,9 @@ enum WorkspaceCmd {
         name: String,
         #[arg(long, default_value = "")]
         description: String,
+        /// Starter template: minimal, developer or ai-engineering-pro (`nexus templates list`).
+        #[arg(long)]
+        template: Option<String>,
     },
     /// Register an existing workspace folder (e.g. cloned on a new machine) and make it active.
     Open { folder: String },
@@ -129,6 +139,25 @@ enum WorkspaceCmd {
     /// Would syncing the active workspace folder through Git be safe? Read-only: no fetch, commit or push (ADR-0031).
     /// Exit code 1 when something blocks syncing.
     SyncStatus,
+    /// Schema, compatibility, template, features and layout of the active workspace (ADR-0036).
+    Info,
+    /// Migrate the active workspace to the current schema. Shows the plan; changes nothing without --yes. The files it
+    /// changes are backed up to the NEXUS data folder first and put back if a step fails.
+    Migrate {
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Restoring the active workspace on this computer: each step (Claude Code, schema, index, approvals, skills,
+    /// projects, tools, profiles, gates) with its state, what came with the workspace and what cannot be recovered.
+    Restore,
+    /// Workspace Doctor: health of the active workspace with recommendations. `--repair ID` shows what that repair
+    /// changes; add --yes to apply it. Exit code 1 when something is an error.
+    Doctor {
+        #[arg(long, value_name = "ID")]
+        repair: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -147,6 +176,28 @@ enum ProjectCmd {
     },
     /// Bind a project that is not on this machine to FOLDER.
     Locate { project: String, folder: String },
+    /// Repositories in the workspace's clone folder (registered, belonging to a missing project, or new) and projects
+    /// missing on this computer. Read-only.
+    Scan,
+    /// Clone a missing project from its recorded remote into the clone folder (or --to, relative to the workspace).
+    Clone {
+        project: String,
+        #[arg(long, value_name = "FOLDER")]
+        to: Option<String>,
+    },
+    /// Create or refresh a project's portable context (project-context/<project>/): the overview and architecture
+    /// you wrote are kept; project.json, environment.json and current-state.md are regenerated.
+    Context { project: String },
+    /// A project's development history: records (verified / observed / reported, with their sync state), sessions,
+    /// tasks, decisions, recent commits, gate results and blockers.
+    History { project: String },
+    /// A project's environment requirements (runtimes, package managers, containers, environment variable names) from
+    /// its files; --check compares them with this computer (tools are only asked for their version).
+    Env {
+        project: String,
+        #[arg(long)]
+        check: bool,
+    },
     /// Unregister a project (its folder and repository are not touched).
     Remove { project: String },
     /// Where a project stands: verified Git state, saved history (tasks, notes, checkpoints, sessions) and the next
@@ -246,6 +297,7 @@ fn main() -> ExitCode {
     };
     let result = match cli.command {
         Command::Doctor => cmd_doctor(&ctx),
+        Command::Setup => cmd_setup(&ctx),
         Command::Workspaces(c) => cmd_workspaces(&ctx, c).map(|_| 0),
         Command::Projects(c) => cmd_projects(&ctx, c).map(|_| 0),
         Command::Profiles(c) => cmd_profiles(&ctx, c).map(|_| 0),
@@ -260,6 +312,7 @@ fn main() -> ExitCode {
         Command::Usage(a) => usage::run(&ctx, a),
         Command::Sync(c) => sync::run(&ctx, c),
         Command::Backup(c) => backup::run(&ctx, c),
+        Command::Templates(c) => templates::run(&ctx, c),
         Command::Workflow(c) => workflow::run_workflow(&ctx, c),
         Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),
@@ -290,7 +343,33 @@ fn fail(e: &CoreError) -> ExitCode {
     ExitCode::from(1)
 }
 
-fn active_workspace(conn: &Connection) -> nexus_core::Result<workspace::Workspace> {
+fn cmd_setup(ctx: &Ctx) -> nexus_core::Result<i32> {
+    let conn = ctx.db()?;
+    let s = nexus_core::claude::setup::status(&conn, &ctx.home, true)?;
+    if ctx.json {
+        out::json(&s);
+        return Ok(if s.ready { 0 } else { 1 });
+    }
+    match (&s.version, s.ready) {
+        (Some(v), true) => println!("Claude Code {v} is installed and NEXUS can start it."),
+        (_, true) => println!("Claude Code is installed and NEXUS can start it."),
+        _ => println!("Claude Code is not installed (or cannot be started)."),
+    }
+    println!("{} Claude profile(s) registered.", s.profiles);
+    if !s.ready {
+        println!("Official installation methods (verified {}, {}):", s.verified, s.docs_url);
+        for m in &s.methods {
+            println!("  {}{} [{}]: {}", m.title, if m.recommended { " (recommended)" } else { "" }, m.shell, m.command);
+            println!("      {}", m.notes);
+        }
+    }
+    for n in &s.next {
+        println!("→ {n}");
+    }
+    Ok(if s.ready { 0 } else { 1 })
+}
+
+pub(crate) fn active_workspace(conn: &Connection) -> nexus_core::Result<workspace::Workspace> {
     workspace::active(conn)?.ok_or_else(|| {
         CoreError::invalid("no active workspace — create one with `nexus workspaces create <folder> --name <name>`")
     })
@@ -362,8 +441,14 @@ fn cmd_workspaces(ctx: &Ctx, cmd: WorkspaceCmd) -> nexus_core::Result<()> {
                 .collect();
             out::table(&["", "NAME", "PROJECTS", "FOLDER"], &rows);
         }
-        WorkspaceCmd::Create { folder, name, description } => {
+        WorkspaceCmd::Create { folder, name, description, template } => {
+            if let Some(t) = &template {
+                nexus_core::templates::info(t)?; // unknown templates fail before anything is created
+            }
             let ws = workspace::create(&conn, &folder, &name, &description)?;
+            if let Some(t) = &template {
+                nexus_core::templates::apply(&conn, &ctx.data_dir, &ws, t)?;
+            }
             print_one(&workspace::activate(&conn, &ws.id)?);
         }
         WorkspaceCmd::Open { folder } => {
@@ -401,6 +486,162 @@ fn cmd_workspaces(ctx: &Ctx, cmd: WorkspaceCmd) -> nexus_core::Result<()> {
                 }
             }
             std::process::exit(if r.ready { 0 } else { 1 });
+        }
+        WorkspaceCmd::Info => {
+            let ws = active_workspace(&conn)?;
+            let m = workspace::read_manifest(&ws.root_path)?;
+            let c = workspace::compat(&m);
+            if ctx.json {
+                out::json(&serde_json::json!({
+                    "workspace": ws, "schemaVersion": m.schema_version, "createdWith": m.created_with, "migratedWith": m.migrated_with,
+                    "minNexusVersion": m.min_nexus_version, "template": m.template, "features": m.features,
+                    "projectsDir": m.projects_dir(), "compat": c, "nexusVersion": workspace::NEXUS_VERSION,
+                }));
+                return Ok(());
+            }
+            println!("{} ({})", ws.name, ws.root_path.display());
+            println!("  schema {} · {}", m.schema_version, if c.writable { "writable" } else { "READ-ONLY" });
+            if let Some(r) = &c.reason {
+                println!("  {r}");
+            }
+            if c.needs_migration {
+                println!("  an older schema — `nexus workspaces migrate` shows what moving to schema {} changes", workspace::MANIFEST_SCHEMA);
+            }
+            println!(
+                "  created with NEXUS {} · minimum NEXUS {} · this NEXUS {}",
+                m.created_with.as_deref().unwrap_or("(unknown)"),
+                m.min_nexus_version.as_deref().unwrap_or("(none)"),
+                workspace::NEXUS_VERSION
+            );
+            match &m.template {
+                Some(t) => println!("  template {} {}", t.id, t.version),
+                None => println!("  no starter template"),
+            }
+            println!("  features: {}", if m.features.is_empty() { "(none)".to_string() } else { m.features.join(", ") });
+            println!("  project clones: {}/ · {} project(s)", m.projects_dir(), m.projects.len());
+        }
+        WorkspaceCmd::Restore => {
+            let ws = active_workspace(&conn)?;
+            let r = nexus_core::restoration::plan(&conn, &ctx.data_dir, &ctx.home, &ws, true)?;
+            if ctx.json {
+                out::json(&r);
+                return Ok(());
+            }
+            println!("Restoring {} on this computer — {} of {} steps done", r.name, r.done, r.total);
+            for s in &r.steps {
+                let mark = match s.status {
+                    "done" => "done    ",
+                    "todo" => "TO DO   ",
+                    "blocked" => "BLOCKED ",
+                    _ => "optional",
+                };
+                println!("  {mark} {}: {}", s.title, s.summary);
+                for d in &s.detail {
+                    println!("             {d}");
+                }
+                if let Some(rep) = &s.repair {
+                    println!("             → nexus workspaces doctor --repair {rep}");
+                }
+            }
+            let x = &r.restored;
+            println!(
+                "Came with the workspace: {} constitutions, {} rules, {} workflows, {} skills, {} projects, {} tasks, {} decisions, {} notes, {} development records{}",
+                x.constitutions, x.rules, x.workflows, x.skills, x.projects, x.tasks, x.decisions, x.notes, x.development_records,
+                x.template.as_deref().map(|t| format!(" (template {t})")).unwrap_or_default()
+            );
+            println!("Not recoverable from the workspace:");
+            for n in &r.not_recoverable {
+                println!("  · {n}");
+            }
+        }
+        WorkspaceCmd::Doctor { repair, yes } => {
+            use nexus_core::workspace_doctor as wd;
+            let ws = active_workspace(&conn)?;
+            if let Some(id) = repair {
+                let plan = wd::repair_plan(&conn, &ctx.data_dir, &ws, &id)?;
+                if !yes {
+                    if ctx.json {
+                        out::json(&serde_json::json!({ "plan": plan, "applied": false }));
+                    } else {
+                        println!("{}:", plan.title);
+                        for c in &plan.changes {
+                            println!("  {c}");
+                        }
+                        for n in &plan.notes {
+                            println!("  · {n}");
+                        }
+                        println!("Repeat with --yes to apply.");
+                    }
+                    std::process::exit(1);
+                }
+                let done = wd::repair(&conn, &ctx.data_dir, &ws, &id)?;
+                if ctx.json { out::json(&done) } else { println!("{}", done.message) }
+                return Ok(());
+            }
+            let r = wd::run(&conn, &ctx.data_dir, &ws, &wd::Options { home: &ctx.home, probe_tools: true })?;
+            if ctx.json {
+                out::json(&r);
+            } else {
+                println!("{} — {} error(s), {} warning(s), {} note(s), {} ok", ws.name, r.counts.error, r.counts.warn, r.counts.info, r.counts.ok);
+                for f in &r.findings {
+                    let mark = match f.status {
+                        Status::Ok => "ok   ",
+                        Status::Info => "info ",
+                        Status::Warn => "WARN ",
+                        Status::Error => "ERROR",
+                    };
+                    println!("{mark} [{}] {}", f.area, f.summary);
+                    for d in &f.detail {
+                        println!("        {d}");
+                    }
+                    if let Some(rec) = &f.recommendation {
+                        println!("        → {rec}");
+                    }
+                    if let Some(rep) = &f.repair {
+                        println!("        repair: nexus workspaces doctor --repair {}  ({})", rep.id, rep.title);
+                    }
+                }
+            }
+            if r.counts.error > 0 {
+                std::process::exit(1);
+            }
+        }
+        WorkspaceCmd::Migrate { yes } => {
+            let ws = active_workspace(&conn)?;
+            let plan = workspace::migrate::plan(&ws.root_path)?;
+            if plan.is_empty() {
+                if ctx.json {
+                    out::json(&serde_json::json!({ "plan": plan, "applied": false }));
+                } else {
+                    println!("{} is on workspace schema {} — nothing to migrate.", ws.name, plan.to);
+                }
+                return Ok(());
+            }
+            if !yes {
+                if ctx.json {
+                    out::json(&serde_json::json!({ "plan": plan, "applied": false }));
+                } else {
+                    println!("Migrating {} from workspace schema {} to {} would:", ws.name, plan.from, plan.to);
+                    for c in &plan.changes {
+                        println!("  {} {} — {}", c.action, c.path, c.description);
+                    }
+                    for n in &plan.notes {
+                        println!("  · {n}");
+                    }
+                    println!("Repeat with --yes to apply. The files above are backed up to the NEXUS data folder first.");
+                }
+                std::process::exit(1);
+            }
+            let done = workspace::migrate::apply(&conn, &ctx.data_dir, &ws)?;
+            if ctx.json {
+                out::json(&serde_json::json!({ "plan": done.plan, "applied": true, "backupDir": done.backup_dir }));
+            } else {
+                println!("{} is now on workspace schema {}.", ws.name, done.plan.to);
+                if let Some(b) = &done.backup_dir {
+                    println!("  previous versions of the changed files: {}", b.display());
+                }
+                println!("  review and commit the change through the Sync Center (`nexus sync review`).");
+            }
         }
     }
     Ok(())
@@ -459,11 +700,117 @@ fn cmd_projects(ctx: &Ctx, cmd: ProjectCmd) -> nexus_core::Result<()> {
             out::table(headers, &table);
         }
         ProjectCmd::Add { folder, name } => {
-            let p = project::register(&conn, &ws.id, &folder, name.as_deref())?;
+            let p = project::register_with_context(&conn, &ctx.data_dir, &ws.id, &folder, name.as_deref())?;
             if ctx.json {
                 out::json(&p);
             } else {
                 println!("added {} [{}] to {}", p.name, p.stack.stacks.join(", "), ws.name);
+            }
+        }
+        ProjectCmd::Scan => {
+            let s = project::discovery::scan(&conn, &ws)?;
+            if ctx.json {
+                out::json(&s);
+                return Ok(());
+            }
+            println!("clone folder: {}/", s.projects_dir);
+            for f in &s.found {
+                let what = match f.status {
+                    "registered" => "registered".to_string(),
+                    "known" => "belongs to a project missing here — `nexus projects locate` it".to_string(),
+                    _ => "new — review it and `nexus projects add` it".to_string(),
+                };
+                println!("  {} [{}] {}", f.rel, f.stacks.join(", "), what);
+            }
+            for m in &s.missing {
+                match (&m.clone_to, &m.reason) {
+                    (Some(to), _) => println!("  missing: {} — `nexus projects clone \"{}\"` → {to}", m.name, m.name),
+                    (None, Some(r)) => println!("  missing: {} — {r}", m.name),
+                    _ => println!("  missing: {}", m.name),
+                }
+            }
+            if !s.external.is_empty() {
+                println!("  outside the workspace: {}", s.external.join(", "));
+            }
+        }
+        ProjectCmd::Clone { project: q, to } => {
+            let p = project::discovery::clone_missing(&conn, &ctx.data_dir, &ws, &find(&q)?.id, to.as_deref())?;
+            if ctx.json {
+                out::json(&p);
+            } else {
+                println!("cloned {} into {}", p.name, p.local_path.as_ref().map(|x| x.display().to_string()).unwrap_or_default());
+            }
+        }
+        ProjectCmd::History { project: q } => {
+            let p = find(&q)?;
+            let _ = nexus_core::devrecord::finalize_pending(&conn, &ctx.data_dir);
+            let h = nexus_core::devrecord::history(&conn, &ctx.data_dir, &ws, &p.id)?;
+            if ctx.json {
+                out::json(&h);
+                return Ok(());
+            }
+            println!("{} — development history", p.name);
+            println!("records ({}):", h.records.len());
+            for r in &h.records {
+                println!("  {} [{}] {}", r.created.as_deref().unwrap_or(""), r.sync, r.title);
+            }
+            let open: Vec<String> = h.tasks.iter().filter(|t| t.2 != "done").map(|t| format!("[{}] {}", t.2, t.1)).collect();
+            if !open.is_empty() {
+                println!("open tasks: {}", open.join("; "));
+            }
+            for (b, at) in &h.blockers {
+                println!("blocker ({}): {b}", out::ago(Some(*at)));
+            }
+            for (oid, s, _) in h.commits.iter().take(5) {
+                println!("commit {} {s}", &oid[..oid.len().min(10)]);
+            }
+        }
+        ProjectCmd::Env { project: q, check } => {
+            let p = find(&q)?;
+            let Some(r) = project::environment::report(&ws, &p, check) else {
+                println!("{}: not on this computer and no environment record in the workspace yet", p.name);
+                return Ok(());
+            };
+            if ctx.json {
+                out::json(&r);
+                return Ok(());
+            }
+            println!("{} — environment (from the {})", p.name, r.from);
+            if r.checks.is_empty() {
+                for q in &r.environment.requirements {
+                    println!("  {} {}  ({})", q.tool, if q.constraint.is_empty() { "any version" } else { &q.constraint }, q.source);
+                }
+            } else {
+                for c in &r.checks {
+                    let have = c.installed.clone().unwrap_or_else(|| "–".into());
+                    println!("  {:<9} {} {} — installed {have}  ({})", c.status, c.name, if c.constraint.is_empty() { "(any)" } else { &c.constraint }, c.source);
+                    if let Some(cmd) = &c.install_command {
+                        println!("            install: {}  (or {})", cmd.join(" "), c.install_url.clone().unwrap_or_default());
+                    } else if c.status == "missing" {
+                        println!("            install: {}", c.install_url.clone().unwrap_or_default());
+                    }
+                }
+            }
+            let cont = &r.environment.containers;
+            if !cont.compose_services.is_empty() {
+                println!("  local services ({}): {}", cont.compose_file.clone().unwrap_or_default(), cont.compose_services.join(", "));
+            }
+            if let Some(d) = &cont.devcontainer {
+                println!("  dev container: {d}{}", cont.devcontainer_image.as_deref().map(|i| format!(" ({i})")).unwrap_or_default());
+            }
+            if !r.environment.env_vars.is_empty() {
+                println!("  environment variables (names only): {}", r.environment.env_vars.iter().map(|v| v.name.as_str()).collect::<Vec<_>>().join(", "));
+            }
+            if let Some(s) = &r.environment.setup_section {
+                println!("  setup instructions: README.md — “{s}”");
+            }
+        }
+        ProjectCmd::Context { project: q } => {
+            let r = project::context::init(&conn, &ctx.data_dir, &ws, &find(&q)?.id)?;
+            if ctx.json {
+                out::json(&r);
+            } else {
+                println!("{}: {} created, {} updated, {} kept", r.dir, r.created.len(), r.updated.len(), r.kept.len());
             }
         }
         ProjectCmd::Locate { project: q, folder } => {

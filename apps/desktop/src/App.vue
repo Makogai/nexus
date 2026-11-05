@@ -10,6 +10,7 @@ import { useNotificationStore } from './stores/notifications'
 import { toIpcError } from './lib/ipc'
 import AppSidebar from './components/AppSidebar.vue'
 import AppTopBar from './components/AppTopBar.vue'
+import WorkspaceBanner from './components/WorkspaceBanner.vue'
 import TerminalPanel from './components/TerminalPanel.vue'
 import LaunchDialog from './components/LaunchDialog.vue'
 import CommandPalette from './components/CommandPalette.vue'
@@ -126,6 +127,7 @@ onBeforeUnmount(() => {
     <AppSidebar />
     <div class="main">
       <AppTopBar />
+      <WorkspaceBanner />
       <div class="work">
         <main v-show="showContent" class="content">
           <RouterView v-slot="{ Component }">

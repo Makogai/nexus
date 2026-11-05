@@ -39,9 +39,11 @@ async function start() {
   error.value = null
   try {
     const r = await api.syncClone(url.value.trim(), folder.value)
+    // Tell the parent first: loading the stores makes the onboarding screen give way to the app, which would unmount
+    // the listener before it could navigate to the restoration steps.
+    emit('cloned', r)
     await workspaces.load()
     await projects.load(r.workspace.id)
-    emit('cloned', r)
   } catch (e) {
     error.value = toIpcError(e).message
   } finally {

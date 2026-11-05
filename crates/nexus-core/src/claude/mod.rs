@@ -12,6 +12,7 @@ pub mod plugin;
 pub mod policy;
 pub mod prepare;
 pub mod profile;
+pub mod setup;
 
 /// Native reasoning-effort levels accepted by `claude --effort` (Claude Code 2.1.x help text).
 pub const EFFORT_LEVELS: &[&str] = &["low", "medium", "high", "xhigh", "max"];

@@ -170,6 +170,10 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
             let trigger = one_of(str_field("trigger"), &["manual", "auto"], "auto");
             record(conn, &s.id, "compact", trigger, None)?;
             touch(conn, &s.id, "")?;
+            // A durable NEXUS checkpoint of what the session changed so far (ADR-0038) — from the event log only.
+            if let Err(e) = crate::devrecord::checkpoint_at_compaction(conn, &s.id) {
+                tracing::debug!(error = %e, "compaction checkpoint skipped");
+            }
             Ok(Outcome::default())
         }
         HookEvent::Stop => {

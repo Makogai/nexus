@@ -29,6 +29,8 @@ cd apps/desktop && node e2e/workflow-real-claude.mjs # workflow skills only in t
 cd apps/desktop && node e2e/usage.mjs       # Usage dashboard: transcripts → scanner → tiles, trend, breakdowns (E2E build)
 cd apps/desktop && node e2e/usage-real-claude.mjs # real transcript format parsed; nothing invented (real Claude)
 cd apps/desktop && node e2e/sync.mjs        # Sync Center: local bare remote, reviewed commit/push, ff pull (E2E build)
+cd apps/desktop && node e2e/portable.mjs    # Portable Workspace: schema, templates, Doctor, projects, env, records, sync policy (E2E build)
+cd apps/desktop && node e2e/restore.mjs     # second computer: open from Git → Restore view → clone, approve → history (E2E build)
 cd apps/desktop && npx tauri build --debug --config src-tauri/tauri.installer.conf.json && node e2e/installed.mjs # real installer: install, check, uninstall
 cd apps/desktop && node scripts/release-check.mjs ../../target/release/bundle/nsis # after `npx tauri build --config src-tauri/tauri.installer.conf.json`
 cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Windows notification sender
@@ -74,6 +76,10 @@ cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Wi
   token of a confirmed review and after the inspection (`workspace_sync::inspect`) did not block; pulls fast-forward
   only; never force, never automatic; machine-local state never travels; synced rules, constitutions, workflows and
   kits need approval again. Tests use temporary repositories and local bare remotes only.
+* Portable workspace (ADR-0036/0037): one manifest (`nexus-workspace.json`, schema 2), newer schemas read-only, explained
+  migrations with backups; templates install through the stores with a lock file and never overwrite changed files;
+  only the core constitution is always on; workspace skills reach only their workspace's sessions; project knowledge
+  lives in `project-context/<slug>/`; scanning never registers or runs anything; tools are named by id (`toolchain`).
 * Data safety (ADR-0032): never start with an empty database instead of a failed one; migrations are transactions;
   backups before upgrades, daily and before restores; restore verifies and rolls back. Installer (ADR-0033): programs in
   `%LOCALAPPDATA%\Programs\NEXUS`, data in `%LOCALAPPDATA%\NEXUS` — never mixed; the CLI is the installer's sidecar;

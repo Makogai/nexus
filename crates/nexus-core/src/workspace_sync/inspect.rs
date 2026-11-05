@@ -129,7 +129,8 @@ pub fn path_findings(rel: &str, mode: &str, dir: Direction) -> Vec<Finding> {
     }
     match mode {
         "120000" => out.push(finding(rel, None, "symlink", Severity::Block, "symbolic link — it could point outside the workspace; NEXUS does not sync links")),
-        "160000" => out.push(finding(rel, None, "submodule", Severity::Warn, "a submodule — NEXUS does not sync submodules")),
+        // A gitlink is an independent repository recorded inside the workspace: never committed by NEXUS.
+        "160000" => out.push(finding(rel, None, "submodule", out_block, "an embedded Git repository (gitlink/submodule) — project repositories stay independent; move it to projects/ or ignore it")),
         _ => {}
     }
     if let Some(why) = sensitive_reason(rel) {
@@ -139,8 +140,8 @@ pub fn path_findings(rel: &str, mode: &str, dir: Direction) -> Vec<Finding> {
     if lower.starts_with(".nexus-local/") || lower == ".nexus-local" {
         out.push(finding(rel, None, "local-only-knowledge", out_block, "local-only knowledge stays on this machine"));
     }
-    if lower.starts_with("repos/") {
-        out.push(finding(rel, None, "project-repository", out_block, "project repositories cloned into repos/ are separate repositories"));
+    if lower.starts_with("repos/") || lower.starts_with("projects/") {
+        out.push(finding(rel, None, "project-repository", out_block, "project repositories cloned into projects/ (or repos/) are separate repositories"));
     }
     let name = lower.rsplit('/').next().unwrap_or(&lower);
     if name == "claude.local.md" || (lower.contains(".claude/") && name == "settings.local.json") {
@@ -333,10 +334,14 @@ fn is_binary(bytes: &[u8]) -> bool {
 pub fn inspect_worktree(repo: &Path, ctx: &Context<'_>, changes: &[(String, String)]) -> Result<Inspection> {
     let mut insp = Inspection { files: changes.len(), ..Default::default() };
     for (status, rel) in changes {
-        let full = repo.join(rel);
+        let full = repo.join(rel.trim_end_matches('/'));
         let meta = std::fs::symlink_metadata(&full).ok();
+        // An untracked independent repository inside the workspace (Git lists it as a folder and would add it as a
+        // gitlink): blocked like any project repository.
+        let nested_repo = status != "D" && meta.as_ref().is_some_and(|m| m.is_dir()) && full.join(".git").exists();
         let mode = match &meta {
             Some(m) if m.file_type().is_symlink() => "120000",
+            _ if nested_repo => "160000",
             _ => "100644",
         };
         for f in path_findings(rel, mode, Direction::Outgoing) {

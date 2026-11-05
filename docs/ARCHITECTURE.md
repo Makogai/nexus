@@ -183,18 +183,27 @@ on this machine; see `docs/RESEARCH.md`).
 │   └── rules/ workflows/ knowledge/
 └── sessions/<nexus-session-id>/    per-session generated artifacts (mcp.json, settings.json)
 
-<workspace dir>                     chosen by the user, optionally a Git repo
-├── nexus-workspace.json            schema_version, id, name, projects[] (portable fields only)
+<workspace dir>                     chosen by the user, optionally a Git repo (schema 2, ADR-0036)
+├── nexus-workspace.json            schemaVersion, id, name, createdWith, minNexusVersion, template, features,
+│                                   layout.projects, projects[] (portable fields only)
+├── nexus.lock.json                 installed template components: version + original hash (ADR-0037)
 ├── README.md
-├── .gitignore                      ignores repos/ so project clones are never absorbed
-├── repos/                          default location for cloned project repos (independent Git repos)
+├── .gitignore                      ignores projects/, repos/, .nexus-local/ so clones never enter the repository
+├── projects/                       default location for cloned project repos (schema 1: repos/)
+├── constitutions/                  constitution documents (scope in the frontmatter: global, stacks, project)
 ├── rules/                          rules: workspace, stack (`stacks:`) and project (`project:`) scoped
 ├── workflows/                      workflow documents
 ├── knowledge/                      decisions/, notes/ (durable memory), specs/
 ├── tasks/                          one Markdown file per task (frontmatter + body); file name = UUIDv7 id
-├── skills/<name>/SKILL.md          workspace skills (native Claude format; catalogued, not executed)
+├── project-context/<project>/      portable project knowledge: project.json, environment.json, overview,
+│                                   architecture, current state, tasks/, decisions/, memory/, development/
+├── skills/<name>/SKILL.md          workspace skills (native Claude format; delivered as the workspace AI Kit)
+├── integrations/                   integration manifests (descriptive, never installed automatically)
 └── .nexus-local/                   same layout, privacy: local-only, git-ignored, never synced
 ```
+
+A workspace from a newer NEXUS (schema or `minNexusVersion`) opens read-only; schema 1 workspaces keep working and
+are migrated only after an explained plan, with a backup (`<data dir>/workspace-backups/`).
 
 ## 7. SQLite schema (v1)
 

@@ -192,6 +192,13 @@ pub fn insert_starting(conn: &Connection, s: NewSession) -> Result<Session> {
             s.task_id,
         ],
     )?;
+    // Where the project stood when the session started: commits made during it can be listed for its development
+    // record (ADR-0038). Claude sessions in a Git repository only; a cheap rev-parse.
+    if s.kind.unwrap_or(Kind::Claude) == Kind::Claude && s.project_id.is_some()
+        && let Some(head) = crate::git::head(&s.cwd)
+    {
+        conn.execute("UPDATE sessions SET head_start = ?2 WHERE id = ?1", params![id, head])?;
+    }
     get(conn, &id)
 }
 
