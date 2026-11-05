@@ -162,6 +162,13 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: One flat folder of release files
+        working-directory: dist
+        run: |
+          # The Linux artifact keeps its appimage/ and deb/ folders; a release lists files, not folders.
+          find . -mindepth 2 -type f -exec mv -n -t . {} +
+          find . -mindepth 1 -type d -empty -delete
+          if [ -n "$(find . -mindepth 1 -type d)" ]; then echo "::error::two release files share a name"; exit 1; fi
       - name: Licences and third-party notices (MIT OR Apache-2.0, ADR-0035)
         run: cp LICENSE-MIT LICENSE-APACHE THIRD_PARTY_NOTICES.md dist/
       - name: Checksums
