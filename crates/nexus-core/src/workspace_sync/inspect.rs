@@ -69,6 +69,31 @@ pub struct Context<'a> {
     pub home: &'a Path,
 }
 
+impl Finding {
+    /// Whether this finding stops automatic sync (ADR-0042 amendment): anything blocking, a possible secret, a change too
+    /// large to inspect. Portability and size warnings (an absolute path of this machine, a large file) are only noted —
+    /// a reviewed commit shows them the same way.
+    pub fn stops_automatic(&self) -> bool {
+        self.severity == Severity::Block || !matches!(self.kind, "machine-path" | "large-file")
+    }
+}
+
+/// Findings named precisely for a message or notification: `possible-secret in notes/a.md:3, … (+2 more)`. Kinds, paths
+/// and line numbers only — never the text that was found.
+pub fn describe(findings: &[&Finding]) -> String {
+    let shown: Vec<String> = findings
+        .iter()
+        .take(3)
+        .map(|f| match (f.path.is_empty(), f.line) {
+            (true, _) => f.kind.to_string(),
+            (false, Some(l)) => format!("{} in {}:{l}", f.kind, f.path),
+            (false, None) => format!("{} in {}", f.kind, f.path),
+        })
+        .collect();
+    let more = findings.len().saturating_sub(shown.len());
+    if more > 0 { format!("{} (+{more} more)", shown.join(", ")) } else { shown.join(", ") }
+}
+
 fn finding(path: &str, line: Option<usize>, kind: &'static str, severity: Severity, message: impl Into<String>) -> Finding {
     Finding { path: path.to_string(), line, kind, severity, message: message.into() }
 }

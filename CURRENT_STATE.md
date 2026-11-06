@@ -65,6 +65,13 @@ _Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning contex
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
+* **Fixes after 0.1.3 (branch `fix/autosync-and-drafts`, off `fix/env-templates`)** — owner reports, 2026-11-06:
+  * Automatic sync paused on every run after drivebay's learning: the inspection's only findings were three
+    `machine-path` warnings (read-only diagnosis of the owner's sync history and pending changes). It now stops only on
+    blocking findings, possible secrets and uninspectable changes, and names findings (kind, file, line) in the history
+    and the notification; machine paths are noted (ADR-0042 amendment).
+  * One open learning draft per topic: saving again revises it (`revised: true`), LEARN-5/6/8 and the skill updated
+    (ADR-0045 amendment). `.env.*.example`/`.dist` templates are shown in the explorer.
 * **One pipeline per release (owner feedback, 2026-11-06):** a release used to take three rounds (a CI run started by
   hand on the branch, CI on `main`, then the release run) — over an hour. Now `release.yml` calls `ci.yml`
   (`workflow_call`: clippy and tests on all platforms, frontend, the Windows E2E suites) and creates the draft only when

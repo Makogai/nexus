@@ -49,3 +49,13 @@ repository `maiw`:
 * **Putting the notes into the system prompt** — workspace text would become instructions (T22); the task carries them
   as data.
 * **Registering the wrapper as its own project and linking projects** — heavier; a folder is enough for learning.
+
+## Amendment (2026-11-06, owner report; branch `fix/autosync-and-drafts`)
+
+* **One open draft per topic.** A learning session saved the architecture four times and the overview twice — every
+  save became another draft for the person to sort out. `draft_project_document` now revises the topic's draft that is
+  still waiting for review (the newest, where older ones exist) and says so (`revised: true`); after the person used or
+  set aside a draft, the next save starts a new one. LEARN-6, the skill and the tool description say "revise, do not
+  add".
+* **No absolute paths in knowledge.** LEARN-5 asks for file paths relative to the project and never absolute paths of
+  this computer; LEARN-8 names an extra folder by its name, not its path.

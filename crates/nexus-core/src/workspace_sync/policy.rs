@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+use super::inspect;
 use super::ops::{self, Sync};
 use crate::error::{CoreError, Result};
 use crate::workspace::Workspace;
@@ -244,13 +245,18 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
     if url != trust.remote || branch != trust.branch {
         return pause(format!("the remote or branch changed since you approved it (approved {} on {})", trust.remote, trust.branch), pending.len());
     }
-    // 1. Commit — M29's reviewed commit with its inspection; any finding stops it. The message is the one Claude proposed
-    //    for this work (or one composed from the paths).
+    // Warnings that do not stop it (machine paths, large files) are named in the history entry.
+    let mut noted: Vec<inspect::Finding> = Vec::new();
+    // 1. Commit — M29's reviewed commit with its inspection; a blocking finding, a possible secret or a change too large
+    //    to inspect stops it, named precisely. The message is the one Claude proposed for this work (or one composed from
+    //    the paths).
     if !pending.is_empty() {
         let review = ops::review_commit(s, Some(&pending))?;
-        if !review.inspection.findings.is_empty() {
-            return pause(format!("the security inspection reported {} finding(s) in the changes", review.inspection.findings.len()), pending.len());
+        let (stop, note): (Vec<&inspect::Finding>, Vec<&inspect::Finding>) = review.inspection.findings.iter().partition(|f| f.stops_automatic());
+        if !stop.is_empty() {
+            return pause(format!("the security inspection stopped it: {}", inspect::describe(&stop)), pending.len());
         }
+        noted.extend(note.into_iter().cloned());
         let message = if everything {
             super::message::suggest(s.conn, &s.ws.id, &s.ws.root_path, &pending)?
         } else {
@@ -277,13 +283,23 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
     if !everything && let Some(other) = pr.files.iter().find(|f| !allowlisted(&f.path)) {
         return pause(format!("other unpushed commits change {} — push those yourself after reviewing them", other.path), pending.len());
     }
-    if !pr.inspection.findings.is_empty() {
-        return pause(format!("the push inspection reported {} finding(s)", pr.inspection.findings.len()), pending.len());
+    let (stop, note): (Vec<&inspect::Finding>, Vec<&inspect::Finding>) = pr.inspection.findings.iter().partition(|f| f.stops_automatic());
+    if !stop.is_empty() {
+        return pause(format!("the push inspection stopped it: {}", inspect::describe(&stop)), pending.len());
+    }
+    for f in note {
+        if !noted.iter().any(|n| n.kind == f.kind && n.path == f.path && n.line == f.line) {
+            noted.push(f.clone());
+        }
     }
     match ops::push(s, &pr.token) {
         Ok(p) => {
             let what = if everything { "file(s)" } else { "record file(s)" };
-            audit("ok", None, &format!("published {} {what} to {}/{}", pr.files.len(), p.remote, p.branch), p.commits, pr.files.len())?;
+            let mut message = format!("published {} {what} to {}/{}", pr.files.len(), p.remote, p.branch);
+            if !noted.is_empty() {
+                message.push_str(&format!(" — noted, not stopping: {}", inspect::describe(&noted.iter().collect::<Vec<_>>())));
+            }
+            audit("ok", None, &message, p.commits, pr.files.len())?;
             out("pushed", format!("published {} {what}", pr.files.len()), pr.files.len())
         }
         Err(e) => {

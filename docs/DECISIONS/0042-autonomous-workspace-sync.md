@@ -41,3 +41,15 @@ instances that do changes should always write the commit messages."
 
 * **Widening the trusted allowlist** — would change what an existing confirmation covered; a separate mode asks again.
 * **Committing from the hook** — Git and network work in a hook would slow Claude and break ADR-0016.
+
+## Amendment (2026-11-06, owner report; branch `fix/autosync-and-drafts`)
+
+Every automatic sync after a learning session stopped with "the security inspection reported 2 finding(s)" — the
+findings were `machine-path` warnings (absolute paths of a computer in Claude's memories and a task), not secrets, and
+the message did not say which. Now:
+
+* **Only real risks stop it:** a blocking finding, a `possible-secret` warning, or a change too large to inspect.
+  Portability and size warnings (`machine-path`, a large file below the limit) are named in the history entry ("noted,
+  not stopping: …") — a reviewed commit shows them the same way and never blocked on them.
+* **The reason is precise:** the history entry and the notification name the findings — kind, file and line, never the
+  text found (`secret in project-context/shop/tasks/a.md:1`, up to three, "+N more").

@@ -41,7 +41,9 @@ Sections: **Components** · **Data flow** · **Boundaries and integrations** · 
 questions**.
 
 In both drafts, end each statement with *(verified: path)* when you saw it in the code, or *(inferred)* when you
-concluded it. Stay within the budget's word limits; write for a developer who joins tomorrow.
+concluded it — paths relative to the project, never absolute paths of this computer. Stay within the budget's word
+limits; write for a developer who joins tomorrow. Each topic has one open draft: when you learn more, save the topic
+again — it replaces your draft (revise it, do not add another).
 
 ## 5. Record durable facts — `record_memory`
 
