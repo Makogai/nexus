@@ -1,31 +1,32 @@
-# NEXUS 0.1.3 — learning a project with its surroundings
+# NEXUS 0.1.4 — automatic sync that keeps going, and one draft per topic
 
-Learning a project can now take what the code does not say into account: notes you write for Claude, and folders it
-may read besides the project — such as the repository the project lives in. A knowledge graph you build in a terminal
-is now noticed by itself. NEXUS 0.1.2 installs this update on its own.
+Automatic workspace sync no longer stops on harmless warnings, and when it does stop it says exactly why. Learning
+sessions keep one draft per topic instead of piling up versions. NEXUS 0.1.3 installs this update on its own.
 
 ## What's new
 
-- **Notes for Claude.** *Learn with Claude* has a notes field — "drivebay is one app of my monorepo; shared code lives
-  in packages/". The notes are saved in the learning task, and Claude reads them as part of it.
-- **Let Claude read the surroundings.** When a project sits inside another Git repository (a monorepo or a wrapper
-  repository), NEXUS offers it in one click; you can add other folders too (up to five). Only learning sessions get
-  them, read only and within the same budget, and Claude names the folder a statement comes from. The list stays on
-  this computer; credential folders, Claude's configuration, your home folder and whole drives are refused.
-- **The graph ticks by itself.** After *Build the graph in a terminal*, the Learn tab watches for Graphify's report and
-  updates when the build finishes — also when you come back from the terminal. The graph card has *Check again*.
-- **Faster releases.** One pipeline per release: every check runs once, and new versions reach you sooner.
+- **Automatic sync keeps going.** *Everything, automatically* stopped on any warning of the security inspection — for
+  example an absolute path of your computer in a note Claude wrote. Now only real risks stop it: anything blocking, a
+  possible secret, or a change too large to inspect. Harmless warnings are noted in the Sync history.
+- **It says why.** When automatic sync stops, the Sync history and the notification name the findings — kind, file and
+  line (never the text found) — instead of just counting them.
+- **One draft per topic.** When a learning session revises the overview or the architecture, it replaces its draft
+  instead of adding another, so the Learn tab shows only the latest version for you to review.
+- **Cleaner learning notes.** Learning sessions write file paths relative to the project and name extra folders by
+  name, so the knowledge base stays portable between computers.
+- **Environment templates are shown.** The project explorer shows templates such as `.env.docker.example` and
+  `.env.dist`; real environment files stay hidden.
 
 ## Download
 
 | Platform | File | Notes |
 | --- | --- | --- |
-| Windows 10/11 (x64) | `NEXUS_0.1.3_x64-setup.exe` | Per-user install, no administrator rights |
-| macOS 11+ (Apple silicon) | `NEXUS_0.1.3_aarch64.dmg` | Drag NEXUS to Applications |
-| macOS 11+ (Intel) | `NEXUS_0.1.3_x64.dmg` | Drag NEXUS to Applications |
-| Linux (x64) | `NEXUS_0.1.3_amd64.AppImage` / `NEXUS_0.1.3_amd64.deb` | AppImage: make it executable and run it; deb: `sudo apt install ./NEXUS_0.1.3_amd64.deb` |
+| Windows 10/11 (x64) | `NEXUS_0.1.4_x64-setup.exe` | Per-user install, no administrator rights |
+| macOS 11+ (Apple silicon) | `NEXUS_0.1.4_aarch64.dmg` | Drag NEXUS to Applications |
+| macOS 11+ (Intel) | `NEXUS_0.1.4_x64.dmg` | Drag NEXUS to Applications |
+| Linux (x64) | `NEXUS_0.1.4_amd64.AppImage` / `NEXUS_0.1.4_amd64.deb` | AppImage: make it executable and run it; deb: `sudo apt install ./NEXUS_0.1.4_amd64.deb` |
 
-Already on 0.1.2? NEXUS updates itself when it starts (or from the top bar). The `.app.tar.gz` files and `latest.json`
+Already on 0.1.2 or later? NEXUS updates itself when it starts (or from the top bar). The `.app.tar.gz` files and `latest.json`
 are for NEXUS's own updates — you don't need to download them.
 
 You need **Claude Code** (`claude`) installed and signed in, and **Git** for repository features and sync.
@@ -35,7 +36,7 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 - **Windows:** SmartScreen says "Windows protected your PC". Choose **More info → Run anyway**.
 - **macOS:** the app is ad-hoc signed but not notarized. Open it once with **right-click → Open**, or allow it under
   **System Settings → Privacy & Security → Open Anyway**.
-- **Linux:** no prompt. For the AppImage, run `chmod +x NEXUS_0.1.3_amd64.AppImage` first.
+- **Linux:** no prompt. For the AppImage, run `chmod +x NEXUS_0.1.4_amd64.AppImage` first.
 
 ## Verify what you downloaded
 

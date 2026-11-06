@@ -65,7 +65,7 @@ _Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning contex
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
-* **Fixes after 0.1.3 (branch `fix/autosync-and-drafts`, off `fix/env-templates`)** — owner reports, 2026-11-06:
+* **Fixes after 0.1.3 (branch `fix/autosync-and-drafts`, merged and released as v0.1.4)** — owner reports, 2026-11-06:
   * Automatic sync paused on every run after drivebay's learning: the inspection's only findings were three
     `machine-path` warnings (read-only diagnosis of the owner's sync history and pending changes). It now stops only on
     blocking findings, possible secrets and uninspectable changes, and names findings (kind, file, line) in the history
@@ -379,9 +379,9 @@ free.
 
 ## Next actions (in order)
 
-1. Owner: one push — `git push --atomic origin main v0.1.3` — starts the single release pipeline (CI checks + builds,
+1. Owner: one push — `git push --atomic origin main v0.1.4` — starts the single release pipeline (CI checks + builds,
    ≈ 20 minutes); publish the draft when it is green. NEXUS 0.1.2 then updates itself: the first real automatic update
-   (ADR-0044) — check that it installs at start and that the version in the top bar reads v0.1.3.
+   (ADR-0044) — 0.1.3 updates itself to 0.1.4 (check the version in the top bar).
    Open: the skill editor (create/edit workspace and project skills in NEXUS) — waiting for the owner's choice.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
    project from Git and try *Learn*; MANUAL_CHECKS 33 (with `docs/TEMPLATE_REVIEW.md`).
