@@ -434,7 +434,7 @@ fn policies_are_machine_local_and_trusted_publishes_only_allowlisted_records() {
     let bad = record(&a, "shop", "2026-11-05-b", &format!("deploy key {token}\n"));
     let o = policy::apply(&a.sync(), &allowed()).unwrap();
     assert_eq!(o.action, "paused", "{o:?}");
-    assert!(o.message.contains("finding") && !o.message.contains("QQQQ"), "{}", o.message);
+    assert!(o.message.contains(&format!("secret in {bad}:1")) && !o.message.contains("QQQQ"), "named precisely, never the value: {}", o.message);
     assert!(!remote_has(&url, &bad));
     std::fs::remove_file(a.root().join(&bad)).unwrap();
 
@@ -695,11 +695,20 @@ fn autonomous_sync_publishes_every_change_with_claudes_message_and_still_stops_o
     assert_eq!(policy::apply(&a.sync(), &allowed()).unwrap().action, "pushed");
     assert_eq!(last_subject(a.root()), "NEXUS: shop — 1 task");
 
-    // A credential-shaped value still stops it and asks; nothing is published.
+    // A portability warning (an absolute path of a machine) does not stop it — it is named in the history entry.
+    std::fs::write(tasks.join("paths.md"), "The old notes live in /Users/alex/code/maiw/CLAUDE.md\n").unwrap();
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "pushed", "{o:?}");
+    assert!(remote_has(&url, "project-context/shop/tasks/paths.md"));
+    let entry = super::history::list(&a.conn, &a.ws.id, 1).unwrap().remove(0);
+    assert!(entry.message.as_deref().unwrap_or("").contains("noted, not stopping: machine-path in project-context/shop/tasks/paths.md:1"), "{entry:?}");
+
+    // A credential-shaped value still stops it and asks, naming the finding (never the value); nothing is published.
     let token = format!("{}{}", "ghp_", "Q".repeat(36));
     std::fs::write(tasks.join("leak.md"), format!("deploy key {token}\n")).unwrap();
     let o = policy::apply(&a.sync(), &allowed()).unwrap();
     assert_eq!(o.action, "paused", "{o:?}");
+    assert!(o.message.contains("secret in project-context/shop/tasks/leak.md:1") && !o.message.contains(&token), "{o:?}");
     assert!(!remote_has(&url, "project-context/shop/tasks/leak.md"));
     assert!(crate::notify::list(&a.conn, &Default::default()).unwrap().iter().any(|n| n.title.contains("ready to sync")));
 }

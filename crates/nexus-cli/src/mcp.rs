@@ -795,8 +795,13 @@ impl Server {
         let project_id = b.session.project_id.clone().ok_or("this session has no project — drafts belong to a project")?;
         let topic = args.get("topic").and_then(Value::as_str).ok_or("`topic` is required (overview or architecture)")?;
         let body = args.get("body").and_then(Value::as_str).ok_or("`body` is required")?;
-        let item = nexus_core::project::learn::record_draft(&self.conn, &self.data_dir, &b.workspace, &project_id, topic, body).map_err(|e| e.to_string())?;
-        Ok(json!({ "drafted": { "id": item.id, "title": item.title, "topic": topic }, "next": "The person reviews the draft in NEXUS (project → Learn) and decides whether to use it." }))
+        let d = nexus_core::project::learn::record_draft(&self.conn, &self.data_dir, &b.workspace, &project_id, topic, body).map_err(|e| e.to_string())?;
+        let next = if d.revised {
+            "This replaced your open draft of this topic — the person reviews the latest version in NEXUS (project → Learn)."
+        } else {
+            "The person reviews the draft in NEXUS (project → Learn) and decides whether to use it. Saving this topic again replaces it."
+        };
+        Ok(json!({ "drafted": { "id": d.item.id, "title": d.item.title, "topic": topic, "revised": d.revised }, "next": next }))
     }
 
     /// Ask the person to push the project's branch (ADR-0043): NEXUS records the request and notifies; the push runs in
@@ -1054,7 +1059,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "draft_project_document", "title": "Draft a project document",
-            "description": "Propose a draft of this project's overview or architecture summary for the person to review (for example in a learning session). The draft is saved as an unverified note; the person decides whether it becomes the overview or the architecture summary. Write Markdown and say which parts you verified in the code and which you inferred.",
+            "description": "Propose a draft of this project's overview or architecture summary for the person to review (for example in a learning session). The draft is saved as an unverified note; the person decides whether it becomes the overview or the architecture summary. Write Markdown and say which parts you verified in the code and which you inferred. One open draft per topic: saving a topic again replaces your draft that is still waiting for review.",
             "inputSchema": { "type": "object", "properties": {
                 "topic": { "type": "string", "enum": ["overview", "architecture"] },
                 "body": { "type": "string", "minLength": 1, "maxLength": 30000 }

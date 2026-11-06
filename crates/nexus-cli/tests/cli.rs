@@ -1809,17 +1809,22 @@ fn claude_drafts_project_documents_for_review() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let sid = e.json(&["sessions"])[0]["id"].as_str().unwrap().to_string();
     let r = mcp_calls(&e, &sid, &[
+        ("draft_project_document", serde_json::json!({ "topic": "architecture", "body": "## Architecture summary\n\nFirst pass." })),
         ("draft_project_document", serde_json::json!({ "topic": "architecture", "body": "## Architecture summary\n\nOne crate (verified: Cargo.toml)." })),
         ("draft_project_document", json(r#"{"topic":"security","body":"x"}"#)),
     ]);
     assert_eq!(r[0]["isError"], false, "{}", r[0]);
-    assert_eq!(r[0]["structuredContent"]["drafted"]["topic"], "architecture");
-    assert_eq!(r[1]["isError"], true, "only overview or architecture");
+    assert_eq!((r[0]["structuredContent"]["drafted"]["topic"].as_str(), r[0]["structuredContent"]["drafted"]["revised"].as_bool()), (Some("architecture"), Some(false)));
+    // Saving the topic again revises the open draft (one open draft per topic) and says so.
+    assert_eq!(r[1]["structuredContent"]["drafted"]["revised"], true, "{}", r[1]);
+    assert_eq!(r[1]["structuredContent"]["drafted"]["id"], r[0]["structuredContent"]["drafted"]["id"]);
+    assert_eq!(r[2]["isError"], true, "only overview or architecture");
     let ctx = ws_dir(&e).join("project-context").join("repo");
     let arch = std::fs::read_to_string(ctx.join("architecture.md")).unwrap();
     assert!(arch.contains("_Not written yet._"), "the draft does not touch the architecture document");
     let notes: Vec<String> = std::fs::read_dir(ctx.join("memory")).into_iter().chain(std::fs::read_dir(ctx.join("notes"))).flatten().flatten().map(|f| std::fs::read_to_string(f.path()).unwrap_or_default()).collect();
     assert!(notes.iter().any(|n| n.contains("One crate (verified: Cargo.toml).") && n.contains("draft") && n.contains("architecture")), "a labelled draft note: {notes:?}");
+    assert!(!notes.iter().any(|n| n.contains("First pass.")), "the revision replaced the first version: {notes:?}");
 }
 
 #[test]

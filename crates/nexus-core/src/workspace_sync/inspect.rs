@@ -69,6 +69,31 @@ pub struct Context<'a> {
     pub home: &'a Path,
 }
 
+impl Finding {
+    /// Whether this finding stops automatic sync (ADR-0042 amendment): anything blocking, a possible secret, a change too
+    /// large to inspect. Portability and size warnings (an absolute path of this machine, a large file) are only noted —
+    /// a reviewed commit shows them the same way.
+    pub fn stops_automatic(&self) -> bool {
+        self.severity == Severity::Block || !matches!(self.kind, "machine-path" | "large-file")
+    }
+}
+
+/// Findings named precisely for a message or notification: `possible-secret in notes/a.md:3, … (+2 more)`. Kinds, paths
+/// and line numbers only — never the text that was found.
+pub fn describe(findings: &[&Finding]) -> String {
+    let shown: Vec<String> = findings
+        .iter()
+        .take(3)
+        .map(|f| match (f.path.is_empty(), f.line) {
+            (true, _) => f.kind.to_string(),
+            (false, Some(l)) => format!("{} in {}:{l}", f.kind, f.path),
+            (false, None) => format!("{} in {}", f.kind, f.path),
+        })
+        .collect();
+    let more = findings.len().saturating_sub(shown.len());
+    if more > 0 { format!("{} (+{more} more)", shown.join(", ")) } else { shown.join(", ") }
+}
+
 fn finding(path: &str, line: Option<usize>, kind: &'static str, severity: Severity, message: impl Into<String>) -> Finding {
     Finding { path: path.to_string(), line, kind, severity, message: message.into() }
 }
@@ -76,7 +101,9 @@ fn finding(path: &str, line: Option<usize>, kind: &'static str, severity: Severi
 /// Names that must never travel (checked by name; contents are never read for this).
 pub fn sensitive_reason(rel: &str) -> Option<&'static str> {
     let name = rel.rsplit(['/', '\\']).next().unwrap_or(rel).to_ascii_lowercase();
-    if name == ".env" || (name.starts_with(".env.") && !matches!(name.as_str(), ".env.example" | ".env.sample" | ".env.template")) {
+    // Templates hold names, not values: `.env.example`, and also variants such as `.env.docker.example` or `.env.dist`.
+    let template = [".example", ".sample", ".template", ".dist"].iter().any(|s| name.ends_with(s));
+    if name == ".env" || (name.starts_with(".env.") && !template) {
         return Some("environment file (may contain secrets)");
     }
     let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
@@ -449,6 +476,12 @@ mod tests {
     fn names_modes_and_paths() {
         assert!(path_findings("config/.env", "100644", Direction::Outgoing).iter().any(|f| f.severity == Severity::Block));
         assert!(path_findings(".env.example", "100644", Direction::Outgoing).is_empty());
+        for template in [".env.docker.example", ".env.coolify.example", ".env.sample", ".env.local.template", ".env.dist", "app/.ENV.Example"] {
+            assert_eq!(sensitive_reason(template), None, "{template} is a template");
+        }
+        for secret in [".env", ".env.local", ".env.production", ".env.example.bak", ".env.docker"] {
+            assert!(sensitive_reason(secret).is_some(), "{secret} may hold secrets");
+        }
         assert!(path_findings(".nexus-local/tasks/a.md", "100644", Direction::Outgoing).iter().any(|f| f.kind == "local-only-knowledge"));
         assert!(path_findings("tools/run", "120000", Direction::Incoming).iter().any(|f| f.kind == "symlink" && f.severity == Severity::Block));
         assert!(path_findings("notes/aux.md", "100644", Direction::Incoming).iter().any(|f| f.kind == "unsafe-path"));

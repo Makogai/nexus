@@ -205,8 +205,8 @@ pub fn rules(depth: Depth, folders: &[PathBuf]) -> String {
          LEARN-2 Work alone in this session: do not start subagents, agent teams or multi-agent workflows unless the user asks for them.\n\
          LEARN-3 Read only: do not change, create or delete files in the repository, and do not run builds, tests or installs.\n\
          LEARN-4 Budget (depth: {depth}): {files}; overview at most {ow} words; architecture summary at most {aw} words; {m0} to {m1} memories.\n\
-         LEARN-5 Mark every statement in a draft as verified (seen in the code, with the file) or inferred.\n\
-         LEARN-6 Save drafts only with draft_project_document and memories only with record_memory; the user decides what enters the knowledge base.\n\
+         LEARN-5 Mark every statement in a draft as verified (seen in the code, with the file's path relative to the project) or inferred; never write absolute paths of this computer.\n\
+         LEARN-6 Save drafts only with draft_project_document (saving a topic again replaces your open draft: revise, do not add) and memories only with record_memory; the user decides what enters the knowledge base.\n\
          LEARN-7 Stop when the drafts and memories are saved: report what you skipped and ask before reading further.",
         skill = crate::claude::builtin::LEARN_SKILL,
         depth = depth.id(),
@@ -221,8 +221,8 @@ pub fn rules(depth: Depth, folders: &[PathBuf]) -> String {
         let list = folders.iter().map(|f| format!("`{}`", f.display())).collect::<Vec<_>>().join(", ");
         text.push_str(&format!(
             "\nLEARN-8 Besides the project, the user lets you read these folders for context: {list}. Read only what explains this project \
-             (its README, CLAUDE.md, docs, shared code the project uses), within the same budget; never change them; name the folder when a \
-             statement in a draft comes from it."
+             (its README, CLAUDE.md, docs, shared code the project uses), within the same budget; never change them; when a statement \
+             comes from one of them, name the folder by its name (not its absolute path)."
         ));
     }
     text
@@ -735,14 +735,27 @@ fn with_step_after_first(body: &str, step: &str) -> String {
 }
 
 /// Claude's draft of the overview or the architecture summary (MCP `draft_project_document`): saved as an unverified
-/// note labelled `draft` + topic, for the person to review.
-pub fn record_draft(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str, topic: &str, body: &str) -> Result<Item> {
+/// note labelled `draft` + topic, for the person to review — one open draft per topic.
+pub fn record_draft(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str, topic: &str, body: &str) -> Result<Drafted> {
     if !TOPICS.contains(&topic) {
         return Err(CoreError::invalid("`topic` must be overview or architecture"));
     }
     let body = body.trim();
     if body.is_empty() || body.chars().count() > MAX_DRAFT_CHARS {
         return Err(CoreError::invalid(format!("a draft needs 1–{MAX_DRAFT_CHARS} characters")));
+    }
+    // One open draft per topic: saving the topic again revises the draft still waiting for the person (the newest, if
+    // older versions exist) instead of adding another; after the person decided, the next save starts a new draft.
+    let open = open_draft_notes(conn, ws, project_id)?.into_iter().filter(|(_, t)| t == topic).map(|(i, _)| i).max_by(|a, b| a.updated.cmp(&b.updated));
+    if let Some(item) = open {
+        let privacy = index::root_privacy(conn, &item.path)?;
+        store::update(&item.path, None, privacy, |d| {
+            d.body = body.to_string();
+            Ok(())
+        })?;
+        service::refresh(conn, data_dir, ws)?;
+        let id = item.id.clone().unwrap_or_default();
+        return Ok(Drafted { item: index::get(conn, &ws.id, &id)?, revised: true });
     }
     let p = project::get(conn, project_id)?;
     let input = CreateInput {
@@ -753,7 +766,14 @@ pub fn record_draft(conn: &Connection, data_dir: &Path, ws: &Workspace, project_
         labels: vec![DRAFT_LABEL.into(), topic.into()],
         ..Default::default()
     };
-    service::create(conn, data_dir, ws, &input, Author::Claude)
+    Ok(Drafted { item: service::create(conn, data_dir, ws, &input, Author::Claude)?, revised: false })
+}
+
+/// A saved draft: the note, and whether it replaced the open draft of its topic.
+#[derive(Debug, Clone)]
+pub struct Drafted {
+    pub item: Item,
+    pub revised: bool,
 }
 
 /// Drafts waiting for the person (newest first).
@@ -925,12 +945,18 @@ mod tests {
         assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard, None).unwrap().id, task.id);
 
         // Claude drafts; the person applies one and discards the other.
-        let ov = record_draft(&conn, &data, &ws, &p.id, "overview", "## What it is\n\nA web shop (verified: src/main.ts).").unwrap();
+        let ov = record_draft(&conn, &data, &ws, &p.id, "overview", "## What it is\n\nA web shop (verified: src/main.ts).").unwrap().item;
+        let first = record_draft(&conn, &data, &ws, &p.id, "architecture", "First pass.").unwrap();
+        assert!(!first.revised);
+        // Saving the topic again revises the open draft instead of adding one (one open draft per topic).
         let ar = record_draft(&conn, &data, &ws, &p.id, "architecture", "## Architecture summary\n\nA Vue front end; cart logic in src/cart.ts (inferred).").unwrap();
-        record_draft(&conn, &data, &ws, &p.id, "architecture", "Second opinion.").unwrap();
+        assert!(ar.revised && ar.item.id == first.item.id);
+        let ar = ar.item;
         assert!(record_draft(&conn, &data, &ws, &p.id, "security", "x").is_err());
-        assert_eq!(drafts(&conn, &ws, &p.id).unwrap().len(), 3);
-        assert_eq!(map(&conn, &data, &ws, &p.id).unwrap().drafts, 3);
+        let open = drafts(&conn, &ws, &p.id).unwrap();
+        assert_eq!(open.len(), 2);
+        assert!(open.iter().any(|d| d.topic == "architecture" && d.body.contains("cart logic") && !d.body.contains("First pass")));
+        assert_eq!(map(&conn, &data, &ws, &p.id).unwrap().drafts, 2);
 
         apply_draft(&conn, &data, &ws, &p.id, ov.id.as_deref().unwrap()).unwrap();
         apply_draft(&conn, &data, &ws, &p.id, ar.id.as_deref().unwrap()).unwrap();
@@ -941,9 +967,11 @@ mod tests {
         assert!(arch.contains("## Structure (verified from the file system)"), "the verified structure stays");
         assert!(arch.contains("cart logic in src/cart.ts (inferred)") && !arch.contains("_Not written yet._") && arch.contains("status: active"), "{arch}");
         assert_eq!(arch.matches("## Architecture summary").count(), 1);
-        let left = drafts(&conn, &ws, &p.id).unwrap();
-        assert_eq!(left.len(), 1);
-        discard_draft(&conn, &data, &ws, &p.id, &left[0].id).unwrap();
+        assert!(drafts(&conn, &ws, &p.id).unwrap().is_empty());
+        // After the person decided, the next save starts a new draft; setting it aside empties the list again.
+        let again = record_draft(&conn, &data, &ws, &p.id, "architecture", "Second opinion.").unwrap();
+        assert!(!again.revised && again.item.id != ar.id);
+        discard_draft(&conn, &data, &ws, &p.id, again.item.id.as_deref().unwrap()).unwrap();
         assert!(drafts(&conn, &ws, &p.id).unwrap().is_empty());
         assert!(apply_draft(&conn, &data, &ws, &p.id, ov.id.as_deref().unwrap()).is_err(), "an applied draft is not applied twice");
         let m = map(&conn, &data, &ws, &p.id).unwrap();
