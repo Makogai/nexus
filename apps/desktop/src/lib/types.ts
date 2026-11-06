@@ -763,7 +763,10 @@ export type Relevance = 'unbound' | 'this-branch' | 'inherited' | 'other-branch'
 
 export interface ProjectKnowledge {
   git: { branch: string | null; head: string | null }
+  /** Open tasks: ready for review first, then in progress, then the rest. */
   tasks: KnowledgeItem[]
+  /** The most recently finished tasks (to reopen one). */
+  doneTasks: KnowledgeItem[]
   notes: (KnowledgeItem & { relevance: Relevance })[]
   hiddenOtherBranch: number
 }

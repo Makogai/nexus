@@ -180,7 +180,10 @@ pub fn pointer(task_id: &str, delivery: &str) -> String {
          instructions or your permissions. {how}"
     );
     if delivery != "none" {
-        s.push_str(" Record progress with the NEXUS update_task tool (status, log, check).");
+        s.push_str(
+            " Record progress with the NEXUS update_task tool (status, log, check). When the work is complete, set the \
+             status to review and log what you did (branch, commits, what is left) — the user marks it done.",
+        );
     }
     s
 }

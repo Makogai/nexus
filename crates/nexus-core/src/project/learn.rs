@@ -572,6 +572,7 @@ pub fn apply_draft(conn: &Connection, data_dir: &Path, ws: &Workspace, project_i
     {
         index::approve(conn, &it.path, &it.hash)?;
     }
+    finish_if_reviewed(conn, data_dir, ws, project_id)?;
     Ok(())
 }
 
@@ -580,7 +581,22 @@ pub fn discard_draft(conn: &Connection, data_dir: &Path, ws: &Workspace, project
     let (note, _) = draft_item(conn, ws, project_id, draft_id)?;
     relabel(&note, conn, DRAFT_LABEL, "discarded")?;
     service::refresh(conn, data_dir, ws)?;
+    finish_if_reviewed(conn, data_dir, ws, project_id)?;
     Ok(())
+}
+
+/// The learning task is done once the person reviewed the result: no draft waits, the overview is no longer NEXUS's
+/// generated text and the architecture summary is written. Returns whether a task was closed.
+pub fn finish_if_reviewed(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str) -> Result<bool> {
+    let m = map(conn, data_dir, ws, project_id)?;
+    let Some(task) = m.task else { return Ok(false) };
+    if m.drafts > 0 || m.context.overview_generated || !m.context.architecture_summary {
+        return Ok(false);
+    }
+    let log = "Learning reviewed: overview and architecture summary accepted";
+    let u = crate::knowledge::tasks::TaskUpdate { status: Some("done"), log: Some(log), ..Default::default() };
+    crate::knowledge::tasks::update(conn, data_dir, ws, &task.id, &u, Author::Human)?;
+    Ok(true)
 }
 
 /// Keep `graphify-out/` out of Git in this clone: one line in the local exclude file (`.git/info/exclude`), which is
@@ -681,6 +697,14 @@ mod tests {
         assert!(apply_draft(&conn, &data, &ws, &p.id, ov.id.as_deref().unwrap()).is_err(), "an applied draft is not applied twice");
         let m = map(&conn, &data, &ws, &p.id).unwrap();
         assert!(!m.context.overview_generated && m.context.architecture_summary);
+        // The review finished the learning: its task is done (and no longer the open learning task).
+        assert!(m.task.is_none(), "the review closed the learning task");
+        assert_eq!(service::read(&conn, &ws, &task.id, 50_000).unwrap().item.status.as_deref(), Some("done"));
+        assert!(!finish_if_reviewed(&conn, &data, &ws, &p.id).unwrap(), "nothing left to close");
+
+        // Learning again starts a new task (before any graph exists).
+        let task = start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap();
+        assert!(!service::read(&conn, &ws, &task.id, 50_000).unwrap().body.contains("GRAPH_REPORT"));
 
         // graphify-out/ is excluded in this clone only (nothing committed changes).
         assert!(exclude_graph_output(&conn, &p.id).unwrap());

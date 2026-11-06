@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Info, SquareTerminal } from '@lucide/vue'
 import { useSessionStore } from '../stores/sessions'
 import { useWorkspaceStore } from '../stores/workspaces'
+import { useProjectStore } from '../stores/projects'
 import SessionRow from '../components/SessionRow.vue'
 
 const sessions = useSessionStore()
@@ -11,9 +12,22 @@ const workspaces = useWorkspaceStore()
 type FilterKey = 'all' | 'running' | 'resumable' | 'ended'
 const filter = ref<FilterKey>('all')
 const allWorkspaces = ref(false)
+const projects = useProjectStore()
+const route = useRoute()
+const router = useRouter()
+/** One project's sessions (`?project=<id>`; the project page links here). */
+const projectFilter = computed<string>({
+  get: () => (typeof route.query.project === 'string' ? route.query.project : ''),
+  set: (v) => router.replace({ query: { ...route.query, project: v || undefined } }),
+})
 
 const scoped = computed(() =>
-  sessions.list.filter((s) => !s.archivedAt && (allWorkspaces.value || s.workspaceId === workspaces.active?.id)),
+  sessions.list.filter(
+    (s) =>
+      !s.archivedAt &&
+      (allWorkspaces.value || s.workspaceId === workspaces.active?.id) &&
+      (!projectFilter.value || s.projectId === projectFilter.value),
+  ),
 )
 const counts = computed(() => ({
   all: scoped.value.length,
@@ -31,7 +45,6 @@ const labels: Record<FilterKey, string> = { all: 'All', running: 'Running', resu
 onActivated(() => sessions.load().catch(() => undefined))
 
 // Opened from a notification: show and highlight that session.
-const route = useRoute()
 const highlighted = ref<string | null>(null)
 watch(
   () => [route.name, route.query.focus],
@@ -40,6 +53,7 @@ watch(
     if (!id) return
     const s = sessions.byId[id]
     if (s && s.workspaceId !== workspaces.active?.id) allWorkspaces.value = true
+    if (s && projectFilter.value && s.projectId !== projectFilter.value) projectFilter.value = ''
     filter.value = 'all'
     highlighted.value = id
     await nextTick()
@@ -64,6 +78,10 @@ watch(
     </div>
 
     <div class="filters" role="tablist">
+      <select v-model="projectFilter" class="select project-filter" aria-label="Project" data-sessions-project>
+        <option value="">All projects</option>
+        <option v-for="p in projects.list" :key="p.id" :value="p.id">{{ p.name }}</option>
+      </select>
       <button
         v-for="k in (Object.keys(labels) as FilterKey[])"
         :key="k"
@@ -91,6 +109,11 @@ watch(
 </template>
 
 <style scoped>
+.project-filter {
+  width: auto;
+  min-width: 180px;
+  margin-right: 6px;
+}
 .list :deep(.highlighted) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

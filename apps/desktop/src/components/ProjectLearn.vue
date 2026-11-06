@@ -46,6 +46,20 @@ async function load() {
   }
 }
 
+/** The drafts are reviewed but the learning task is still open (e.g. reviewed before NEXUS closed it on its own). */
+async function finishLearning() {
+  const ws = workspaces.active
+  const t = map.value?.task
+  if (!ws || !t) return
+  try {
+    await api.knowledgeUpdateTask(ws.id, t.id, { status: 'done', log: 'Learning reviewed: marked done' })
+    app.toast('success', 'Learning finished — the task is done')
+    await load()
+  } catch (e) {
+    app.toast('error', toIpcError(e).message)
+  }
+}
+
 async function startSession() {
   const ws = workspaces.active
   if (!ws) return
@@ -199,6 +213,7 @@ watch(() => props.projectId, load)
         </div>
         <div class="row">
           <button class="btn btn-primary" data-learn-start @click="startSession"><Sparkles /> {{ map.task ? 'Continue the learning session' : 'Start a learning session' }}</button>
+          <button v-if="map.task && !map.drafts && !map.context.overviewGenerated && map.context.architectureSummary" class="btn" data-learn-finish @click="finishLearning"><Check /> Finish learning</button>
           <span v-if="map.task" class="faint small">Task: {{ map.task.title }} · {{ map.task.status }}</span>
           <span class="spacer" />
           <button class="btn btn-sm btn-ghost" @click="router.push({ name: 'knowledge', query: { tab: 'proposals' } })"><Lightbulb /> Memory proposals</button>

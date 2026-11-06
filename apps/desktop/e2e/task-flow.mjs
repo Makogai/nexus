@@ -233,6 +233,24 @@ try {
   const approved = await cdp.waitFor(`!document.querySelector('[data-proposal]')`, 10000).catch(() => false)
   const files = decisionFiles()
   check('approving writes an accepted decision file', !!approved && files.length === 1 && readFileSync(join(decisionsDir, files[0]), 'utf8').includes('status: accepted'), files.join(','))
+
+  // Finished work: the task Claude put into review leads the list; Done moves it to "Recently done"; Reopen brings it back.
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}'; true`)
+  const review = await cdp.waitFor(`document.querySelector('[data-task="${setup.task.id}"].for-review')?.innerText`, 15000).catch(() => '')
+  check('a task in review shows as ready for review', review.includes('Ready for review'), review.replace(/\n/g, ' ').slice(0, 80))
+  await cdp.evaluate(`document.querySelector('[data-task="${setup.task.id}"] [data-task-done]').click(), true`)
+  const done = await cdp.waitFor(`!document.querySelector('[data-task="${setup.task.id}"]') && !!document.querySelector('[data-done-task="${setup.task.id}"]')`, 15000).catch(() => false)
+  check('Done moves it to Recently done (the file says done)', !!done && readFileSync(setup.task.path, 'utf8').includes('status: done'))
+  await cdp.evaluate(`document.querySelector('[data-project-done]').open = true; document.querySelector('[data-done-task="${setup.task.id}"] [data-task-reopen]').click(); true`)
+  const reopened = await cdp.waitFor(`!!document.querySelector('[data-task="${setup.task.id}"]')`, 15000).catch(() => false)
+  check('…and Reopen brings it back', !!reopened && readFileSync(setup.task.path, 'utf8').includes('status: ready'))
+
+  // Sessions can be filtered by project (kept in the URL).
+  await cdp.evaluate(`location.hash = '#/sessions?project=${setup.project.id}'; true`)
+  const filtered = await cdp.waitFor(`document.querySelector('[data-sessions-project]')?.value === ${JSON.stringify(setup.project.id)} && document.querySelectorAll('[data-session]').length`, 15000).catch(() => 0)
+  await cdp.evaluate(`location.hash = '#/sessions?project=none'; true`)
+  const none = await cdp.waitFor(`document.querySelector('[data-sessions-project]') && document.querySelectorAll('[data-session]').length === 0 ? 'empty' : ''`, 15000).catch(() => '')
+  check('the Sessions tab filters by project', filtered >= 1 && none === 'empty', `${filtered} session(s) for the project`)
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)
