@@ -65,6 +65,11 @@ _Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning contex
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
+* **Skills page (branch `milestone/skills-editor`, ADR-0046)** — owner request, 2026-11-06: `/skills` lists every skill
+  a session can get (built-in, workspace, project, AI Kit) with its Claude name, reach and state; *New skill* writes a
+  workspace skill (`skills/<name>`) or a project skill (`.claude/skills/<name>`) from a template; the editor saves with
+  the replaced version's hash; delete for plain skill folders. A workspace save approves only when nothing else waits for
+  review (T54). Core `skills.rs` (+ tests), commands `skills_*`, `SkillsView.vue`, E2E in `workbench.mjs`.
 * **Fixes after 0.1.3 (branch `fix/autosync-and-drafts`, merged and released as v0.1.4)** — owner reports, 2026-11-06:
   * Automatic sync paused on every run after drivebay's learning: the inspection's only findings were three
     `machine-path` warnings (read-only diagnosis of the owner's sync history and pending changes). It now stops only on

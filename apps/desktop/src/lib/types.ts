@@ -1841,6 +1841,40 @@ export interface LearnTask {
   notes: string | null
 }
 
+/** Skills page (ADR-0046). */
+export type SkillScope = 'builtin' | 'workspace' | 'project' | 'kit'
+
+export interface SkillEntry {
+  scope: SkillScope
+  name: string
+  description: string
+  /** How Claude names it: `workspace:<name>`, `<name>` (project), `<kit>:<name>`, `nexus:<name>`. */
+  invokeAs: string
+  projectId: string | null
+  projectName: string | null
+  kitId: string | null
+  kitName: string | null
+  path: string | null
+  editable: boolean
+  /** `built-in`, `approved`, `needs-review`, `changed`, `missing`, `not-registered`, `native`. */
+  status: string
+  /** Which sessions get it, in words. */
+  reaches: string
+}
+
+export interface SkillFile {
+  entry: SkillEntry
+  text: string
+  /** The version a save must name (empty for read-only skills). */
+  hash: string
+}
+
+export interface SkillSaved {
+  file: SkillFile
+  outcome: 'approved' | 'needs-review' | 'native'
+  message: string
+}
+
 export interface LearnGraph {
   installed: boolean
   built: boolean

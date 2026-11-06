@@ -82,6 +82,9 @@ cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Wi
   migrations with backups; templates install through the stores with a lock file and never overwrite changed files;
   only the core constitution is always on; workspace skills reach only their workspace's sessions; project knowledge
   lives in `project-context/<slug>/`; scanning never registers or runs anything; tools are named by id (`toolchain`).
+* Skills (ADR-0046): only the person writes skills, through the desktop Skills page — `<workspace>/skills/<name>` or
+  `<project>/.claude/skills/<name>`, validated, optimistic, never through links; no MCP tool writes skills. A save
+  approves the workspace skills only when nothing else waits for review.
 * Data safety (ADR-0032): never start with an empty database instead of a failed one; migrations are transactions;
   backups before upgrades, daily and before restores; restore verifies and rolls back. Installer (ADR-0033): programs in
   `%LOCALAPPDATA%\Programs\NEXUS`, data in `%LOCALAPPDATA%\NEXUS` — never mixed; the CLI is the installer's sidecar;

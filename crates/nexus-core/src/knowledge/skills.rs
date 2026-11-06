@@ -50,7 +50,7 @@ fn collect(dir: &Path, source: &'static str, out: &mut Vec<Skill>) {
     }
 }
 
-fn header(text: &str) -> (Option<String>, Option<String>) {
+pub(crate) fn header(text: &str) -> (Option<String>, Option<String>) {
     let mut lines = text.lines();
     if lines.next().map(str::trim) != Some("---") {
         return (None, None);
@@ -64,7 +64,8 @@ fn header(text: &str) -> (Option<String>, Option<String>) {
             continue;
         }
         if let Some((k, v)) = line.split_once(':') {
-            let v = v.trim().trim_matches(['"', '\'']).to_string();
+            let v = v.trim();
+            let v = if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') { v[1..v.len() - 1].replace("\\\"", "\"").replace("\\\\", "\\") } else { v.trim_matches(['"', '\'']).to_string() };
             match k.trim() {
                 "name" if !v.is_empty() => name = Some(v),
                 "description" if !v.is_empty() && !v.starts_with(['|', '>']) => description = Some(v),

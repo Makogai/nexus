@@ -40,7 +40,7 @@ const writes = computed(() => data.value?.tools.filter((t) => !t.annotations?.re
     <div class="page-header">
       <div>
         <h1>NEXUS tools</h1>
-        <p>What NEXUS gives the Claude sessions it starts: its own skills, the NEXUS MCP server's tools and the lifecycle hooks. Skills from AI Kits and your workspace are managed in <RouterLink to="/kits">AI Kits</RouterLink>.</p>
+        <p>What NEXUS gives the Claude sessions it starts: its own skills, the NEXUS MCP server's tools and the lifecycle hooks. Your workspace and project skills are written and edited in <RouterLink to="/skills">Skills</RouterLink>; plugins in <RouterLink to="/kits">AI Kits</RouterLink>.</p>
       </div>
       <div class="page-actions">
         <button class="btn btn-ghost" :disabled="busy" @click="load"><RefreshCw :class="{ spin: busy }" /> Refresh</button>

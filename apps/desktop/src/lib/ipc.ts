@@ -108,6 +108,10 @@ import type {
   PushReview,
   LearnTask,
   ProjectMap,
+  SkillEntry,
+  SkillFile,
+  SkillSaved,
+  SkillScope,
 } from './types'
 
 export class IpcError extends Error {
@@ -197,6 +201,16 @@ export const api = {
   projectLearnStart: (workspaceId: string, projectId: string, depth: LearnDepth, notes?: string | null) =>
     call<LearnTask>('project_learn_start', { workspaceId, projectId, depth, notes: notes ?? null }),
   /** Cheap: only whether the Graphify graph is built (the Learn tab watches for a build in a terminal). */
+  /** Skills page (ADR-0046): every skill a session can get; the person edits workspace and project skills. */
+  skillsList: (workspaceId: string) => call<SkillEntry[]>('skills_list', { workspaceId }),
+  skillsRead: (workspaceId: string, skill: { scope: SkillScope; name: string; projectId?: string | null; kitId?: string | null }) =>
+    call<SkillFile>('skills_read', { workspaceId, skill }),
+  skillsCreate: (workspaceId: string, scope: 'workspace' | 'project', projectId: string | null, name: string, description: string) =>
+    call<SkillSaved>('skills_create', { workspaceId, scope, projectId, name, description }),
+  skillsSave: (workspaceId: string, scope: 'workspace' | 'project', projectId: string | null, name: string, text: string, expectedHash: string) =>
+    call<SkillSaved>('skills_save', { workspaceId, scope, projectId, name, text, expectedHash }),
+  skillsDelete: (workspaceId: string, scope: 'workspace' | 'project', projectId: string | null, name: string, expectedHash: string) =>
+    call<void>('skills_delete', { workspaceId, scope, projectId, name, expectedHash }),
   projectLearnGraph: (projectId: string) => call<LearnGraph>('project_learn_graph', { projectId }),
   projectLearnAddFolder: (projectId: string, path: string) => call<LearnFolder[]>('project_learn_add_folder', { projectId, path }),
   projectLearnRemoveFolder: (projectId: string, path: string) => call<LearnFolder[]>('project_learn_remove_folder', { projectId, path }),
