@@ -228,6 +228,19 @@ try {
   const learnSession = (await inv('session_list', { filter: null })).find((x) => x.taskId === learnTaskId)
   check('…recorded with the session (depth, skill)', learnSession?.integrations?.learn?.depth === 'quick' && learnSession?.integrations?.learn?.skill === 'nexus:learn-project', JSON.stringify(learnSession?.integrations?.learn ?? null))
   await click('[data-project-tab="learn"]')
+
+  // Back returns where you came from: project → Learn → Memory proposals (Knowledge) → Back → the project's Learn tab.
+  await cdp.waitFor(`!!document.querySelector('[data-learn-session]')`, 10000)
+  await cdp.evaluate(`[...document.querySelectorAll('[data-learn-session] button')].find((b) => b.innerText.includes('Memory proposals'))?.click(); true`)
+  const inKnowledge = await until(async () => ((await cdp.evaluate('location.hash')).includes('knowledge') ? true : null))
+  await click('[data-nav-back]')
+  const backAt = await until(async () => {
+    const h = await cdp.evaluate('location.hash')
+    return h.includes(`/projects/${proj.id}`) && h.includes('tab=learn') ? h : null
+  })
+  check('Back returns from Memory proposals to the project’s Learn tab', !!inKnowledge && !!backAt, backAt ?? '')
+  const version = await textOf('[data-app-version]')
+  check('the top bar shows the NEXUS version', /^v\d+\.\d+\.\d+/.test(version.trim()), version)
   const lm = await inv('project_learn_map', { workspaceId: ws.id, projectId: proj.id })
   const brief = lm.task ? (await inv('knowledge_read', { workspaceId: ws.id, id: lm.task.id })).body : ''
   check('…the task carries NEXUS\'s map and the drafting instructions (graph included)', brief.includes('draft_project_document') && brief.includes('GRAPH_REPORT.md') && brief.includes('do not change any file'), brief.slice(0, 100))

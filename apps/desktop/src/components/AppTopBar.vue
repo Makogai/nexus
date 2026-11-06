@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Check, ChevronDown, Layers, Plus, Search, Sparkles } from '@lucide/vue'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Layers, Plus, Search, Sparkles } from '@lucide/vue'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
 import { useProfileStore } from '../stores/profiles'
@@ -33,12 +33,62 @@ async function switchTo(id: string) {
 function onDocClick(e: MouseEvent) {
   if (menuOpen.value && !menuRoot.value?.contains(e.target as Node)) menuOpen.value = false
 }
-onMounted(() => document.addEventListener('mousedown', onDocClick))
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
+
+// Back and forward through the views you opened (Projects → umbra → Learn → Memory proposals → back to Learn). Project
+// tabs and filters live in the URL, so going back restores them. vue-router keeps the neighbours in history.state.
+const canBack = ref(false)
+const canForward = ref(false)
+function readHistory() {
+  const st = window.history.state as { back?: string | null; forward?: string | null } | null
+  canBack.value = !!st?.back
+  canForward.value = !!st?.forward
+}
+const stopAfterEach = router.afterEach(() => readHistory())
+function back() {
+  if (canBack.value) router.back()
+}
+function forward() {
+  if (canForward.value) router.forward()
+}
+/** Alt+← / Alt+→ and the mouse's back/forward buttons, as in a browser. */
+function onKey(e: KeyboardEvent) {
+  if (!e.altKey || e.ctrlKey || e.shiftKey || e.metaKey) return
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    back()
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    forward()
+  }
+}
+function onMouseButton(e: MouseEvent) {
+  if (e.button === 3 || e.button === 4) {
+    e.preventDefault()
+    if (e.type === 'mouseup') (e.button === 3 ? back : forward)()
+  }
+}
+onMounted(() => {
+  readHistory()
+  document.addEventListener('mousedown', onDocClick)
+  window.addEventListener('keydown', onKey)
+  window.addEventListener('mousedown', onMouseButton)
+  window.addEventListener('mouseup', onMouseButton)
+})
+onBeforeUnmount(() => {
+  stopAfterEach()
+  document.removeEventListener('mousedown', onDocClick)
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('mousedown', onMouseButton)
+  window.removeEventListener('mouseup', onMouseButton)
+})
 </script>
 
 <template>
   <header class="topbar">
+    <div class="nav">
+      <button class="btn btn-ghost btn-icon btn-sm" :disabled="!canBack" title="Back (Alt+←)" aria-label="Back" data-nav-back @click="back"><ArrowLeft /></button>
+      <button class="btn btn-ghost btn-icon btn-sm" :disabled="!canForward" title="Forward (Alt+→)" aria-label="Forward" data-nav-forward @click="forward"><ArrowRight /></button>
+    </div>
     <div ref="menuRoot" class="ws">
       <button class="ws-button" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">
         <Layers />
@@ -67,6 +117,8 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
 
     <div class="spacer" />
 
+    <span v-if="app.info" class="version" :title="`NEXUS ${app.info.version} · data in ${app.info.dataDir}`" data-app-version>v{{ app.info.version }}</span>
+
     <NotificationBell />
 
     <button v-if="lastProfile" class="context" title="Change launch defaults" @click="app.openLaunch()">
@@ -90,6 +142,20 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocClick))
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+}
+.nav {
+  display: flex;
+  gap: 2px;
+  margin-right: -4px;
+}
+.version {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
 }
 .ws {
   position: relative;
