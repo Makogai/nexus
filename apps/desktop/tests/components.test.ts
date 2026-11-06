@@ -9,6 +9,7 @@ import type { ClaudeProfile, LaunchOptions, Project, SessionView } from '../src/
 const api = vi.hoisted(() => ({
   sessionStartClaude: vi.fn(),
   sessionResume: vi.fn(),
+  sessionContinueTask: vi.fn(),
   sessionInterrupt: vi.fn(),
   sessionTerminate: vi.fn(),
   sessionRename: vi.fn(),
@@ -241,6 +242,42 @@ describe('LaunchDialog', () => {
     app.openLaunch(null, 'game', { id: 'task-2', title: 'Fix cart', projectId: 'p1' })
     await flushPromises()
     expect(box().checked, 'the last choice is remembered').toBe(false)
+  })
+
+  it('a task with its own earlier session resumes it by default — no new session', async () => {
+    seed()
+    useSessionStore().list = [session({ id: 'own', taskId: 'task-1', running: false, resumable: true, state: 'exited' })]
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-1', title: 'Ship login', projectId: 'p1' })
+    await flushPromises()
+    expect(w.find('[data-start-in="own"]').classes()).toContain('selected')
+    expect(w.find('[data-start-in-hint]').text()).toContain('cheapest')
+    api.sessionResume.mockResolvedValue(session({ id: 'own', running: true, state: 'running', taskId: 'task-1' }))
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionResume).toHaveBeenCalledWith('own', expect.anything(), expect.anything())
+    expect(api.sessionStartClaude).not.toHaveBeenCalled()
+  })
+
+  it('a task can be handed to a running session of its project that has NEXUS tools', async () => {
+    seed()
+    const running = session({ id: 'busy', title: 'Refactor cart', running: true, attached: true, state: 'running', integrations: { mcp: { state: 'enabled' } } as never })
+    const noTools = session({ id: 'plain', title: 'No tools', running: true, attached: true, state: 'running', integrations: { mcp: { state: 'blocked', reason: 'x' } } as never })
+    useSessionStore().list = [running, noTools]
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-2', title: 'Fix rounding', projectId: 'p1' })
+    await flushPromises()
+    expect(w.find('[data-start-in="new"]').classes(), 'handing over is never the default').toContain('selected')
+    await w.find('[data-start-in="continue"]').trigger('click')
+    expect(w.find('[data-start-in-hint]').text()).toContain('Refactor cart')
+    expect(w.find('[data-continue-session]').exists(), 'only one session qualifies (the other has no NEXUS tools)').toBe(false)
+    api.sessionContinueTask.mockResolvedValue({ ...running, taskId: 'task-2' })
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionContinueTask).toHaveBeenCalledWith('busy', 'task-2')
+    expect(api.sessionStartClaude).not.toHaveBeenCalled()
   })
 
   it('the Learn view preselects “start right away”, shows the exact first message and sends it', async () => {

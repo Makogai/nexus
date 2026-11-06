@@ -578,6 +578,40 @@ pub async fn session_rename(app: AppHandle, ctx: State<'_, Ctx>, id: String, tit
     .await
 }
 
+/// Hand a task to a running Claude session of its project (instead of a new session): the session already has the
+/// project's context. NEXUS types a fixed message with the task id into its terminal (the task text arrives through
+/// `get_task`), starts the task and moves the session's task link.
+#[tauri::command]
+pub async fn session_continue_task(app: AppHandle, ctx: State<'_, Ctx>, id: String, task_id: String) -> IpcResult<SessionView> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        {
+            let db = ctx.db();
+            let s = session::get(&db, &id)?;
+            if s.kind != Kind::Claude || !ctx.pty.is_running(&id) {
+                return Err(IpcError::invalid("only a running Claude session in this window can take on a task"));
+            }
+            let tools_on = s.integrations.as_ref().is_some_and(|i| i["mcp"]["state"] == "enabled");
+            if !tools_on {
+                return Err(IpcError::invalid("this session has no NEXUS tools, so it cannot read the task — start a new session for it"));
+            }
+            let ws_id = s.workspace_id.clone().ok_or_else(|| IpcError::invalid("this session belongs to no workspace"))?;
+            let ws = workspace::get(&db, &ws_id)?;
+            let v = nexus_core::knowledge::tasks::view(&db, &ws, &task_id, 200)?;
+            if v.project_id.is_some() && v.project_id != s.project_id {
+                return Err(IpcError::invalid("the task belongs to another project"));
+            }
+            nexus_core::knowledge::tasks::start(&db, &ctx.data_dir, &ws, &v.id)?;
+            session::switch_task(&db, &id, &v.id)?;
+            let text = nexus_core::knowledge::tasks::handoff(&v.id);
+            ctx.pty.write(&id, format!("{text}\r").as_bytes()).map_err(IpcError::terminal)?;
+        }
+        emit(&app, &ctx, &id);
+        view_of(&ctx, &id)
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn session_set_archived(app: AppHandle, ctx: State<'_, Ctx>, id: String, archived: bool) -> IpcResult<SessionView> {
     let ctx = ctx.inner().clone();

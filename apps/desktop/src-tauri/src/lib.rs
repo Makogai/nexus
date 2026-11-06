@@ -219,6 +219,7 @@ pub fn run() {
             commands::sessions::session_release,
             commands::sessions::session_rename,
             commands::sessions::session_set_archived,
+            commands::sessions::session_continue_task,
             commands::knowledge::knowledge_overview,
             commands::knowledge::knowledge_read,
             commands::knowledge::knowledge_search,

@@ -83,6 +83,13 @@ export const useSessionStore = defineStore('sessions', () => {
     return s
   }
 
+  async function continueTask(id: string, taskId: string) {
+    const s = await api.sessionContinueTask(id, taskId)
+    upsert(s)
+    openTab(s.id)
+    return s
+  }
+
   async function resume(id: string) {
     const s = await api.sessionResume(id, lastSize.cols, lastSize.rows)
     upsert(s)
@@ -107,6 +114,7 @@ export const useSessionStore = defineStore('sessions', () => {
   }
 
   return {
+    continueTask,
     list,
     loaded,
     byId,

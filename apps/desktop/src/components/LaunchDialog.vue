@@ -29,14 +29,52 @@ const busy = ref(false)
 const error = ref<string | null>(null)
 const startTask = ref(true)
 const kickoff = ref(false)
+/** Where a task's work happens: a new session, the task's own session (resume or open), or a running session of the
+ * project that takes the task on — the cheaper choices reuse context Claude already has. */
+type StartIn = 'new' | 'own' | 'continue'
+const startIn = ref<StartIn>('new')
+const continueId = ref('')
 const task = computed(() => app.launchDialog.task ?? null)
 
 const isOpen = computed(() => app.launchDialog.open)
+/** The task's latest Claude session. */
+const ownSession = computed(() => {
+  const t = task.value
+  if (!t) return null
+  return sessions.list.filter((s) => s.kind === 'claude' && s.taskId === t.id && !s.archivedAt).sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
+})
+const ownUsable = computed(() => !!ownSession.value && ((ownSession.value.running && ownSession.value.attached) || ownSession.value.resumable))
+/** Running Claude sessions of the task's project in this window, with NEXUS tools (they read the task with get_task). */
+const runningInProject = computed(() =>
+  task.value
+    ? sessions.list.filter(
+        (s) => s.kind === 'claude' && s.running && s.attached && s.projectId === projectId.value && s.id !== ownSession.value?.id && s.integrations?.mcp?.state === 'enabled',
+      )
+    : [],
+)
+const startHint = computed(() => {
+  if (startIn.value === 'own') {
+    return ownSession.value?.running
+      ? 'This task already has a running session — NEXUS opens its terminal.'
+      : 'Continues this task’s own conversation — the cheapest way to pick the same task up again.'
+  }
+  if (startIn.value === 'continue') {
+    const s = runningInProject.value.find((x) => x.id === continueId.value)
+    return `Hands the task to “${s?.title ?? 'the session'}”, which already has this project’s context — cheapest for small, related tasks; its context keeps growing.`
+  }
+  return 'A clean context: Claude reads the project again. Best for unrelated work.'
+})
+const launchLabel = computed(() => (startIn.value === 'own' ? (ownSession.value?.running ? 'Open its terminal' : 'Resume') : startIn.value === 'continue' ? 'Hand over' : 'Launch'))
 const availableProjects = computed(() => projects.list.filter((p) => p.available))
 const profile = computed(() => profiles.byId[profileId.value] ?? null)
 const options = computed(() => profiles.launchOptions)
 const selectedWork = computed(() => options.value?.workProfiles.find((w) => w.id === workProfile.value) ?? null)
-const canLaunch = computed(() => !!profile.value && (!!projectId.value || !!customDir.value) && !busy.value)
+const canLaunch = computed(() => {
+  if (busy.value) return false
+  if (task.value && startIn.value === 'own') return ownUsable.value
+  if (task.value && startIn.value === 'continue') return !!continueId.value
+  return !!profile.value && (!!projectId.value || !!customDir.value)
+})
 
 watch(isOpen, (open) => {
   if (!open) return
@@ -48,6 +86,9 @@ watch(isOpen, (open) => {
   // A task session starts working right away unless the person turned that off last time.
   kickoff.value = app.launchDialog.kickoff ?? app.prefs.lastLaunch?.taskKickoff ?? true
   projectId.value = app.launchDialog.projectId ?? availableProjects.value[0]?.id ?? ''
+  // The task's own session when it has one (cheapest); otherwise a new one. Handing over is always a deliberate choice.
+  startIn.value = ownUsable.value ? 'own' : 'new'
+  continueId.value = runningInProject.value[0]?.id ?? ''
   const sel = initialLaunchSelection(
     profiles.list,
     app.prefs.lastLaunch,
@@ -82,6 +123,18 @@ async function launch() {
   busy.value = true
   error.value = null
   try {
+    if (task.value && startIn.value === 'own' && ownSession.value) {
+      const s = ownSession.value
+      if (s.running) sessions.openTab(s.id)
+      else await sessions.resume(s.id)
+      close()
+      return
+    }
+    if (task.value && startIn.value === 'continue' && continueId.value) {
+      await sessions.continueTask(continueId.value, task.value.id)
+      close()
+      return
+    }
     await sessions.startClaude({
       profileId: profileId.value,
       projectId: projectId.value || null,
@@ -140,6 +193,23 @@ function goToProfiles() {
           <div class="hint">Claude gets a short brief of the task (not its history) and records progress with the NEXUS task tools.</div>
         </div>
       </div>
+      <div v-if="task && (ownUsable || runningInProject.length)" class="field" data-launch-start-in>
+        <label>Start in</label>
+        <div class="segments" role="radiogroup" aria-label="Start in">
+          <button class="segment" role="radio" data-start-in="new" :aria-checked="startIn === 'new'" :class="{ selected: startIn === 'new' }" @click="startIn = 'new'">New session</button>
+          <button v-if="ownUsable" class="segment" role="radio" data-start-in="own" :aria-checked="startIn === 'own'" :class="{ selected: startIn === 'own' }" @click="startIn = 'own'">
+            {{ ownSession?.running ? 'Its running session' : 'Resume its session' }}
+          </button>
+          <button v-if="runningInProject.length" class="segment" role="radio" data-start-in="continue" :aria-checked="startIn === 'continue'" :class="{ selected: startIn === 'continue' }" @click="startIn = 'continue'">
+            A running session
+          </button>
+        </div>
+        <select v-if="startIn === 'continue' && runningInProject.length > 1" v-model="continueId" class="select" aria-label="Running session" data-continue-session>
+          <option v-for="s in runningInProject" :key="s.id" :value="s.id">{{ s.title }}</option>
+        </select>
+        <span class="hint" data-start-in-hint>{{ startHint }}</span>
+      </div>
+      <div v-show="!task || startIn === 'new'" class="fresh">
       <div class="field">
         <label for="launch-project">Project</label>
         <div class="input-row">
@@ -201,6 +271,7 @@ function goToProfiles() {
         <input id="launch-title" v-model="title" class="input" :placeholder="task?.title ?? 'e.g. Fix login redirect'" @keydown.enter="launch" />
       </div>
 
+      </div>
       <div v-if="error" class="notice notice-error selectable"><TriangleAlert /> {{ error }}</div>
     </template>
 
@@ -208,7 +279,7 @@ function goToProfiles() {
       <span class="faint footnote">Work profile and model are fixed for the conversation once it starts.</span>
       <button class="btn" @click="close">Cancel</button>
       <button class="btn btn-primary" :disabled="!canLaunch" @click="launch">
-        <Sparkles /> {{ busy ? 'Launching…' : 'Launch' }}
+        <Sparkles /> {{ busy ? 'Launching…' : launchLabel }}
       </button>
     </template>
   </BaseModal>

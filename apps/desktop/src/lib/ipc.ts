@@ -227,6 +227,8 @@ export const api = {
   sessionList: (filter?: SessionFilter) => call<SessionView[]>('session_list', { filter }),
   sessionGet: (id: string) => call<SessionView>('session_get', { id }),
   sessionStartClaude: (args: StartClaude) => call<SessionView>('session_start_claude', { args }),
+  /** Hand a task to a running Claude session of its project (NEXUS types a fixed message with the task id). */
+  sessionContinueTask: (id: string, taskId: string) => call<SessionView>('session_continue_task', { id, taskId }),
   sessionResume: (id: string, cols?: number, rows?: number) =>
     call<SessionView>('session_resume', { id, cols, rows }),
   shellList: () => call<ShellInfo[]>('shell_list'),
