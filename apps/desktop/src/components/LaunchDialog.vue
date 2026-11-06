@@ -45,7 +45,8 @@ watch(isOpen, (open) => {
   model.value = ''
   customDir.value = null
   startTask.value = true
-  kickoff.value = !!app.launchDialog.kickoff
+  // A task session starts working right away unless the person turned that off last time.
+  kickoff.value = app.launchDialog.kickoff ?? app.prefs.lastLaunch?.taskKickoff ?? true
   projectId.value = app.launchDialog.projectId ?? availableProjects.value[0]?.id ?? ''
   const sel = initialLaunchSelection(
     profiles.list,
@@ -93,7 +94,12 @@ async function launch() {
       startTask: task.value ? startTask.value : undefined,
       kickoff: task.value ? kickoff.value : undefined,
     })
-    app.prefs.lastLaunch = { profileId: profileId.value, workProfile: workProfile.value, effort: effort.value || null }
+    app.prefs.lastLaunch = {
+      profileId: profileId.value,
+      workProfile: workProfile.value,
+      effort: effort.value || null,
+      taskKickoff: task.value ? kickoff.value : app.prefs.lastLaunch?.taskKickoff,
+    }
     close()
   } catch (e) {
     error.value = toIpcError(e).message

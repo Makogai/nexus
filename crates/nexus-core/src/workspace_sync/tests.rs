@@ -387,7 +387,7 @@ fn record(m: &Machine, project: &str, name: &str, body: &str) -> String {
 }
 
 fn allowed() -> policy::Managed {
-    policy::Managed { trusted_allowed: true, review_allowed: true, source: None }
+    policy::Managed { trusted_allowed: true, review_allowed: true, autonomous_allowed: true, source: None }
 }
 
 fn remote_has(url: &str, rel: &str) -> bool {
@@ -466,7 +466,7 @@ fn trusted_sync_never_forces_respects_managed_policy_and_survives_offline() {
     assert!(!remote_has(&url, &rel));
 
     // An organisation can forbid it: setting is refused, an existing trusted policy only asks.
-    let forbid = policy::Managed { trusted_allowed: false, review_allowed: true, source: Some("policy.json".into()) };
+    let forbid = policy::Managed { trusted_allowed: false, review_allowed: true, autonomous_allowed: false, source: Some("policy.json".into()) };
     assert_eq!(policy::set(&a.conn, &a.ws, policy::Mode::Trusted, true, &forbid).unwrap_err().code(), "unsupported");
     let o = policy::apply(&a.sync(), &forbid).unwrap();
     assert!(o.action == "notified" || o.action == "none", "{o:?}");
@@ -657,4 +657,49 @@ fn host_scaffolding_is_kept_and_a_project_repository_never_becomes_a_workspace()
     assert_eq!(crate::workspace::import(&conn, empty.to_str().unwrap()).unwrap_err().code(), "not_found");
     let ws = crate::workspace::create(&conn, empty.to_str().unwrap(), "Here", "").unwrap();
     assert!(ws.root_path.join("knowledge").join("README.md").is_file());
+}
+
+fn last_subject(dir: &Path) -> String {
+    let out = std::process::Command::new("git").args(["log", "-1", "--format=%s"]).current_dir(dir).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[test]
+fn autonomous_sync_publishes_every_change_with_claudes_message_and_still_stops_on_findings() {
+    let (a, url, _t) = origin();
+    a.commit_all("init");
+    a.push();
+    assert!(policy::set(&a.conn, &a.ws, policy::Mode::Autonomous, false, &allowed()).is_err(), "needs the private-remote confirmation");
+    let no_auto = policy::Managed { autonomous_allowed: false, ..allowed() };
+    assert_eq!(policy::set(&a.conn, &a.ws, policy::Mode::Autonomous, true, &no_auto).unwrap_err().code(), "unsupported");
+    policy::set(&a.conn, &a.ws, policy::Mode::Autonomous, true, &allowed()).unwrap();
+
+    // Claude's task and a development record both travel — with the message the session proposed.
+    let tasks = a.root().join("project-context").join("shop").join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::write(tasks.join("t.md"), "my task\n").unwrap();
+    let rel = record(&a, "shop", "2026-11-06-a", "Record A\n");
+    let s = crate::session::insert_starting(
+        &a.conn,
+        crate::session::NewSession { workspace_id: Some(a.ws.id.clone()), title: "t".into(), cwd: a.root().to_path_buf(), program: "claude".into(), ..Default::default() },
+    )
+    .unwrap();
+    super::message::record(&a.conn, &s.id, "Plan the checkout task").unwrap();
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "pushed", "{o:?}");
+    assert!(remote_has(&url, "project-context/shop/tasks/t.md") && remote_has(&url, &rel));
+    assert_eq!(last_subject(a.root()), "Plan the checkout task");
+
+    // No new proposal: NEXUS composes the message from the paths (the earlier proposal was used).
+    std::fs::write(tasks.join("u.md"), "another task\n").unwrap();
+    assert_eq!(policy::apply(&a.sync(), &allowed()).unwrap().action, "pushed");
+    assert_eq!(last_subject(a.root()), "NEXUS: shop — 1 task");
+
+    // A credential-shaped value still stops it and asks; nothing is published.
+    let token = format!("{}{}", "ghp_", "Q".repeat(36));
+    std::fs::write(tasks.join("leak.md"), format!("deploy key {token}\n")).unwrap();
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "paused", "{o:?}");
+    assert!(!remote_has(&url, "project-context/shop/tasks/leak.md"));
+    assert!(crate::notify::list(&a.conn, &Default::default()).unwrap().iter().any(|n| n.title.contains("ready to sync")));
 }

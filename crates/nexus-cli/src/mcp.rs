@@ -144,6 +144,7 @@ impl Server {
                 "update_task" => self.update_task(b, &args),
                 "record_memory" => self.record_memory(b, &args),
                 "draft_project_document" => self.draft_project_document(b, &args),
+                "propose_commit_message" => self.propose_commit_message(b, &args),
                 "request_attention" => self.request_attention(b, &args),
                 "get_constitution" => self.get_constitution(b, &args),
                 "get_workflow_run" => self.get_workflow_run(b),
@@ -796,6 +797,14 @@ impl Server {
         let item = nexus_core::project::learn::record_draft(&self.conn, &self.data_dir, &b.workspace, &project_id, topic, body).map_err(|e| e.to_string())?;
         Ok(json!({ "drafted": { "id": item.id, "title": item.title, "topic": topic }, "next": "The person reviews the draft in NEXUS (project → Learn) and decides whether to use it." }))
     }
+
+    /// Claude's commit message for the workspace changes of this session (ADR-0042): stored with the session; the Sync
+    /// Center pre-fills it and autonomous sync commits with it. Nothing is committed here.
+    fn propose_commit_message(&self, b: &Binding, args: &Value) -> Result<Value, String> {
+        let message = args.get("message").and_then(Value::as_str).ok_or("`message` is required")?;
+        let stored = nexus_core::workspace_sync::message::record(&self.conn, &b.session.id, message).map_err(|e| e.to_string())?;
+        Ok(json!({ "proposed": stored.lines().next().unwrap_or_default(), "next": "NEXUS uses it when the workspace changes are committed (automatically, or by the person in the Sync Center)." }))
+    }
 }
 
 fn kinds_arg(args: &Value) -> Result<Vec<Kind>, String> {
@@ -1038,6 +1047,14 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
         }),
         json!({
+            "name": "propose_commit_message", "title": "Propose a commit message",
+            "description": "When your work changed this NEXUS workspace (tasks, notes, decisions, drafts or other workspace files), propose the commit message for those changes before you finish: a subject line (imperative, at most 100 characters: what changed and why) and optionally a short body. NEXUS commits with it when the workspace is synced. It does not commit anything itself.",
+            "inputSchema": { "type": "object", "properties": {
+                "message": { "type": "string", "minLength": 1, "maxLength": 1400 }
+            }, "required": ["message"], "additionalProperties": false },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
+        }),
+        json!({
             "name": "get_constitution", "title": "Constitution rules",
             "description": "The effective constitution rules for this session (workspace, stack, project and task scopes applied; mandatory policies cannot be overridden): ids, enforcement (mandatory, rule, guideline) and text. Use it to read the rules of a document listed for on-demand reading (ids such as \"TST-*\" select all rules with that prefix), or to check a rule before acting.",
             "inputSchema": { "type": "object", "properties": {
@@ -1150,7 +1167,7 @@ mod tests {
         assert_eq!(names, [
             "get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint",
             "get_session_activity", "get_context_index", "search_knowledge", "get_document", "list_tasks", "create_task",
-            "get_resume_summary", "get_task", "update_task", "record_memory", "draft_project_document", "get_constitution", "get_workflow_run", "report_step",
+            "get_resume_summary", "get_task", "update_task", "record_memory", "draft_project_document", "propose_commit_message", "get_constitution", "get_workflow_run", "report_step",
             "request_attention", "get_checkpoints",
         ]);
         assert!(names.iter().all(|n| !n.starts_with("nexus_")), "Claude already prefixes mcp__nexus__");

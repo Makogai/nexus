@@ -221,10 +221,29 @@ describe('LaunchDialog', () => {
     api.sessionStartClaude.mockResolvedValue(session({ id: 'new', running: true, state: 'running' }))
     await w.findAll('footer .btn-primary')[0]!.trigger('click')
     await flushPromises()
-    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ projectId: 'p1', taskId: 'task-1', startTask: false, kickoff: false, title: null })
+    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ projectId: 'p1', taskId: 'task-1', startTask: false, kickoff: true, title: null })
   })
 
-  it('“start right away” is preselected only when asked, shows the exact first message and is sent', async () => {
+  it('a task launch starts right away by default and remembers when the person turns it off', async () => {
+    seed()
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-1', title: 'Ship login', projectId: 'p1' })
+    await flushPromises()
+    const box = () => w.find('[data-launch-kickoff] input').element as HTMLInputElement
+    expect(box().checked, 'on by default').toBe(true)
+    await w.find('[data-launch-kickoff] input').setValue(false)
+    api.sessionStartClaude.mockResolvedValue(session({ id: 'new', running: true, state: 'running' }))
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ taskId: 'task-1', kickoff: false })
+    expect(app.prefs.lastLaunch?.taskKickoff).toBe(false)
+    app.openLaunch(null, 'game', { id: 'task-2', title: 'Fix cart', projectId: 'p1' })
+    await flushPromises()
+    expect(box().checked, 'the last choice is remembered').toBe(false)
+  })
+
+  it('the Learn view preselects “start right away”, shows the exact first message and sends it', async () => {
     seed()
     const app = useAppStore()
     const w = mountWith(LaunchDialog)
@@ -238,7 +257,7 @@ describe('LaunchDialog', () => {
     expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ taskId: 'task-1', kickoff: true })
     // Without a task there is nothing to start on.
     app.openLaunch('p1', 'game', null, { kickoff: true })
-    expect(app.launchDialog.kickoff).toBe(false)
+    expect(app.launchDialog.kickoff).toBeUndefined()
   })
 
   it('switching profile applies that profile’s defaults', async () => {
@@ -469,6 +488,6 @@ describe('CommandPalette', () => {
     expect(first.text()).toContain('Launch Claude in Game')
     await w.find('.palette input').trigger('keydown', { key: 'Enter' })
     expect(app.paletteOpen).toBe(false)
-    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null, kickoff: false })
+    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null, kickoff: undefined })
   })
 })

@@ -502,12 +502,12 @@ fn spawn(app: &AppHandle, ctx: &Ctx, session: &Session, req: SpawnRequest) -> Ip
         }
         // The session's development record (ADR-0038), on its own connection so the UI stays responsive.
         // …and the workspace's sync policy acts on it (ADR-0039; manual = nothing happens).
+        // Autonomous sync (ADR-0042) publishes whatever the session changed, record or not.
         let record = nexus_core::db::open(&ctx_exit.data_dir.join(nexus_core::db::DB_FILE)).map_err(|e| e.to_string()).and_then(|c| {
-            let written = nexus_core::devrecord::finalize(&c, &ctx_exit.data_dir, &sid).map_err(|e| e.to_string())?;
-            if written.is_some() {
-                let managed = nexus_core::workspace_sync::policy::default_managed_path();
-                nexus_core::workspace_sync::policy::run_due(&c, &ctx_exit.data_dir, &ctx_exit.home, &ctx_exit.host.id, &managed).map_err(|e| e.to_string())?;
-            }
+            nexus_core::devrecord::finalize(&c, &ctx_exit.data_dir, &sid).map_err(|e| e.to_string())?;
+            nexus_core::workspace_sync::policy::session_ended(&c, &sid).map_err(|e| e.to_string())?;
+            let managed = nexus_core::workspace_sync::policy::default_managed_path();
+            nexus_core::workspace_sync::policy::run_due(&c, &ctx_exit.data_dir, &ctx_exit.home, &ctx_exit.host.id, &managed).map_err(|e| e.to_string())?;
             Ok(())
         });
         if let Err(e) = record {

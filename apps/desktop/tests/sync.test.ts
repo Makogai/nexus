@@ -82,7 +82,7 @@ describe('SyncView', () => {
 
   it('commits only after a non-blocking review and a confirmation, with the review token', async () => {
     api.syncStatus.mockResolvedValue(status())
-    const blocked: SyncCommitReview = { branch: 'main', files: [{ status: 'M', path: 'notes/a.md' }], inspection: inspection(true), identity: true, token: 't-blocked' }
+    const blocked: SyncCommitReview = { branch: 'main', files: [{ status: 'M', path: 'notes/a.md' }], inspection: inspection(true), identity: true, token: 't-blocked', suggestedMessage: 'Plan the checkout' }
     api.syncReviewCommit.mockResolvedValueOnce(blocked)
     const w = mount(SyncView, { attachTo: document.body })
     const dialog = mount(ConfirmDialog, { attachTo: document.body })
@@ -91,6 +91,7 @@ describe('SyncView', () => {
     await flushPromises()
     expect(api.syncReviewCommit).toHaveBeenCalledWith('w1', ['notes/a.md'])
     expect(document.querySelector('[data-sync-finding="secret:block"]')?.textContent).toContain('notes/a.md:3')
+    expect((document.querySelector('[data-sync-message]') as HTMLTextAreaElement).value, 'Claude’s message is pre-filled').toBe('Plan the checkout')
     ;(document.querySelector('[data-sync-message]') as HTMLTextAreaElement).value = 'Notes'
     document.querySelector('[data-sync-message]')!.dispatchEvent(new Event('input'))
     await flushPromises()

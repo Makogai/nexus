@@ -70,15 +70,24 @@ fn spawn_heartbeat(ctx: Ctx) {
         loop {
             std::thread::sleep(host::HEARTBEAT_INTERVAL);
             let running = ctx.pty.running_ids();
-            let db = ctx.db();
-            if let Err(e) = host::heartbeat(&db, &ctx.host.id, &running)
-                .and_then(|_| host::reconcile(&db, now_ms()))
-                .and_then(|_| nexus_core::workflow::run::reconcile(&db, now_ms()))
-                .and_then(|_| nexus_core::workspace_sync::history::reconcile(&db, now_ms()))
-                .and_then(|_| nexus_core::devrecord::finalize_pending(&db, &ctx.data_dir))
-                .and_then(|_| nexus_core::workspace_sync::policy::run_due(&db, &ctx.data_dir, &ctx.home, &ctx.host.id, &nexus_core::workspace_sync::policy::default_managed_path()))
             {
-                tracing::warn!(error = %e, "host heartbeat failed");
+                let db = ctx.db();
+                if let Err(e) = host::heartbeat(&db, &ctx.host.id, &running)
+                    .and_then(|_| host::reconcile(&db, now_ms()))
+                    .and_then(|_| nexus_core::workflow::run::reconcile(&db, now_ms()))
+                    .and_then(|_| nexus_core::workspace_sync::history::reconcile(&db, now_ms()))
+                    .and_then(|_| nexus_core::devrecord::finalize_pending(&db, &ctx.data_dir))
+                {
+                    tracing::warn!(error = %e, "host heartbeat failed");
+                }
+            }
+            // Due workspace syncs (records; autonomous sync after Claude's turns, ADR-0042) talk to the remote: on their
+            // own connection, so a slow push never holds the connection the UI uses.
+            let due = nexus_core::db::open(&ctx.data_dir.join(nexus_core::db::DB_FILE)).and_then(|c| {
+                nexus_core::workspace_sync::policy::run_due(&c, &ctx.data_dir, &ctx.home, &ctx.host.id, &nexus_core::workspace_sync::policy::default_managed_path())
+            });
+            if let Err(e) = due {
+                tracing::warn!(error = %e, "workspace sync policy not applied");
             }
         }
     });

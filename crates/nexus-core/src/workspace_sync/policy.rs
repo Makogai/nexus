@@ -10,6 +10,12 @@
 //!   Any inspection finding, a changed remote or branch, a remote that is ahead, other unpushed commits, or a managed
 //!   policy that forbids it stops the automatic path and falls back to asking. Never forced; failures are recorded.
 //!
+//! * **Autonomous** (opt-in, per workspace, on this machine only; ADR-0042): every change in the workspace repository is
+//!   committed and pushed on its own when a Claude session finishes a turn or ends (and on the host's heartbeat) — with
+//!   the commit message the session proposed (`message::suggest`). Same route and the same stops as trusted: M29's
+//!   inspected commit and push, never forced; a finding, a changed remote or branch, or a remote that is ahead stops it
+//!   and asks with one notification.
+//!
 //! The policy is machine-local (`app_settings`), never read from the workspace: a synced file cannot switch automatic
 //! publication on for another computer. Organisations can forbid trusted (or automatic) sync in a managed policy file.
 
@@ -32,7 +38,11 @@ pub enum Mode {
     Manual,
     Review,
     Trusted,
+    Autonomous,
 }
+
+/// After a Claude turn, wait this long before syncing, so a burst of writes becomes one commit.
+pub const SETTLE_MS: i64 = 20_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +67,8 @@ pub struct Policy {
 pub struct Managed {
     pub trusted_allowed: bool,
     pub review_allowed: bool,
+    /// `workspaceSync.autonomousSync` (default: as `trustedAutoSync`).
+    pub autonomous_allowed: bool,
     /// The file that set a restriction, if any.
     pub source: Option<String>,
 }
@@ -73,7 +85,7 @@ pub fn default_managed_path() -> PathBuf {
 
 /// Read the managed policy file (strict: an unreadable file is treated as forbidding automatic sync).
 pub fn managed(path: &Path) -> Managed {
-    let allowed = Managed { trusted_allowed: true, review_allowed: true, source: None };
+    let allowed = Managed { trusted_allowed: true, review_allowed: true, autonomous_allowed: true, source: None };
     let Ok(text) = std::fs::read_to_string(path) else { return allowed };
     let source = Some(path.display().to_string());
     match serde_json::from_str::<serde_json::Value>(&text) {
@@ -81,9 +93,10 @@ pub fn managed(path: &Path) -> Managed {
             let ws = &v["workspaceSync"];
             let trusted = ws.get("trustedAutoSync").and_then(|x| x.as_bool()).unwrap_or(true);
             let review = ws.get("automaticReview").and_then(|x| x.as_bool()).unwrap_or(true);
-            Managed { trusted_allowed: trusted, review_allowed: review, source: (!trusted || !review).then_some(source).flatten() }
+            let autonomous = trusted && ws.get("autonomousSync").and_then(|x| x.as_bool()).unwrap_or(true);
+            Managed { trusted_allowed: trusted, review_allowed: review, autonomous_allowed: autonomous, source: (!trusted || !review || !autonomous).then_some(source).flatten() }
         }
-        Err(_) => Managed { trusted_allowed: false, review_allowed: false, source },
+        Err(_) => Managed { trusted_allowed: false, review_allowed: false, autonomous_allowed: false, source },
     }
 }
 
@@ -122,9 +135,9 @@ pub fn set(conn: &Connection, ws: &Workspace, mode: Mode, remote_is_private: boo
             }
             Policy { mode, trust: None }
         }
-        Mode::Trusted => {
-            if !m.trusted_allowed {
-                return Err(CoreError::Unsupported(format!("trusted automatic sync is turned off by your organisation ({})", m.source.clone().unwrap_or_default())));
+        Mode::Trusted | Mode::Autonomous => {
+            if !m.trusted_allowed || (mode == Mode::Autonomous && !m.autonomous_allowed) {
+                return Err(CoreError::Unsupported(format!("automatic publication is turned off by your organisation ({})", m.source.clone().unwrap_or_default())));
             }
             if !super::own_repository(&ws.root_path) {
                 return Err(CoreError::invalid("the workspace is not a Git repository of its own"));
@@ -147,6 +160,25 @@ pub fn mark_due(conn: &Connection, workspace_id: &str) -> Result<()> {
     settings::set(conn, &due_key(workspace_id), &crate::now_ms())
 }
 
+/// A session ended (its process exited): under the autonomous policy its workspace is due now — the host runs
+/// [`run_due`] right after. Covers sessions without hooks (policy-blocked), where no Stop event arrives.
+pub fn session_ended(conn: &Connection, session_id: &str) -> Result<()> {
+    use rusqlite::OptionalExtension;
+    let ws: Option<String> = conn.query_row("SELECT workspace_id FROM sessions WHERE id = ?1", [session_id], |r| r.get(0)).optional()?.flatten();
+    if let Some(ws) = ws
+        && get(conn, &ws)?.mode == Mode::Autonomous
+    {
+        mark_due(conn, &ws)?;
+    }
+    Ok(())
+}
+
+/// Note that a workspace may have changes to act on in `delay_ms` — a Claude turn ended (Stop hook) or a session ended.
+/// Each call moves the time forward, so a burst of turns becomes one commit. Cheap: one settings write (hooks call it).
+pub fn mark_due_in(conn: &Connection, workspace_id: &str, delay_ms: i64) -> Result<()> {
+    settings::set(conn, &due_key(workspace_id), &(crate::now_ms() + delay_ms))
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Outcome {
@@ -159,7 +191,7 @@ pub struct Outcome {
 
 fn ask(s: &Sync<'_>, files: usize, why: Option<&str>) -> Result<()> {
     let body = match why {
-        Some(w) => format!("{files} development record file(s) are ready, but automatic publication stopped: {w}. Review them in the Sync Center."),
+        Some(w) => format!("{files} workspace file(s) are ready, but automatic publication stopped: {w}. Review them in the Sync Center."),
         None => format!("{files} development record file(s) are ready to commit and push — review them in the Sync Center."),
     };
     let mut e = crate::notify::NewEvent::new(crate::notify::Category::ReviewRequired, "sync", "Workspace records ready to sync").body(body).target("sync", s.ws.id.clone()).dedupe(format!("sync-records:{}", s.ws.id));
@@ -175,7 +207,12 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
     if policy.mode == Mode::Manual || !super::own_repository(&s.ws.root_path) {
         return out("none", "manual sync".into(), 0);
     }
-    let pending: Vec<String> = git::changed_paths(&s.ws.root_path)?.into_iter().map(|(_, p)| p).filter(|p| allowlisted(p)).collect();
+    // Autonomous publishes every change in the workspace repository; the other modes only NEXUS's own records.
+    let everything = policy.mode == Mode::Autonomous;
+    if everything && !m.autonomous_allowed {
+        return out("none", "autonomous sync is turned off by the organisation".into(), 0);
+    }
+    let pending: Vec<String> = git::changed_paths(&s.ws.root_path)?.into_iter().map(|(_, p)| p).filter(|p| everything || allowlisted(p)).collect();
     let trusted_ok = policy.mode == Mode::Trusted && m.trusted_allowed;
     if policy.mode == Mode::Review || (policy.mode == Mode::Trusted && !m.trusted_allowed) {
         if pending.is_empty() {
@@ -188,8 +225,9 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
         ask(s, pending.len(), why)?;
         return out("notified", "review requested".into(), pending.len());
     }
-    // Trusted.
-    let trust = policy.trust.clone().ok_or_else(|| CoreError::invalid("the trusted policy has no approved remote"))?;
+    // Trusted or autonomous.
+    let mode = policy.mode;
+    let trust = policy.trust.clone().ok_or_else(|| CoreError::invalid("the automatic policy has no approved remote"))?;
     // The audit entry is written after M29's own operations (they allow one running operation at a time).
     let audit = |status: &str, kind: Option<&str>, message: &str, commits: usize, files: usize| -> Result<()> {
         let head = git::head(&s.ws.root_path);
@@ -199,20 +237,26 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
     let pause = |why: String, files: usize| -> Result<Outcome> {
         audit("refused", Some("paused"), &why, 0, files)?;
         ask(s, files.max(1), Some(&why))?;
-        Ok(Outcome { mode: Mode::Trusted, action: "paused", message: why, files })
+        Ok(Outcome { mode, action: "paused", message: why, files })
     };
     let url = git::remote_url(&s.ws.root_path).map(|u| git::redact_url(&u)).unwrap_or_default();
     let branch = git::status(&s.ws.root_path)?.branch.unwrap_or_default();
     if url != trust.remote || branch != trust.branch {
         return pause(format!("the remote or branch changed since you approved it (approved {} on {})", trust.remote, trust.branch), pending.len());
     }
-    // 1. Commit the allowlisted records — M29's reviewed commit with its inspection; any finding stops it.
+    // 1. Commit — M29's reviewed commit with its inspection; any finding stops it. The message is the one Claude proposed
+    //    for this work (or one composed from the paths).
     if !pending.is_empty() {
         let review = ops::review_commit(s, Some(&pending))?;
         if !review.inspection.findings.is_empty() {
-            return pause(format!("the security inspection reported {} finding(s) in the records", review.inspection.findings.len()), pending.len());
+            return pause(format!("the security inspection reported {} finding(s) in the changes", review.inspection.findings.len()), pending.len());
         }
-        if let Err(e) = ops::commit(s, "NEXUS: development records (trusted automatic sync)", Some(&pending), &review.token) {
+        let message = if everything {
+            super::message::suggest(s.conn, &s.ws.id, &s.ws.root_path, &pending)?
+        } else {
+            "NEXUS: development records (trusted automatic sync)".to_string()
+        };
+        if let Err(e) = ops::commit(s, &message, Some(&pending), &review.token) {
             return pause(format!("committing failed: {e}"), pending.len());
         }
     }
@@ -230,7 +274,7 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
     if pr.behind > 0 {
         return pause(format!("the remote has {} new commit(s) — pull them in the Sync Center first (NEXUS never force-pushes)", pr.behind), pending.len());
     }
-    if let Some(other) = pr.files.iter().find(|f| !allowlisted(&f.path)) {
+    if !everything && let Some(other) = pr.files.iter().find(|f| !allowlisted(&f.path)) {
         return pause(format!("other unpushed commits change {} — push those yourself after reviewing them", other.path), pending.len());
     }
     if !pr.inspection.findings.is_empty() {
@@ -238,8 +282,9 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
     }
     match ops::push(s, &pr.token) {
         Ok(p) => {
-            audit("ok", None, &format!("published {} record file(s) to {}/{}", pr.files.len(), p.remote, p.branch), p.commits, pr.files.len())?;
-            out("pushed", format!("published {} record file(s)", pr.files.len()), pr.files.len())
+            let what = if everything { "file(s)" } else { "record file(s)" };
+            audit("ok", None, &format!("published {} {what} to {}/{}", pr.files.len(), p.remote, p.branch), p.commits, pr.files.len())?;
+            out("pushed", format!("published {} {what}", pr.files.len()), pr.files.len())
         }
         Err(e) => {
             let _ = settings::set(s.conn, &due_key(&s.ws.id), &(crate::now_ms() + RETRY_MS));
@@ -285,6 +330,8 @@ pub struct PolicyView {
     pub allowlist: &'static [&'static str],
     /// Why trusted mode cannot be chosen now, if it cannot.
     pub trusted_unavailable: Option<String>,
+    /// Why autonomous mode cannot be chosen now, if it cannot.
+    pub autonomous_unavailable: Option<String>,
     pub remote: Option<String>,
     pub branch: Option<String>,
 }
@@ -303,5 +350,10 @@ pub fn view(conn: &Connection, ws: &Workspace, managed_path: &Path) -> Result<Po
     } else {
         None
     };
-    Ok(PolicyView { policy: get(conn, &ws.id)?, managed: m, allowlist: ALLOWLIST, trusted_unavailable, remote, branch })
+    let autonomous_unavailable = match &trusted_unavailable {
+        Some(why) => Some(why.clone()),
+        None if !m.autonomous_allowed => Some(format!("turned off by your organisation ({})", m.source.clone().unwrap_or_default())),
+        None => None,
+    };
+    Ok(PolicyView { policy: get(conn, &ws.id)?, managed: m, allowlist: ALLOWLIST, trusted_unavailable, autonomous_unavailable, remote, branch })
 }

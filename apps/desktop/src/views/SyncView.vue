@@ -105,7 +105,11 @@ function toggle(path: string) {
 async function reviewCommit() {
   const paths = [...selected.value]
   const r = await run('review', () => api.syncReviewCommit(wsId.value!, paths))
-  if (r) commitReview.value = r
+  if (r) {
+    commitReview.value = r
+    // Claude's message for this work (or one NEXUS composed) — kept when you already wrote your own.
+    if (!commitMessage.value.trim()) commitMessage.value = r.suggestedMessage
+  }
 }
 
 async function commit() {
@@ -351,7 +355,7 @@ watch(wsId, () => {
           </ul>
           <p v-if="commitReview.inspection.blocked" class="small">Leave the blocking files out (untick them) or remove what was found, then review again.</p>
         </div>
-        <textarea v-model="commitMessage" class="textarea message" rows="3" placeholder="Commit message" aria-label="Commit message" data-sync-message />
+        <textarea v-model="commitMessage" class="textarea message" rows="5" placeholder="Commit message" aria-label="Commit message" data-sync-message />
       </div>
       <template #footer>
         <button class="btn" @click="commitReview = null">Cancel</button>

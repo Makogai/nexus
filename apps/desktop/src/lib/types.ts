@@ -179,13 +179,14 @@ export interface DevHistory {
   blockers: [string, number][]
 }
 
-export type SyncPolicyMode = 'manual' | 'review' | 'trusted'
+export type SyncPolicyMode = 'manual' | 'review' | 'trusted' | 'autonomous'
 
 export interface SyncPolicyView {
   policy: { mode: SyncPolicyMode; trust: { remote: string; branch: string; authorizedAt: number } | null }
-  managed: { trustedAllowed: boolean; reviewAllowed: boolean; source: string | null }
+  managed: { trustedAllowed: boolean; reviewAllowed: boolean; autonomousAllowed: boolean; source: string | null }
   allowlist: string[]
   trustedUnavailable: string | null
+  autonomousUnavailable: string | null
   remote: string | null
   branch: string | null
 }
@@ -628,7 +629,8 @@ export interface UiPreferences {
   terminalOpen: boolean
   sidebarCollapsed: boolean
   defaultShell: string | null
-  lastLaunch: { profileId?: string; workProfile?: string; effort?: string | null } | null
+  /** Launch defaults; `taskKickoff` = the last “Start right away” choice for task launches (default: on). */
+  lastLaunch: { profileId?: string; workProfile?: string; effort?: string | null; taskKickoff?: boolean } | null
 }
 
 export type ProfileDialogMode = 'register' | 'create' | 'edit'
@@ -1676,6 +1678,8 @@ export interface SyncCommitReview {
   inspection: SyncInspection
   identity: boolean
   token: string
+  /** What the Claude sessions proposed for this work, or a message composed from the paths (ADR-0042). */
+  suggestedMessage: string
 }
 
 export interface SyncPushReview {

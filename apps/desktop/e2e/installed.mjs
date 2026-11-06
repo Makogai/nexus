@@ -142,7 +142,7 @@ try {
     timeout: 30_000,
   })
   const tools = mcp.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((m) => m.id === 2)?.result?.tools ?? []
-  check('the installed MCP server answers a client (initialize, tools/list)', tools.length === 22, `${tools.length} tools`)
+  check('the installed MCP server answers a client (initialize, tools/list)', tools.length === 23, `${tools.length} tools`)
 
   // ---- the installed desktop running ----
   const port = ui ? '9352' : '9351'
