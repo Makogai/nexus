@@ -331,8 +331,14 @@ pub fn run() {
 /// port) to the window's own browser arguments as well, next to wry's defaults. WebView2 on some systems (GitHub's
 /// Windows Server runners) ignores the variable once the app passes arguments itself. Release builds cannot contain
 /// this code: the e2e feature is refused at compile time there (ADR-0015, ADR-0033).
+///
+/// They also run under their own identifier (`<APP_ID>.e2e`), so a test can run while an installed NEXUS is open: the
+/// single-instance lock and the WebView2 data folder both follow the identifier — sharing them would hand the test's
+/// launch to the person's NEXUS, or start WebView2 with different switches on the same data folder. The bundle and
+/// the notifier keep using `APP_ID`.
 #[cfg(feature = "e2e-webview-debugging")]
 fn e2e_browser_args(context: &mut tauri::Context<tauri::Wry>) {
+    context.config_mut().identifier = format!("{APP_ID}.e2e");
     if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
         for w in context.config_mut().app.windows.iter_mut() {
             w.additional_browser_args = Some(format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection {extra}"));
