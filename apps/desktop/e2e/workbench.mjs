@@ -241,6 +241,17 @@ try {
   check('Back returns from Memory proposals to the project’s Learn tab', !!inKnowledge && !!backAt, backAt ?? '')
   const version = await textOf('[data-app-version]')
   check('the top bar shows the NEXUS version', /^v\d+\.\d+\.\d+/.test(version.trim()), version)
+
+  // NEXUS tools: the built-in skill (as Claude reads it), the MCP server's tools as `nexus mcp` lists them, the hooks.
+  await cdp.evaluate(`location.hash = '#/tools'; true`)
+  const tools = await cdp.waitFor(`document.querySelectorAll('[data-tools-mcp] [data-tool]').length || null`, 20000).catch(() => 0)
+  check('NEXUS tools lists the MCP server’s 24 tools and the hooks', tools === 24 && (await textOf('[data-tools-hooks]')).includes('SessionStart'), `${tools} tools`)
+  await cdp.evaluate(`document.querySelector('[data-skill="nexus:learn-project"] .btn').click(), true`)
+  const skillBody = await cdp.waitFor(`document.querySelector('[data-skill-body]')?.innerText`, 10000).catch(() => '')
+  check('…and the built-in nexus:learn-project skill, exactly as Claude reads it', skillBody.includes('Learn a project for NEXUS') && skillBody.includes('Stop and report'), skillBody.slice(0, 60))
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.getAttribute('aria-label') === 'Close')?.click(); true`)
+  await cdp.evaluate(`location.hash = '#/projects/${proj.id}?tab=learn'; true`)
+  await cdp.waitFor(`!!document.querySelector('[data-learn-session]')`, 15000)
   const lm = await inv('project_learn_map', { workspaceId: ws.id, projectId: proj.id })
   const brief = lm.task ? (await inv('knowledge_read', { workspaceId: ws.id, id: lm.task.id })).body : ''
   check('…the task carries NEXUS\'s map and the drafting instructions (graph included)', brief.includes('draft_project_document') && brief.includes('GRAPH_REPORT.md') && brief.includes('do not change any file'), brief.slice(0, 100))

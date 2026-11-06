@@ -1696,6 +1696,21 @@ export interface SyncPushReview {
   token: string
 }
 
+export interface NexusTool {
+  name: string
+  title?: string
+  description: string
+  annotations?: { readOnlyHint?: boolean }
+}
+
+export interface NexusTools {
+  cli: string | null
+  tools: NexusTool[]
+  toolsError: string | null
+  hooks: string[]
+  skills: { id: string; description: string; givenTo: string; body: string }[]
+}
+
 /** A Claude session asked NEXUS to push its project's branch (ADR-0043). */
 export interface PushRequest {
   id: string

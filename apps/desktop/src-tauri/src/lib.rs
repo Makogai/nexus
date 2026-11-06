@@ -223,6 +223,7 @@ pub fn run() {
             commands::projects::push_request_pending,
             commands::projects::push_request_review,
             commands::projects::push_request_decide,
+            commands::claude::nexus_tools,
             commands::knowledge::knowledge_overview,
             commands::knowledge::knowledge_read,
             commands::knowledge::knowledge_search,

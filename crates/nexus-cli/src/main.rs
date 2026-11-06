@@ -104,9 +104,12 @@ enum Command {
     /// Start Claude Code in this terminal with a profile's own configuration.
     Launch(launch::LaunchArgs),
     /// NEXUS MCP server over stdio, bound to one NEXUS session (started by Claude from the session's --mcp-config).
+    /// `--list-tools` prints the server's tool definitions as JSON instead (no session, nothing is opened).
     Mcp {
+        #[arg(long, required_unless_present = "list_tools")]
+        session: Option<String>,
         #[arg(long)]
-        session: String,
+        list_tools: bool,
     },
     /// Lifecycle hook handler (started by Claude from the session's --settings). Always exits 0.
     #[command(hide = true)]
@@ -296,6 +299,11 @@ impl Ctx {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // The tool definitions only (the desktop's "NEXUS tools" page asks the real server): before anything is opened.
+    if let Command::Mcp { list_tools: true, .. } = &cli.command {
+        println!("{}", serde_json::to_string(&mcp::tool_definitions()).unwrap_or_else(|_| "[]".into()));
+        return ExitCode::SUCCESS;
+    }
     let ctx = match context(&cli) {
         Ok(c) => c,
         Err(e) => return fail(&e),
@@ -321,7 +329,7 @@ fn main() -> ExitCode {
         Command::Workflow(c) => workflow::run_workflow(&ctx, c),
         Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),
-        Command::Mcp { session } => mcp::run(&ctx, &session),
+        Command::Mcp { session, .. } => mcp::run(&ctx, &session.unwrap_or_default()),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),
     };
     match result {

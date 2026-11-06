@@ -17,6 +17,38 @@ const FILES: &[(&str, &str)] = &[
     ("skills/learn-project/SKILL.md", include_str!("../../builtin/nexus/skills/learn-project/SKILL.md")),
 ];
 
+/// A built-in skill as the "NEXUS tools" page shows it.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Skill {
+    /// `nexus:<name>`, as Claude names it.
+    pub id: String,
+    pub description: String,
+    /// Which sessions get it.
+    pub given_to: &'static str,
+    /// The SKILL.md body (Markdown), exactly as Claude reads it.
+    pub body: String,
+}
+
+/// NEXUS's built-in skills, read from the embedded files.
+pub fn skills() -> Vec<Skill> {
+    FILES
+        .iter()
+        .filter(|(rel, _)| rel.starts_with("skills/") && rel.ends_with("/SKILL.md"))
+        .filter_map(|(_, text)| {
+            let (fm, body) = crate::knowledge::frontmatter::split(text).ok()?;
+            let fm = fm?;
+            let name = fm.str("name")?.to_string();
+            Some(Skill {
+                given_to: if name == "learn-project" { "learning sessions only (Learn tab)" } else { "sessions that need it" },
+                id: format!("{PLUGIN}:{name}"),
+                description: fm.str("description").unwrap_or_default().to_string(),
+                body: body.trim().to_string(),
+            })
+        })
+        .collect()
+}
+
 /// The plugin folder for `--plugin-dir`, written when missing or different (a crash half-way, an edit by hand).
 /// Older versions stay: a session started by an earlier NEXUS may still read its skill.
 pub fn plugin_dir(data_dir: &Path) -> Result<PathBuf> {
@@ -61,6 +93,10 @@ mod tests {
         assert_eq!(inv.skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["learn-project"]);
         assert!(inv.hooks.is_empty() && inv.mcp_servers.is_empty() && inv.agents.is_empty(), "skills only, no code");
         assert_eq!(LEARN_SKILL, format!("{PLUGIN}:learn-project"));
+        let listed = skills();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, LEARN_SKILL);
+        assert!(listed[0].description.contains("one lean pass") && listed[0].body.starts_with("# Learn a project for NEXUS"), "{:?}", listed[0]);
 
         let skill = dir.join("skills/learn-project/SKILL.md");
         let before = std::fs::metadata(&skill).unwrap().modified().unwrap();

@@ -913,7 +913,7 @@ fn checkpoint_json(c: &checkpoint::Checkpoint) -> Value {
     json!({ "kind": c.kind, "summary": c.summary, "session": c.session_title, "createdAt": c.created_at })
 }
 
-fn tool_definitions() -> Vec<Value> {
+pub fn tool_definitions() -> Vec<Value> {
     let project_arg = json!({ "type": "string", "maxLength": MAX_REF, "description": "Project name or id in this workspace (default: the session's project)" });
     let read_only = json!({ "readOnlyHint": true, "openWorldHint": false });
     vec![

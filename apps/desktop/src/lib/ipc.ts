@@ -101,6 +101,7 @@ import type {
   GitLogEntry,
   LearnDepth,
   LearnDraft,
+  NexusTools,
   PushRequest,
   PushReview,
   LearnTask,
@@ -229,6 +230,8 @@ export const api = {
   sessionList: (filter?: SessionFilter) => call<SessionView[]>('session_list', { filter }),
   sessionGet: (id: string) => call<SessionView>('session_get', { id }),
   sessionStartClaude: (args: StartClaude) => call<SessionView>('session_start_claude', { args }),
+  /** What NEXUS gives Claude sessions: built-in skills, the MCP server's tools (from `nexus mcp --list-tools`), hooks. */
+  nexusTools: () => call<NexusTools>('nexus_tools'),
   /** Push requests of Claude sessions (ADR-0043): pending ones, the review, and the person's decision. */
   pushRequestPending: (projectId?: string | null) => call<PushRequest[]>('push_request_pending', { projectId: projectId ?? null }),
   pushRequestReview: (id: string) => call<PushReview>('push_request_review', { id }),

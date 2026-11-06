@@ -140,3 +140,47 @@ pub async fn claude_setup_status(ctx: State<'_, Ctx>) -> IpcResult<nexus_core::c
     })
     .await
 }
+
+/// What NEXUS gives Claude sessions: its built-in skills, the MCP server's tools (asked from the real `nexus mcp`
+/// server next to this program), the hook events it subscribes to, and whether this machine's policy allows them.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NexusTools {
+    /// The `nexus` program sessions start for MCP and hooks (None = not found next to NEXUS).
+    pub cli: Option<String>,
+    pub tools: Vec<serde_json::Value>,
+    /// Why the tool list could not be read, if it could not.
+    pub tools_error: Option<String>,
+    pub hooks: Vec<&'static str>,
+    pub skills: Vec<nexus_core::claude::builtin::Skill>,
+}
+
+#[tauri::command]
+pub async fn nexus_tools() -> IpcResult<NexusTools> {
+    crate::error::blocking(move || {
+        let exe = nexus_core::claude::mcp::nexus_next_to_current_exe();
+        let (tools, tools_error) = match &exe {
+            None => (Vec::new(), Some("the nexus program was not found next to NEXUS".to_string())),
+            Some(p) => {
+                let mut cmd = nexus_core::proc::command(p);
+                cmd.args(["mcp", "--list-tools"]);
+                match nexus_core::proc::run(cmd, std::time::Duration::from_secs(15)) {
+                    Ok(o) if o.success() => match serde_json::from_str::<Vec<serde_json::Value>>(o.stdout_str().trim()) {
+                        Ok(t) => (t, None),
+                        Err(e) => (Vec::new(), Some(format!("unexpected tool list: {e}"))),
+                    },
+                    Ok(o) => (Vec::new(), Some(format!("nexus mcp --list-tools failed: {}", o.stderr_str().lines().next().unwrap_or_default()))),
+                    Err(e) => (Vec::new(), Some(e.to_string())),
+                }
+            }
+        };
+        Ok(NexusTools {
+            cli: exe.map(|p| p.display().to_string()),
+            tools,
+            tools_error,
+            hooks: nexus_core::claude::hooks::SUBSCRIPTIONS.iter().map(|(e, _, _)| *e).collect(),
+            skills: nexus_core::claude::builtin::skills(),
+        })
+    })
+    .await
+}
