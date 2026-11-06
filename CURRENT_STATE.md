@@ -65,7 +65,7 @@ _Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning contex
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
-* **Skills page (branch `milestone/skills-editor`, ADR-0046)** — owner request, 2026-11-06: `/skills` lists every skill
+* **Skills page (branch `milestone/skills-editor`, ADR-0046, released as v0.1.5)** — owner request, 2026-11-06: `/skills` lists every skill
   a session can get (built-in, workspace, project, AI Kit) with its Claude name, reach and state; *New skill* writes a
   workspace skill (`skills/<name>`) or a project skill (`.claude/skills/<name>`) from a template; the editor saves with
   the replaced version's hash; delete for plain skill folders. A workspace save approves only when nothing else waits for
@@ -384,10 +384,10 @@ free.
 
 ## Next actions (in order)
 
-1. Owner: one push — `git push --atomic origin main v0.1.4` — starts the single release pipeline (CI checks + builds,
+1. Owner: one push — `git push --atomic origin main v0.1.5` — starts the single release pipeline (CI checks + builds,
    ≈ 20 minutes); publish the draft when it is green. NEXUS 0.1.2 then updates itself: the first real automatic update
-   (ADR-0044) — 0.1.3 updates itself to 0.1.4 (check the version in the top bar).
-   Open: the skill editor (create/edit workspace and project skills in NEXUS) — waiting for the owner's choice.
+   (ADR-0044) — 0.1.4 updates itself to 0.1.5 (check the version in the top bar).
+   Open: context size of running sessions in the task launcher (owner to decide).
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
    project from Git and try *Learn*; MANUAL_CHECKS 33 (with `docs/TEMPLATE_REVIEW.md`).
 3. Owner decisions still open: product name and `nexus://`, code signing (Windows SmartScreen, macOS notarization),
