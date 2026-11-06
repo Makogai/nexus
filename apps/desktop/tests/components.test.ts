@@ -40,6 +40,7 @@ import LaunchDialog from '../src/components/LaunchDialog.vue'
 import ProfileDialog from '../src/components/ProfileDialog.vue'
 import SessionRow from '../src/components/SessionRow.vue'
 import CommandPalette from '../src/components/CommandPalette.vue'
+import BaseModal from '../src/components/BaseModal.vue'
 import ConfirmDialog from '../src/components/ConfirmDialog.vue'
 import { useAppStore } from '../src/stores/app'
 import { useProfileStore } from '../src/stores/profiles'
@@ -385,6 +386,27 @@ describe('SessionRow', () => {
     await confirm.findAll('footer .btn').find((b) => b.text() === 'Terminate')!.trigger('click')
     await flushPromises()
     expect(api.sessionTerminate).toHaveBeenCalledWith('s1')
+  })
+
+  it('a confirmation opened from a dialog is on top of it, and Escape closes only the confirmation', async () => {
+    seed()
+    // The confirmation is mounted first (as in App.vue) and the dialog later — the stack, not the order, decides.
+    const confirm = mountWith(ConfirmDialog)
+    const closed = vi.fn()
+    const dialog = mountWith(BaseModal, { open: true, title: 'Commit', onClose: closed })
+    await flushPromises()
+    const answer = useAppStore().confirm({ title: 'Commit these changes?', message: 'x', confirmLabel: 'Commit' })
+    await flushPromises()
+    const z = (w: ReturnType<typeof mountWith>) => Number((w.find('.backdrop').element as HTMLElement).style.zIndex)
+    expect(z(confirm)).toBeGreaterThan(z(dialog))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(await answer).toBe(false)
+    expect(closed).not.toHaveBeenCalled()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(closed).toHaveBeenCalledTimes(1)
+    dialog.unmount()
+    confirm.unmount()
   })
 
   it('explains when NEXUS tools were blocked by organisation policy', () => {

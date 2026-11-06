@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { X } from '@lucide/vue'
+import { closeModal, isTopModal, openModal } from '../lib/modalStack'
 
 const props = withDefaults(defineProps<{ open: boolean; title: string; subtitle?: string; width?: number }>(), {
   width: 560,
@@ -8,35 +9,50 @@ const props = withDefaults(defineProps<{ open: boolean; title: string; subtitle?
 })
 const emit = defineEmits<{ close: [] }>()
 const panel = ref<HTMLElement>()
+/** Layer and place in the open-dialog stack: a dialog opened later (a confirmation) is always on top. */
+const z = ref(50)
+let modalId = 0
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
+  // Only the topmost dialog closes on Escape — not the dialog under a confirmation.
+  if (e.key === 'Escape' && isTopModal(modalId)) {
     e.stopPropagation()
     emit('close')
   }
+}
+
+function release() {
+  window.removeEventListener('keydown', onKey, true)
+  closeModal(modalId)
+  modalId = 0
 }
 
 watch(
   () => props.open,
   async (open) => {
     if (open) {
+      if (!modalId) {
+        const m = openModal()
+        modalId = m.id
+        z.value = m.z
+      }
       window.addEventListener('keydown', onKey, true)
       await nextTick()
       const first = panel.value?.querySelector<HTMLElement>('[autofocus], input, select, textarea, button.btn-primary')
       first?.focus()
     } else {
-      window.removeEventListener('keydown', onKey, true)
+      release()
     }
   },
   { immediate: true },
 )
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
+onBeforeUnmount(release)
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="open" class="backdrop" @mousedown.self="emit('close')">
+      <div v-if="open" class="backdrop" :style="{ zIndex: z }" @mousedown.self="emit('close')">
         <div ref="panel" class="panel" role="dialog" aria-modal="true" :aria-label="title" :style="{ width: `${width}px` }">
           <header>
             <div>
