@@ -372,8 +372,10 @@ free.
 
 ## Next actions (in order)
 
-1. Owner: push `main` and the tag `v0.1.1`; review the draft release the workflow creates and publish it (the site
-   updates itself — the `github-pages` environment now accepts `v*` tags). Then install 0.1.1 over 0.1.0.
+1. Owner: one push — `git push --atomic origin main v0.1.3` — starts the single release pipeline (CI checks + builds,
+   ≈ 20 minutes); publish the draft when it is green. NEXUS 0.1.2 then updates itself: the first real automatic update
+   (ADR-0044) — check that it installs at start and that the version in the top bar reads v0.1.3.
+   Open: the skill editor (create/edit workspace and project skills in NEXUS) — waiting for the owner's choice.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
    project from Git and try *Learn*; MANUAL_CHECKS 33 (with `docs/TEMPLATE_REVIEW.md`).
 3. Owner decisions still open: product name and `nexus://`, code signing (Windows SmartScreen, macOS notarization),
