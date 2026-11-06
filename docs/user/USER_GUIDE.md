@@ -5,7 +5,7 @@ A short tour of each area. Everything stays on your machine unless you push it t
 | Area | What it is for |
 | --- | --- |
 | **Home** | What needs you now: sessions waiting for a decision, reviews, recent work. |
-| **Projects** | Repositories of the workspace — add a folder or **clone from Git**. Each project has *Overview* (Git status, context, usage, *Resume project*, *Run workflow*), **Learn** (build its knowledge base: NEXUS's own map, a guided Claude session, drafts you accept; Graphify optional), **Files** (a read-only tree and viewer; files that may hold secrets are never shown) and **Commits** (history, changed files, diffs). |
+| **Projects** | Repositories of the workspace — add a folder or **clone from Git**. Each project has *Overview* (Git status, context, usage, *Resume project*, *Run workflow*), **Learn** (build its knowledge base: NEXUS's own map, a guided Claude session, drafts you accept; Graphify optional; notes for Claude and extra folders it may read — e.g. the repository the project lives in, kept on this computer), **Files** (a read-only tree and viewer; files that may hold secrets are never shown) and **Commits** (history, changed files, diffs). |
 | **Sessions** / terminal panel | Claude sessions and shells. Sessions keep running when you switch views; ended ones can be resumed. |
 | **Knowledge** | Tasks, notes, decisions and rules as Markdown files in the workspace — opened formatted (rule cards for constitutions) and editable in place (*Edit*). Synced rules need your approval. |
 | **Constitutions** | Structured rules (mandatory policies, rules, guidelines) by scope; which ones Claude is told, and which are verified by a gate. |

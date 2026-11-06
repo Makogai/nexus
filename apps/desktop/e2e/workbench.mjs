@@ -10,7 +10,7 @@
 //
 // Windows only (WebView2 DevTools protocol).
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,7 +31,8 @@ const check = (name, ok, detail = '') => {
   if (!ok) failures++
 }
 
-const root = mkdtempSync(join(tmpdir(), 'nexus-workbench-'))
+// The real path: on CI the temp folder is an 8.3 short path, and NEXUS shows (and passes) canonical paths.
+const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexus-workbench-')))
 let log = ''
 const child = spawn(app, [], {
   env: { ...process.env, NEXUS_DATA_DIR: join(root, 'data'), NEXUS_E2E_NOTIFIER: 'record', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`, FAKE_CLAUDE_REPORT: join(root, 'fake-report.json') },
@@ -129,9 +130,13 @@ try {
   check('…and Edit shows the tree editor', !!(await until(async () => ((await cdp.evaluate(`!!document.querySelector('[data-save]')`)) ? true : null), 5000)))
 
   // --- W3: project explorer ----------------------------------------------------------------------------------------
-  const repo = join(root, 'app')
+  // The app is its own repository inside a wrapper repository (like drivebay inside maiw) — Learn offers the wrapper.
+  const mono = join(root, 'mono')
+  const repo = join(mono, 'apps', 'app')
   const git = (...args) => execFileSync('git', ['-c', 'user.name=Ann', '-c', 'user.email=ann@example.invalid', '-c', 'init.defaultBranch=main', '-c', 'core.autocrlf=false', ...args], { cwd: repo, encoding: 'utf8' })
   mkdirSync(join(repo, 'src'), { recursive: true })
+  writeFileSync(join(mono, 'README.md'), '# mono\n')
+  execFileSync('git', ['init', '-q'], { cwd: mono })
   writeFileSync(join(repo, 'src', 'main.ts'), 'export const answer = 41\n')
   writeFileSync(join(repo, 'README.md'), '# App\n')
   writeFileSync(join(repo, '.gitignore'), 'dist/\n')
@@ -184,14 +189,26 @@ try {
   check('…and Graphify only as an option (install hint or build button)', await cdp.evaluate(`!!document.querySelector('[data-learn-graph-missing], [data-learn-graph-build]')`))
   mkdirSync(join(repo, 'graphify-out'))
   writeFileSync(join(repo, 'graphify-out', 'GRAPH_REPORT.md'), '# Graph report\n')
-  await cdp.evaluate(`[...document.querySelectorAll('[data-learn-map] button')].find((b) => b.innerText.includes('Read again'))?.click(); true`)
+  // Built while the person was elsewhere (e.g. in the terminal): coming back to the kept-alive project page reads again.
+  await cdp.evaluate(`location.hash = '#/sessions'; true`)
+  await sleep(1800)
+  await cdp.evaluate(`location.hash = '#/projects/${proj.id}?tab=learn'; true`)
   const graphReady = await until(async () => ((await textOf('[data-learn-graph]')).includes('Graph ready') ? true : null))
-  check('…a built graph is recognised', !!graphReady)
+  check('…a graph built meanwhile is recognised on coming back, without “Read again”', !!graphReady)
+
+  // Extra context (ADR-0045): the wrapper repository is offered; notes go into the learning task.
+  const offer = await cdp.waitFor(`document.querySelector('[data-learn-surrounding]')?.innerText`, 10000).catch(() => '')
+  check('Learn offers the repository the project lives in', offer.includes('mono') && offer.includes(mono), offer.replace(/\n/g, ' ').slice(0, 140))
+  await click('[data-learn-add-surrounding]')
+  const added = await cdp.waitFor(`document.querySelector('[data-learn-folder="mono"]')?.innerText`, 10000).catch(() => '')
+  check('…one click lets Claude read it too (listed, the offer gone)', added.includes(mono) && !(await cdp.evaluate(`!!document.querySelector('[data-learn-surrounding]')`)), added.replace(/\n/g, ' '))
 
   // A synthetic profile (fake Claude, temporary config folder) so the launch dialog can show the task.
   const cfg = join(root, 'claude-cfg')
   mkdirSync(cfg)
   await inv('profile_create', { input: { name: 'Fake', configDir: cfg, executable: fileURLToPath(new URL('../../../target/debug/fake-claude.exe', import.meta.url)), defaultWorkProfile: 'balanced' } })
+  const refused = await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('project_learn_add_folder', ${js({ projectId: proj.id, path: cfg })}).then(() => 'added', (e) => 'refused: ' + JSON.stringify(e))`)
+  check('…a Claude profile’s configuration folder is never given to Claude as context', refused.startsWith('refused') && refused.includes('Fake'), refused.slice(0, 160))
   await cdp.evaluate(`location.reload(); true`)
   await cdp.waitFor(`!!document.querySelector('[data-learn-start]')`, 30000)
   // The depth sets the budget; the rules Claude gets are shown as they are sent.
@@ -200,7 +217,9 @@ try {
   check('Quick depth shows its budget', budget.includes('at most 20 files') && budget.includes('250 words'), budget)
   await click('[data-learn-rules-toggle]')
   const shownRules = await textOf('[data-learn-rules]')
-  check('…and the exact rules Claude gets (LEARN-1 to LEARN-7, no subagents)', shownRules.includes('LEARN-2 Work alone') && shownRules.includes('LEARN-7'), shownRules.slice(0, 80))
+  check('…and the exact rules Claude gets (LEARN-1 to LEARN-8 with the added folder, no subagents)', shownRules.includes('LEARN-2 Work alone') && shownRules.includes('LEARN-8') && shownRules.includes(mono), shownRules.slice(0, 80))
+  // Notes for Claude: typed here, saved into the learning task when the session starts.
+  await cdp.evaluate(`(() => { const t = document.querySelector('[data-learn-notes]'); t.value = 'app is one package of the mono repository; shared code lives in mono/packages.'; t.dispatchEvent(new Event('input')); return true })()`)
   await click('[data-learn-start]')
   const launch = await cdp.waitFor(`document.querySelector('[data-launch-task]')?.innerText`, 10000).catch(() => '')
   check('Start a learning session opens the launch for the learning task', launch.includes('Learn App'), launch.replace(/\n/g, ' ').slice(0, 120))
@@ -223,10 +242,14 @@ try {
   const skillDir = pluginDirs.find((d) => existsSync(join(d, 'skills', 'learn-project', 'SKILL.md')))
   check('…with NEXUS’s built-in learn-project skill for this session (--plugin-dir)', !!skillDir && /[\\/]nexus$/.test(skillDir), JSON.stringify(pluginDirs).slice(0, 160))
   const system = args[args.indexOf('--append-system-prompt') + 1] ?? ''
-  check('…and the Quick rules in its system prompt (no task text)', system.includes('LEARN-2 Work alone') && system.includes('open at most 20 files') && !system.includes('Learn App'), system.slice(-160))
+  check('…and the Quick rules in its system prompt (no task text, no notes)', system.includes('LEARN-2 Work alone') && system.includes('open at most 20 files') && !system.includes('Learn App') && !system.includes('mono/packages'), system.slice(-160))
+  const addDir = args.indexOf('--add-dir')
+  check('…and the added folder as --add-dir (before the message’s `--`), with rule LEARN-8', addDir > 0 && args[addDir + 1] === mono && addDir < args.indexOf('--') && system.includes('LEARN-8'), JSON.stringify(args.slice(addDir, addDir + 2)))
   const learnTaskId = (await inv('project_learn_map', { workspaceId: ws.id, projectId: proj.id })).task?.id
   const learnSession = (await inv('session_list', { filter: null })).find((x) => x.taskId === learnTaskId)
-  check('…recorded with the session (depth, skill)', learnSession?.integrations?.learn?.depth === 'quick' && learnSession?.integrations?.learn?.skill === 'nexus:learn-project', JSON.stringify(learnSession?.integrations?.learn ?? null))
+  check('…recorded with the session (depth, skill, folders)', learnSession?.integrations?.learn?.depth === 'quick' && learnSession?.integrations?.learn?.skill === 'nexus:learn-project' && learnSession?.integrations?.learn?.folders?.[0] === mono, JSON.stringify(learnSession?.integrations?.learn ?? null))
+  const taskBody = (await inv('knowledge_read', { workspaceId: ws.id, id: learnTaskId })).body
+  check('…and the notes are in the learning task, before NEXUS’s map', taskBody.indexOf('## Notes from the person') > 0 && taskBody.indexOf('mono/packages') > 0 && taskBody.indexOf('mono/packages') < taskBody.indexOf("## NEXUS's map"), taskBody.slice(0, 120))
   await click('[data-project-tab="learn"]')
 
   // Back returns where you came from: project → Learn → Memory proposals (Knowledge) → Back → the project's Learn tab.

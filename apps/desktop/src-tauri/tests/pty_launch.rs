@@ -100,6 +100,7 @@ fn launch(
             settings: None,
             context_prompt: None,
             plugin_dirs: &[],
+            add_dirs: &[],
             first_prompt: None,
         },
         base,

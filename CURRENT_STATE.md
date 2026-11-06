@@ -1,6 +1,6 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, CI on all platforms)._ Read this first, then `docs/ROADMAP.md`,
+_Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning context on `milestone/learn-context`)._ Read this first, then `docs/ROADMAP.md`,
 `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
@@ -65,6 +65,14 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
+* **Learning context (branch `milestone/learn-context`, ADR-0045, not merged yet)** — owner feedback, 2026-11-06:
+  * **Graph build noticed:** the Learn tab kept a stale map while the kept-alive project page sat behind the terminal
+    (NEXUS's map itself recognised the graph). Now it watches for `graphify-out/GRAPH_REPORT.md` after *Build* (cheap
+    `learn::graph`, every 4 s, 30 min), re-reads when the page or window becomes active again, and has *Check again*.
+  * **Notes for Claude:** saved in the learning task (before the map, above the log) when the session starts — data.
+  * **Extra folders:** the repository the project sits in is offered (`maiw` for `maiw/apps/drivebay`); any folder can
+    be added; machine-local (migration 0019), checked (not the project, a drive, the home folder, credentials or a
+    Claude configuration; at most five); learning sessions get `--add-dir` + rule LEARN-8 (T53).
 * **Daily-use pass (branch `milestone/ux-pass`, merged into `main` with `--no-ff`, released as v0.1.2)** — owner
   feedback, 2026-11-06. CI and a signed build-only release run passed on the branch (signatures verified against the
   public key, key id `1D98A1077641F538`; `latest.json` built from the artifacts):

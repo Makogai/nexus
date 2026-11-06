@@ -58,7 +58,13 @@ pub async fn project_learn_map(ctx: State<'_, Ctx>, workspace_id: String, projec
 
 /// Create (or reuse) the learning task at the chosen depth (ADR-0041); the desktop launches Claude on it.
 #[tauri::command]
-pub async fn project_learn_start(ctx: State<'_, Ctx>, workspace_id: String, project_id: String, depth: Option<String>) -> IpcResult<project::learn::LearnTask> {
+pub async fn project_learn_start(
+    ctx: State<'_, Ctx>,
+    workspace_id: String,
+    project_id: String,
+    depth: Option<String>,
+    notes: Option<String>,
+) -> IpcResult<project::learn::LearnTask> {
     let ctx = ctx.inner().clone();
     blocking(move || {
         let depth = match depth.as_deref() {
@@ -66,9 +72,29 @@ pub async fn project_learn_start(ctx: State<'_, Ctx>, workspace_id: String, proj
             Some(d) => project::learn::Depth::parse(d).ok_or_else(|| IpcError::invalid(format!("unknown depth “{d}”")))?,
         };
         let c = own_conn(&ctx)?;
-        Ok(project::learn::start(&c, &ctx.data_dir, &learn_ws(&c, &workspace_id)?, &project_id, depth)?)
+        Ok(project::learn::start(&c, &ctx.data_dir, &learn_ws(&c, &workspace_id)?, &project_id, depth, notes.as_deref())?)
     })
     .await
+}
+
+/// Whether the project's Graphify graph is built — cheap, so the Learn tab can watch for a build in a terminal.
+#[tauri::command]
+pub async fn project_learn_graph(ctx: State<'_, Ctx>, project_id: String) -> IpcResult<project::learn::GraphStatus> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::learn::graph(&own_conn(&ctx)?, &project_id)?)).await
+}
+
+/// Let the project's learning sessions read a folder besides the project (ADR-0045); checked, machine-local.
+#[tauri::command]
+pub async fn project_learn_add_folder(ctx: State<'_, Ctx>, project_id: String, path: String) -> IpcResult<Vec<project::learn::LearnFolder>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::learn::add_folder(&own_conn(&ctx)?, &project_id, &path)?)).await
+}
+
+#[tauri::command]
+pub async fn project_learn_remove_folder(ctx: State<'_, Ctx>, project_id: String, path: String) -> IpcResult<Vec<project::learn::LearnFolder>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(project::learn::remove_folder(&own_conn(&ctx)?, &project_id, &path)?)).await
 }
 
 /// Claude's drafts waiting for the person.

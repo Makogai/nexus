@@ -101,6 +101,8 @@ import type {
   GitLogEntry,
   LearnDepth,
   LearnDraft,
+  LearnFolder,
+  LearnGraph,
   NexusTools,
   PushRequest,
   PushReview,
@@ -192,8 +194,12 @@ export const api = {
     call<Project>('project_register', { workspaceId, path, name }),
   /** Learn a project (W4): NEXUS's map, the learning task, Claude's drafts, Graphify's output kept out of Git. */
   projectLearnMap: (workspaceId: string, projectId: string) => call<ProjectMap>('project_learn_map', { workspaceId, projectId }),
-  projectLearnStart: (workspaceId: string, projectId: string, depth: LearnDepth) =>
-    call<LearnTask>('project_learn_start', { workspaceId, projectId, depth }),
+  projectLearnStart: (workspaceId: string, projectId: string, depth: LearnDepth, notes?: string | null) =>
+    call<LearnTask>('project_learn_start', { workspaceId, projectId, depth, notes: notes ?? null }),
+  /** Cheap: only whether the Graphify graph is built (the Learn tab watches for a build in a terminal). */
+  projectLearnGraph: (projectId: string) => call<LearnGraph>('project_learn_graph', { projectId }),
+  projectLearnAddFolder: (projectId: string, path: string) => call<LearnFolder[]>('project_learn_add_folder', { projectId, path }),
+  projectLearnRemoveFolder: (projectId: string, path: string) => call<LearnFolder[]>('project_learn_remove_folder', { projectId, path }),
   projectLearnDrafts: (workspaceId: string, projectId: string) => call<LearnDraft[]>('project_learn_drafts', { workspaceId, projectId }),
   projectLearnDecide: (workspaceId: string, projectId: string, draftId: string, apply: boolean) =>
     call<void>('project_learn_decide', { workspaceId, projectId, draftId, apply }),

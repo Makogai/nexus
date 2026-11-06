@@ -66,6 +66,8 @@ pub struct Prepared {
     pub settings: Option<std::path::PathBuf>,
     /// AI Kit overlays to pass as `--plugin-dir` (profile-specific, ADR-0024).
     pub plugin_dirs: Vec<std::path::PathBuf>,
+    /// Folders Claude may also read (`--add-dir`): only a learning session's checked extra folders (ADR-0045).
+    pub add_dirs: Vec<std::path::PathBuf>,
     /// Name to give Claude (`--name`) instead of the host's title: task sessions get a neutral `NEXUS task <id>` so the
     /// (untrusted) task title is never handed to Claude as session metadata (T22).
     pub claude_name: Option<String>,
@@ -149,6 +151,9 @@ pub struct LearnLaunch {
     pub depth: crate::project::learn::Depth,
     pub skill: Option<String>,
     pub withheld: Option<String>,
+    /// Extra folders the session may read (`--add-dir`, rule LEARN-8, ADR-0045).
+    #[serde(default)]
+    pub folders: Vec<String>,
 }
 
 /// The context strategy a session was launched with (ADR-0028).
@@ -195,7 +200,9 @@ pub fn preview(r: &PreviewRequest<'_>) -> Result<Preview> {
         if let Some(tid) = r.task_id {
             let v = tasks::view(r.conn, &ws, tid, 4000)?;
             nexus.task_brief_chars = tasks::pointer(&v.id, "session-start").chars().count()
-                + crate::project::learn::Depth::of_labels(&v.labels).map(|d| crate::project::learn::rules(d).chars().count() + 2).unwrap_or(0);
+                + crate::project::learn::Depth::of_labels(&v.labels)
+                    .map(|d| crate::project::learn::rules(d, &learn_folders(r.conn, v.project_id.as_deref())).chars().count() + 2)
+                    .unwrap_or(0);
             nexus.task = Some(v.title);
         }
         nexus.appended_chars = rules.text.as_deref().map(|t| t.chars().count()).unwrap_or(0) + nexus.task_brief_chars;
@@ -218,6 +225,7 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
     let extra = run.as_ref().map(|x| x.skills.clone()).unwrap_or_default();
     let (mut plugin_dirs, kit_launches, refused) = crate::kits::session_plugin_dirs_with(r.conn, r.data_dir, &r.profile.id, r.workspace_id, &pol, &extra)?;
     let mut learn = None;
+    let mut add_dirs = Vec::new();
     let ws = r.workspace_id.and_then(|id| workspace::get(r.conn, id).ok()).filter(|w| w.available);
     let project = r.project_id.and_then(|id| project::get(r.conn, id).ok());
     let mut parts: Vec<String> = Vec::new();
@@ -283,14 +291,21 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
                 if let Some(depth) = crate::project::learn::Depth::of_labels(&v.labels) {
                     // A learning task (ADR-0041): NEXUS's rules with the depth's budget, and the built-in skill for this
                     // session only — unless policy forbids --plugin-dir or an AI Kit already uses the name `nexus`.
-                    parts.push(crate::project::learn::rules(depth));
+                    // Extra folders (ADR-0045): machine-local, checked again now, for this learning session only.
+                    add_dirs = learn_folders(r.conn, v.project_id.as_deref());
+                    parts.push(crate::project::learn::rules(depth, &add_dirs));
                     let withheld = crate::kits::blocked_by(&pol).map(str::to_string).or_else(|| {
                         kit_launches.iter().any(|k| k.name == builtin::PLUGIN).then(|| format!("an AI Kit of this profile is named “{}”", builtin::PLUGIN))
                     });
                     if withheld.is_none() {
                         plugin_dirs.push(builtin::plugin_dir(r.data_dir)?);
                     }
-                    learn = Some(LearnLaunch { depth, skill: withheld.is_none().then(|| builtin::LEARN_SKILL.to_string()), withheld });
+                    learn = Some(LearnLaunch {
+                        depth,
+                        skill: withheld.is_none().then(|| builtin::LEARN_SKILL.to_string()),
+                        withheld,
+                        folders: add_dirs.iter().map(|d| d.display().to_string()).collect(),
+                    });
                 }
                 claude_name = Some(format!("NEXUS task {}", service::short_id(&v.id)));
                 task = Some(TaskLaunch { id: v.id.clone(), title: v.title.clone(), status: v.status.clone(), delivery });
@@ -316,9 +331,15 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
         prompt: (!parts.is_empty()).then(|| parts.join("\n\n")),
         settings,
         plugin_dirs,
+        add_dirs,
         claude_name,
         policy: pol,
     })
+}
+
+/// A learning task's extra folders (ADR-0045) — none for a task without a project.
+fn learn_folders(conn: &Connection, project_id: Option<&str>) -> Vec<std::path::PathBuf> {
+    project_id.map(|p| crate::project::learn::session_folders(conn, p)).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -410,6 +431,20 @@ mod tests {
         assert!(prepared.plugin_dirs[0].join("skills/learn-project/SKILL.md").is_file());
         let l = prepared.integrations.learn.unwrap();
         assert_eq!((l.depth, l.skill.as_deref(), l.withheld), (crate::project::learn::Depth::Quick, Some(builtin::LEARN_SKILL), None));
+        assert!(prepared.add_dirs.is_empty() && l.folders.is_empty() && !prompt.contains("LEARN-8"), "no extra folders yet");
+
+        // An extra folder the person added (ADR-0045): --add-dir and rule LEARN-8 for this learning session.
+        let mono = root.join("mono");
+        std::fs::create_dir_all(&mono).unwrap();
+        crate::project::learn::add_folder(&conn, &p.id, mono.to_str().unwrap()).unwrap();
+        let with_folder = prepare_with(&MachinePolicyLocations::default());
+        assert_eq!(with_folder.add_dirs, std::slice::from_ref(&mono));
+        let prompt = with_folder.prompt.unwrap();
+        assert!(prompt.contains("LEARN-1 to LEARN-8") && prompt.contains(&format!("LEARN-8 Besides the project, the user lets you read these folders for context: `{}`", mono.display())), "{prompt}");
+        assert_eq!(with_folder.integrations.learn.unwrap().folders, [mono.display().to_string()]);
+        std::fs::remove_dir(&mono).unwrap();
+        let gone = prepare_with(&MachinePolicyLocations::default());
+        assert!(gone.add_dirs.is_empty() && !gone.prompt.unwrap().contains("LEARN-8"), "a missing folder is skipped");
 
         // An organisation that forbids --plugin-dir: the skill is withheld (and says why); the rules still apply.
         let managed = root.join("managed-settings.json");
