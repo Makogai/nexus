@@ -133,7 +133,7 @@ const maxStrategyContext = computed(() => Math.max(1, ...byStrategy.value.map((g
 </script>
 
 <template>
-  <div class="page usage" data-usage-view>
+  <div class="page page-flex usage" data-usage-view>
     <div class="page-header">
       <div>
         <h1>Usage</h1>
