@@ -107,6 +107,15 @@ pub fn status(repo: &Path) -> Result<GitStatus> {
     Ok(st)
 }
 
+/// URL of the remote `name`, with credentials removed.
+pub fn remote_url_of(repo: &Path, name: &str) -> Option<String> {
+    if name.starts_with('-') {
+        return None;
+    }
+    let out = run_git(Some(repo), &["remote", "get-url", name]).ok()?;
+    out.success().then(|| redact_url(out.stdout_str().trim()))
+}
+
 /// Remote URL of `origin` (or the first remote), with credentials removed.
 pub fn remote_url(repo: &Path) -> Option<String> {
     let out = run_git(Some(repo), &["remote"]).ok()?;

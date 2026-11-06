@@ -21,6 +21,7 @@ pub mod notify;
 pub mod paths;
 pub mod proc;
 pub mod project;
+pub mod push_request;
 pub mod restoration;
 pub mod resume;
 pub mod session;

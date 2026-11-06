@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 23);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 24);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");

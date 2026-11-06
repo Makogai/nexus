@@ -260,3 +260,27 @@ pub async fn project_git_status(ctx: State<'_, Ctx>, id: String) -> IpcResult<Gi
 pub fn project_checkpoints(ctx: State<'_, Ctx>, id: String, limit: Option<u32>) -> IpcResult<Vec<Checkpoint>> {
     Ok(checkpoint::for_project(&ctx.db(), &id, limit.unwrap_or(30).min(100))?)
 }
+
+// ---- Push requests (ADR-0043) ---------------------------------------------------------------------------------------
+
+/// Pending push requests (of one project, or all).
+#[tauri::command]
+pub async fn push_request_pending(ctx: State<'_, Ctx>, project_id: Option<String>) -> IpcResult<Vec<nexus_core::push_request::PushRequest>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(nexus_core::push_request::pending(&own_conn(&ctx)?, project_id.as_deref())?)).await
+}
+
+/// What the push would send now: commits, files and the security inspection.
+#[tauri::command]
+pub async fn push_request_review(ctx: State<'_, Ctx>, id: String) -> IpcResult<nexus_core::push_request::PushReview> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(nexus_core::push_request::review(&own_conn(&ctx)?, &ctx.home, &id)?)).await
+}
+
+/// The person's decision: push exactly the reviewed commit (`token`, never forced) or decline. On its own connection — a
+/// push talks to the remote.
+#[tauri::command]
+pub async fn push_request_decide(ctx: State<'_, Ctx>, id: String, approve: bool, token: String) -> IpcResult<nexus_core::push_request::PushRequest> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(nexus_core::push_request::decide(&own_conn(&ctx)?, &ctx.home, &id, approve, &token)?)).await
+}

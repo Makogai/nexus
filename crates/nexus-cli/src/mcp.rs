@@ -145,6 +145,7 @@ impl Server {
                 "record_memory" => self.record_memory(b, &args),
                 "draft_project_document" => self.draft_project_document(b, &args),
                 "propose_commit_message" => self.propose_commit_message(b, &args),
+                "request_push" => self.request_push(b, &args),
                 "request_attention" => self.request_attention(b, &args),
                 "get_constitution" => self.get_constitution(b, &args),
                 "get_workflow_run" => self.get_workflow_run(b),
@@ -798,6 +799,20 @@ impl Server {
         Ok(json!({ "drafted": { "id": item.id, "title": item.title, "topic": topic }, "next": "The person reviews the draft in NEXUS (project → Learn) and decides whether to use it." }))
     }
 
+    /// Ask the person to push the project's branch (ADR-0043): NEXUS records the request and notifies; the push runs in
+    /// the NEXUS host after the person approves it. Asking again reports the outcome. Nothing is pushed here.
+    fn request_push(&self, b: &Binding, args: &Value) -> Result<Value, String> {
+        let reason = args.get("reason").and_then(Value::as_str).unwrap_or("");
+        let r = nexus_core::push_request::request(&self.conn, &b.session.id, reason).map_err(|e| e.to_string())?;
+        let next = match r.status.as_str() {
+            "pending" => "The person reviews the outgoing commits in NEXUS and pushes or declines. Ask again later to learn the outcome.",
+            "pushed" => "Pushed.",
+            "declined" => "The person declined this push.",
+            _ => "The push failed — see message.",
+        };
+        Ok(json!({ "pushRequest": { "id": r.id, "branch": r.branch, "commit": r.head, "status": r.status, "message": r.message }, "next": next }))
+    }
+
     /// Claude's commit message for the workspace changes of this session (ADR-0042): stored with the session; the Sync
     /// Center pre-fills it and autonomous sync commits with it. Nothing is committed here.
     fn propose_commit_message(&self, b: &Binding, args: &Value) -> Result<Value, String> {
@@ -1055,6 +1070,14 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
         }),
         json!({
+            "name": "request_push", "title": "Ask the user to push",
+            "description": "When this project's commits should be pushed but you may not push yourself (for example git push is not allowed in this session), ask the user here instead: NEXUS shows them the outgoing commits of the checked-out branch and pushes after their approval — never forced. Give a one-line reason. Calling it again reports the outcome (pending, pushed, declined, failed).",
+            "inputSchema": { "type": "object", "properties": {
+                "reason": { "type": "string", "maxLength": 300 }
+            }, "additionalProperties": false },
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+        }),
+        json!({
             "name": "get_constitution", "title": "Constitution rules",
             "description": "The effective constitution rules for this session (workspace, stack, project and task scopes applied; mandatory policies cannot be overridden): ids, enforcement (mandatory, rule, guideline) and text. Use it to read the rules of a document listed for on-demand reading (ids such as \"TST-*\" select all rules with that prefix), or to check a rule before acting.",
             "inputSchema": { "type": "object", "properties": {
@@ -1167,7 +1190,7 @@ mod tests {
         assert_eq!(names, [
             "get_session_context", "list_projects", "get_project", "get_git_status", "list_recent_sessions", "checkpoint",
             "get_session_activity", "get_context_index", "search_knowledge", "get_document", "list_tasks", "create_task",
-            "get_resume_summary", "get_task", "update_task", "record_memory", "draft_project_document", "propose_commit_message", "get_constitution", "get_workflow_run", "report_step",
+            "get_resume_summary", "get_task", "update_task", "record_memory", "draft_project_document", "propose_commit_message", "request_push", "get_constitution", "get_workflow_run", "report_step",
             "request_attention", "get_checkpoints",
         ]);
         assert!(names.iter().all(|n| !n.starts_with("nexus_")), "Claude already prefixes mcp__nexus__");

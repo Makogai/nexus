@@ -522,7 +522,7 @@ export interface AppNotification {
   sessionId: string | null
   taskId: string | null
   workflowId: string | null
-  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | 'workflow' | 'sync' | null
+  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | 'workflow' | 'sync' | 'push' | null
   targetId: string | null
   dedupeKey: string | null
   occurrences: number
@@ -1692,6 +1692,34 @@ export interface SyncPushReview {
   commits: GitLogEntry[]
   files: GitDiffEntry[]
   behind: number
+  inspection: SyncInspection
+  token: string
+}
+
+/** A Claude session asked NEXUS to push its project's branch (ADR-0043). */
+export interface PushRequest {
+  id: string
+  sessionId: string | null
+  projectId: string
+  branch: string
+  head: string
+  reason: string
+  status: 'pending' | 'pushed' | 'declined' | 'failed'
+  message: string | null
+  createdAt: number
+  decidedAt: number | null
+}
+
+export interface PushReview {
+  request: PushRequest
+  projectName: string
+  remote: string
+  remoteUrl: string | null
+  remoteBranch: string
+  firstPush: boolean
+  head: string
+  moved: boolean
+  commits: GitLogEntry[]
   inspection: SyncInspection
   token: string
 }

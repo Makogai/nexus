@@ -138,7 +138,8 @@ pub struct WorkflowLaunch {
 
 /// The system-prompt line for sessions with NEXUS tools in a workspace (ADR-0042).
 pub const COMMIT_MESSAGE_NOTE: &str = "NEXUS: when your work changed this workspace (tasks, notes, decisions, drafts or other workspace files), \
-     finish by proposing a commit message for those changes with propose_commit_message.";
+     finish by proposing a commit message for those changes with propose_commit_message. When project commits should be pushed but \
+     you may not push yourself, ask the user with request_push.";
 
 /// A learning session (ADR-0041): its depth and whether the built-in skill was given (or why not). The rules are in
 /// the system prompt either way.

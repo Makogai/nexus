@@ -24,7 +24,7 @@ project repositories stay independent.
 | Hooks | `activity.rs`, `nexus hook` | Deterministic, cheap: session start/end, compaction, prompts/turns, files edited (project-relative, deduplicated), command *categories* (test, build, git-commit, git-push, dependencies — never the command text), attention. SessionEnd extracts memory proposals. |
 | Checkpoints | `checkpoint.rs`, MCP `checkpoint` | Machine-local SQLite rows (progress, decision, blocker, done, note) from Claude, a person or NEXUS; replayed after compaction/resume. |
 | Resume | `resume.rs` | Verified Git state + saved history (tasks, notes, checkpoints, sessions) + next action. |
-| MCP | `nexus mcp` (23 tools) | Workspace-scoped, bounded, no exec/network/arbitrary files; writes only task/note/decision records. |
+| MCP | `nexus mcp` (24 tools) | Workspace-scoped, bounded, no exec/network/arbitrary files; writes only task/note/decision records. |
 | Sync | `workspace_sync/*` (M29) | Status, fetch, ff-only pull with incoming inspection, reviewed commit/push with tokens, pre-commit/pre-push inspection, history, clone + restore checklist (projects to locate, approvals, kit folders, gates, profiles). Never forced, never automatic. |
 | Doctor | `doctor.rs`, `nexus doctor` | Machine checks: database, Git, Claude installations, profiles + policy, active workspace, project availability. CLI only. |
 | Claude install | `claude/install.rs` | Discovery (PATH + known install dirs), launchability, version; `claude auth status` per profile. No guided installation. |

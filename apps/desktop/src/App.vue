@@ -15,6 +15,7 @@ import TerminalPanel from './components/TerminalPanel.vue'
 import LaunchDialog from './components/LaunchDialog.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import PushRequestDialog from './components/PushRequestDialog.vue'
 import ToastHost from './components/ToastHost.vue'
 import OnboardingView from './views/OnboardingView.vue'
 
@@ -142,6 +143,7 @@ onBeforeUnmount(() => {
   </div>
   <LaunchDialog v-if="ready" />
   <CommandPalette v-if="ready" />
+  <PushRequestDialog v-if="ready" />
   <ConfirmDialog />
   <ToastHost />
 </template>

@@ -2,13 +2,13 @@
 import { computed, onActivated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, BookMarked, Boxes, Check, RotateCcw, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, GraduationCap, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
+import { ArrowLeft, ArrowUp, BookMarked, Boxes, Check, RotateCcw, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, GraduationCap, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
 import { relativeTime } from '../lib/format'
 import { api, toIpcError } from '../lib/ipc'
 import { useWorkspaceStore } from '../stores/workspaces'
 import { typeIntoTerminal } from '../lib/terminal'
 import { STATUS_LABELS } from '../lib/knowledge'
-import type { Checkpoint, ContextInitialized, EnvCheckItem, EnvironmentReport, KnowledgeItem, ProjectKnowledge, TaskStatus } from '../lib/types'
+import type { Checkpoint, ContextInitialized, EnvCheckItem, EnvironmentReport, KnowledgeItem, ProjectKnowledge, PushRequest, TaskStatus } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
@@ -81,9 +81,12 @@ const checkpoints = ref<Checkpoint[]>([])
 const knowledge = ref<ProjectKnowledge | null>(null)
 
 async function loadKnowledge() {
+  pushRequests.value = await api.pushRequestPending(props.id).catch(() => pushRequests.value)
   if (!project.value?.available) return
   knowledge.value = await api.projectKnowledge(props.id).catch(() => knowledge.value)
 }
+/** Claude sessions waiting for the person to approve a push (ADR-0043). */
+const pushRequests = ref<PushRequest[]>([])
 
 /** Finish a task (or reopen a finished one) from the project page — the task file records it in its log. */
 async function setTaskStatus(t: KnowledgeItem, status: 'done' | 'ready') {
@@ -119,7 +122,7 @@ watch(
   { immediate: true },
 )
 watch(
-  () => app.externalChanges,
+  () => [app.externalChanges, app.pushRequestsChanged],
   () => {
     loadCheckpoints()
     loadKnowledge()
@@ -187,6 +190,12 @@ async function unregister() {
     </div>
 
     <div v-if="!project.available" class="notice notice-warn"><TriangleAlert /> This project is registered in the workspace but has no folder on this machine. Use “Locate…” on the Projects page.</div>
+
+    <div v-for="r in pushRequests" :key="r.id" class="notice notice-accent push-banner" :data-push-request="r.id">
+      <ArrowUp />
+      <span>Claude asks to push <strong class="mono">{{ r.branch }}</strong><template v-if="r.reason"> — “{{ r.reason }}”</template></span>
+      <button class="btn btn-sm btn-primary" data-push-open @click="app.pushRequestId = r.id">Review &amp; push</button>
+    </div>
 
     <div class="tabs" role="tablist" aria-label="Project views">
       <button role="tab" class="tab" :class="{ active: tab === 'overview' }" :aria-selected="tab === 'overview'" data-project-tab="overview" @click="setTab('overview')">Overview</button>
@@ -439,6 +448,12 @@ async function unregister() {
 }
 .done-tasks .task-title {
   color: var(--text-muted);
+}
+.push-banner {
+  align-items: center;
+}
+.push-banner .btn {
+  margin-left: auto;
 }
 .all-link {
   margin-left: auto;
