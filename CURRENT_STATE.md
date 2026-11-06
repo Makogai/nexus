@@ -65,7 +65,9 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
-* **Daily-use pass (branch `milestone/ux-pass`, off `main` at `83a469f` = v0.1.1)** — owner feedback, 2026-11-06:
+* **Daily-use pass (branch `milestone/ux-pass`, merged into `main` with `--no-ff`, released as v0.1.2)** — owner
+  feedback, 2026-11-06. CI and a signed build-only release run passed on the branch (signatures verified against the
+  public key, key id `1D98A1077641F538`; `latest.json` built from the artifacts):
   * **Fixes:** the explorer hid a Flutter project's folders and `graphify-out/` was never excluded — `git check-ignore` with
     a trailing slash matches a blank line of a CRLF `.gitignore` (Git 2.55 Windows); `git::ignored_paths` never asks with
     the slash (the Doctor's T46 check uses it too). Confirmations always on top (open-dialog stack; Escape closes only

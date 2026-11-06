@@ -1,51 +1,54 @@
-# NEXUS 0.1.1 — lean learning
+# NEXUS 0.1.2 — NEXUS updates itself, and Claude's work travels on its own
 
-Learning a project is now one focused Claude session with a budget you choose, instead of a plan Claude improvises.
-Everything from [0.1.0](https://github.com/Makogai/nexus/releases/tag/v0.1.0) is included; install over it — your data
-stays.
+NEXUS now keeps itself up to date, pushes your workspace after Claude's work with the commit messages Claude writes,
+asks you before Claude pushes a project, and closes finished tasks. Install this version over 0.1.1 once by hand —
+from now on, updates come by themselves. Your data stays.
 
 ## What's new
 
-- **A built-in learning skill.** Learning sessions get NEXUS's own skill `nexus:learn-project`, a fixed and lean
-  procedure:
-  - orient from NEXUS's map and the Graphify report;
-  - read a few chosen files;
-  - draft the overview and the architecture summary, marking each statement *verified* or *inferred*;
-  - record memories, then stop and report.
-
-  Only learning sessions get it; other sessions never see it.
-- **Rules for learning sessions (LEARN-1 to LEARN-7).** One session, no subagents or multi-agent workflows unless you
-  ask, read only, a budget, and a stop when the drafts are saved. They hold even when your work profile asks for
-  reviews, so a learning session no longer fans out into dozens of agents.
-- **Choose the depth** in the Learn tab — *Quick* (20 files, short drafts), *Standard* (50 files) or *Deep* (no file
-  limit, fuller drafts). The tab shows the budget and, on request, the exact rules Claude gets.
-- **Start right away.** A task launch can send Claude a fixed first message, so the session starts working instead of
-  waiting. It is ticked when you start from *Learn*, and the dialog shows the message word for word.
-- **Graphify, complete.** *Build the graph* now runs both offline steps
-  (`graphify extract . --code-only; graphify cluster-only . --no-label`), so the report NEXUS and Claude read exists.
-  A graph built after the learning task was created is added to its checklist.
-- **AI Kits:** the plugin name `nexus` is reserved for NEXUS's built-in skills.
+- **Automatic updates.** NEXUS checks for a new release when it starts and every few hours. At start it installs one by
+  itself and restarts (nothing is running yet); later it offers it in the top bar. Every download is verified against
+  NEXUS's update-signing key first, and it never restarts over running Claude sessions without asking. Settings →
+  *Version and updates* turns automatic installing off.
+- **Your workspace syncs on its own.** The new sync policy *Everything, automatically*: when Claude finishes a turn or a
+  session ends, NEXUS commits every workspace change and pushes it — after the same security inspection as a reviewed
+  push, never forced. A problem stops it and asks you once.
+- **Commit messages Claude writes.** Sessions propose the message for their workspace changes; the Sync Center fills it
+  in, and automatic sync uses it. Without one, NEXUS composes it ("umbra — 2 tasks, 1 note").
+- **Approve a push in one click.** When Claude may not push a project itself, it asks NEXUS: a notification and a banner
+  open a dialog with Claude's reason, the outgoing commits and the security check. *Push* sends exactly what you saw.
+- **Finished tasks leave the list.** Claude marks finished work *ready for review*; the project page shows it first,
+  with *Done* — and *Recently done* with *Reopen*. A learning task closes itself once you reviewed its drafts.
+- **Continue where the context is.** A task can start in a new session, resume its own earlier session (the default
+  when it has one — the cheapest), or go to a running session of the project that already knows the code. *Start
+  right away* is on by default.
+- **NEXUS tools page.** NEXUS's own skills (exactly as Claude reads them), the 24 tools of the NEXUS MCP server and the
+  hook events — in one place.
+- **Easier to get around.** Back and Forward in the top bar (Alt+←/→ and the mouse buttons), the version at a glance,
+  sessions filtered by project, and calmer spacing everywhere.
+- **Fixes.** The project explorer hid the folders of projects whose `.gitignore` has Windows line endings, and Graphify's
+  output folder was not excluded from Git there — both fixed. A confirmation now always opens on top of the dialog it
+  belongs to.
 
 ## Download
 
 | Platform | File | Notes |
 | --- | --- | --- |
-| Windows 10/11 (x64) | `NEXUS_0.1.1_x64-setup.exe` | Per-user install, no administrator rights |
-| macOS 11+ (Apple silicon) | `NEXUS_0.1.1_aarch64.dmg` | Drag NEXUS to Applications |
-| macOS 11+ (Intel) | `NEXUS_0.1.1_x64.dmg` | Drag NEXUS to Applications |
-| Linux (x64) | `NEXUS_0.1.1_amd64.AppImage` / `NEXUS_0.1.1_amd64.deb` | AppImage: make it executable and run it; deb: `sudo apt install ./NEXUS_0.1.1_amd64.deb` |
+| Windows 10/11 (x64) | `NEXUS_0.1.2_x64-setup.exe` | Per-user install, no administrator rights |
+| macOS 11+ (Apple silicon) | `NEXUS_0.1.2_aarch64.dmg` | Drag NEXUS to Applications |
+| macOS 11+ (Intel) | `NEXUS_0.1.2_x64.dmg` | Drag NEXUS to Applications |
+| Linux (x64) | `NEXUS_0.1.2_amd64.AppImage` / `NEXUS_0.1.2_amd64.deb` | AppImage: make it executable and run it; deb: `sudo apt install ./NEXUS_0.1.2_amd64.deb` |
+
+The `.app.tar.gz` files and `latest.json` are for NEXUS's own updates — you don't need to download them.
 
 You need **Claude Code** (`claude`) installed and signed in, and **Git** for repository features and sync.
-
-**Upgrading from 0.1.0:** close NEXUS and run the new installer. A learning task you started in 0.1.0 continues at
-*Standard* depth; pick another depth before you continue it if you like.
 
 ## First start: the builds are not code-signed yet
 
 - **Windows:** SmartScreen says "Windows protected your PC". Choose **More info → Run anyway**.
 - **macOS:** the app is ad-hoc signed but not notarized. Open it once with **right-click → Open**, or allow it under
   **System Settings → Privacy & Security → Open Anyway**.
-- **Linux:** no prompt. For the AppImage, run `chmod +x NEXUS_0.1.1_amd64.AppImage` first.
+- **Linux:** no prompt. For the AppImage, run `chmod +x NEXUS_0.1.2_amd64.AppImage` first.
 
 ## Verify what you downloaded
 
@@ -59,8 +62,7 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 - **Platforms:** NEXUS is developed and tested end to end on Windows. The macOS and Linux builds pass the automated
   tests, but have had less hands-on use. Please report anything odd.
 - **Notifications:** on macOS and Linux they are display-only. Clicking one does not open the session.
-- **Updates:** there are no automatic updates. Install a newer version over the old one; your data stays.
-- **Signing:** the installers are not code-signed (see above).
+- **Signing:** the installers are not code-signed (see above); updates are signed with NEXUS's own update key.
 
 The guides are in `docs/user/`: first run, user guide, portable workspace, backups, troubleshooting.
 
