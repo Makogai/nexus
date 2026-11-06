@@ -40,9 +40,13 @@ export const useAppStore = defineStore('app', () => {
     profileId?: string | null
     /** Launch for a knowledge task (ADR-0018). */
     task?: { id: string; title: string; projectId: string | null } | null
-    /** Preselect "start right away" (the Learn view's guided session). */
+    /** Preselect "start right away" (the Learn view's guided session); unset = the person's last choice. */
     kickoff?: boolean
   }>({ open: false })
+  /** The push request under review (ADR-0043); null = dialog closed. */
+  const pushRequestId = ref<string | null>(null)
+  /** Increments after a push request was decided (views reload their lists). */
+  const pushRequestsChanged = ref(0)
   /** Increments when another process (nexus CLI, MCP server) committed to the database (ADR-0009). */
   const externalChanges = ref(0)
   let toastSeq = 0
@@ -142,10 +146,12 @@ export const useAppStore = defineStore('app', () => {
     task?: { id: string; title: string; projectId: string | null } | null,
     opts: { kickoff?: boolean } = {},
   ) {
-    launchDialog.value = { open: true, projectId: task?.projectId ?? projectId, profileId, task: task ?? null, kickoff: !!task && !!opts.kickoff }
+    launchDialog.value = { open: true, projectId: task?.projectId ?? projectId, profileId, task: task ?? null, kickoff: task ? opts.kickoff : undefined }
   }
 
   return {
+    pushRequestId,
+    pushRequestsChanged,
     info,
     prefs,
     prefsLoaded,

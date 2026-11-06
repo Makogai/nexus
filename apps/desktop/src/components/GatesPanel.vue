@@ -78,7 +78,7 @@ function edit(g: Gate) {
 
 <template>
   <section class="gates" data-gates>
-    <p class="notice"><Info /> Gates are how NEXUS <strong>verifies</strong> work: commands you define here, for this project, on this machine. Workflow files only name gates (test, lint …) and never carry commands. A gate runs only after you <strong>approve its command</strong>; changing the command makes a new version that needs approval again. Gates run without a shell, with your environment minus Claude's session variables, a timeout, and their output recorded.</p>
+    <p class="notice"><Info /> <span>Gates are how NEXUS <strong>verifies</strong> work: commands you define here, for this project, on this machine. Workflow files only name gates (test, lint …) and never carry commands. A gate runs only after you <strong>approve its command</strong>; changing the command makes a new version that needs approval again. Gates run without a shell, with your environment minus Claude's session variables, a timeout, and their output recorded.</span></p>
     <div class="filters">
       <select v-model="projectId" class="select" aria-label="Project" data-gates-project>
         <option v-for="p in projects.list" :key="p.id" :value="p.id">{{ p.name }}</option>

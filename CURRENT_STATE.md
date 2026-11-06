@@ -65,6 +65,24 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
+* **Daily-use pass (branch `milestone/ux-pass`, off `main` at `83a469f` = v0.1.1)** — owner feedback, 2026-11-06:
+  * **Fixes:** the explorer hid a Flutter project's folders and `graphify-out/` was never excluded — `git check-ignore` with
+    a trailing slash matches a blank line of a CRLF `.gitignore` (Git 2.55 Windows); `git::ignored_paths` never asks with
+    the slash (the Doctor's T46 check uses it too). Confirmations always on top (open-dialog stack; Escape closes only
+    the top). Page sections never touch (a zero-specificity default gap; `page-flex` pages keep their own).
+  * **Navigation:** Back/Forward in the top bar (Alt+←/→, mouse buttons); the version shows next to the bell.
+  * **Sync (ADR-0042):** policy *Everything, automatically* — after each Claude turn (Stop hook, settled 20 s) or
+    session end, every workspace change is committed with the message Claude proposed (`propose_commit_message`) and
+    pushed, through the inspected M29 route; the Sync Center pre-fills messages.
+  * **Push requests (ADR-0043):** `request_push` (24 MCP tools) → notification/banner → dialog with commits and
+    inspection → NEXUS pushes exactly the reviewed commit, never forced.
+  * **Tasks (ADR-0043):** Claude sets *review* when done; Done/Reopen on the project page; learning closes itself;
+    *Start in* new / the task's own session (default) / a running session of the project (hand-off by task id);
+    *Start right away* on by default; sessions filter by project.
+  * **NEXUS tools page:** built-in skills, the MCP tools (`nexus mcp --list-tools`), the hook events.
+  * **Tests:** E2E builds run under `<APP_ID>.e2e`, so suites run beside an installed NEXUS.
+  * **Updates (ADR-0044):** signed with the owner's key (public key in `tauri.conf.json`, private key only in the
+    repository secrets); release builds check on start (install by themselves) and every 6 h (offer).
 * **Built-in learning skill (ADR-0041, branch `milestone/learn-skill`, off `fix/learn-session`)** — owner feedback:
   a learning session fanned out into a multi-agent plan and burned tokens.
   * **Skill:** NEXUS ships a plugin `nexus` with the skill `learn-project` (`crates/nexus-core/builtin/`, written to

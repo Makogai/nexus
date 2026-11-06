@@ -12,9 +12,10 @@ import SyncPolicyCard from '../src/components/SyncPolicyCard.vue'
 
 const view = (over: Partial<SyncPolicyView> = {}): SyncPolicyView => ({
   policy: { mode: 'manual', trust: null },
-  managed: { trustedAllowed: true, reviewAllowed: true, source: null },
+  managed: { trustedAllowed: true, reviewAllowed: true, autonomousAllowed: true, source: null },
   allowlist: ['project-context/*/development/*.md', 'project-context/*/current-state.md'],
   trustedUnavailable: null,
+  autonomousUnavailable: null,
   remote: 'https://example.test/me/workspace.git',
   branch: 'main',
   ...over,
@@ -47,6 +48,32 @@ describe('SyncPolicyCard', () => {
     await flushPromises()
     expect(api.syncPolicySet).toHaveBeenLastCalledWith('w1', 'trusted', true)
     w.unmount()
+  })
+
+  it('turns autonomous sync on only after confirming the remote is private for everything', async () => {
+    api.syncPolicyGet.mockResolvedValue(view())
+    api.syncPolicySet.mockImplementation(async (_w: string, mode: string) => view({ policy: { mode: mode as never, trust: null } }))
+    const w = mount(SyncPolicyCard, { props: { workspaceId: 'w1' }, attachTo: document.body })
+    await flushPromises()
+    await w.find('[data-sync-policy-choose="autonomous"]').trigger('change')
+    await flushPromises()
+    const confirm = document.querySelector('[data-autonomous-confirm]') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    expect(api.syncPolicySet).not.toHaveBeenCalled()
+    ;(document.querySelector('[data-autonomous-private]') as HTMLInputElement).click()
+    await flushPromises()
+    ;(document.querySelector('[data-autonomous-confirm]') as HTMLButtonElement).click()
+    await flushPromises()
+    expect(api.syncPolicySet).toHaveBeenLastCalledWith('w1', 'autonomous', true)
+    w.unmount()
+  })
+
+  it('cannot choose autonomous when the organisation forbids it', async () => {
+    api.syncPolicyGet.mockResolvedValue(view({ autonomousUnavailable: 'turned off by your organisation (policy.json)' }))
+    const w = mount(SyncPolicyCard, { props: { workspaceId: 'w1' } })
+    await flushPromises()
+    expect(w.find('[data-sync-policy-choose="autonomous"]').attributes('disabled')).toBeDefined()
+    expect(w.find('[data-autonomous-unavailable]').text()).toContain('organisation')
   })
 
   it('cannot choose trusted when it is unavailable and says why', async () => {

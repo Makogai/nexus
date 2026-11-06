@@ -298,6 +298,19 @@ pub fn rename(conn: &Connection, id: &str, title: &str) -> Result<Session> {
     get(conn, id)
 }
 
+/// A running Claude session takes on another task (owner feedback: continue in a session that already has the project's
+/// context instead of always starting a new one). The task link moves to the new task; the previous link is kept as a
+/// `task-switch` event, so the session's history still shows what it worked on.
+pub fn switch_task(conn: &Connection, id: &str, task_id: &str) -> Result<Session> {
+    let s = get(conn, id)?;
+    conn.execute("UPDATE sessions SET task_id = ?2 WHERE id = ?1", params![id, task_id])?;
+    conn.execute(
+        "INSERT INTO session_events(id, session_id, kind, summary, data, source, created_at) VALUES (?1, ?2, 'task-switch', ?3, ?4, 'nexus', ?5)",
+        params![new_id(), id, task_id, serde_json::json!({ "from": s.task_id, "to": task_id }).to_string(), now_ms()],
+    )?;
+    get(conn, id)
+}
+
 pub fn set_archived(conn: &Connection, id: &str, archived: bool) -> Result<Session> {
     let s = get(conn, id)?;
     if archived && s.state.is_live() {
@@ -324,6 +337,17 @@ pub fn conversation_recorded(config_dir: &Path, claude_session_id: &str) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_taking_on_another_task_keeps_the_previous_link_as_an_event() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let s = new(&conn);
+        conn.execute("UPDATE sessions SET task_id = 'task-a' WHERE id = ?1", [&s.id]).unwrap();
+        let s = switch_task(&conn, &s.id, "task-b").unwrap();
+        assert_eq!(s.task_id.as_deref(), Some("task-b"));
+        let data: String = conn.query_row("SELECT data FROM session_events WHERE session_id = ?1 AND kind = 'task-switch'", [&s.id], |r| r.get(0)).unwrap();
+        assert!(data.contains("\"from\":\"task-a\"") && data.contains("\"to\":\"task-b\""), "{data}");
+    }
 
     fn new(conn: &Connection) -> Session {
         insert_starting(

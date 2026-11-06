@@ -11,6 +11,7 @@
 
 pub mod history;
 pub mod inspect;
+pub mod message;
 pub mod ops;
 pub mod policy;
 

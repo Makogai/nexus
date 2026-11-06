@@ -101,6 +101,9 @@ import type {
   GitLogEntry,
   LearnDepth,
   LearnDraft,
+  NexusTools,
+  PushRequest,
+  PushReview,
   LearnTask,
   ProjectMap,
 } from './types'
@@ -227,6 +230,14 @@ export const api = {
   sessionList: (filter?: SessionFilter) => call<SessionView[]>('session_list', { filter }),
   sessionGet: (id: string) => call<SessionView>('session_get', { id }),
   sessionStartClaude: (args: StartClaude) => call<SessionView>('session_start_claude', { args }),
+  /** What NEXUS gives Claude sessions: built-in skills, the MCP server's tools (from `nexus mcp --list-tools`), hooks. */
+  nexusTools: () => call<NexusTools>('nexus_tools'),
+  /** Push requests of Claude sessions (ADR-0043): pending ones, the review, and the person's decision. */
+  pushRequestPending: (projectId?: string | null) => call<PushRequest[]>('push_request_pending', { projectId: projectId ?? null }),
+  pushRequestReview: (id: string) => call<PushReview>('push_request_review', { id }),
+  pushRequestDecide: (id: string, approve: boolean, token: string) => call<PushRequest>('push_request_decide', { id, approve, token }),
+  /** Hand a task to a running Claude session of its project (NEXUS types a fixed message with the task id). */
+  sessionContinueTask: (id: string, taskId: string) => call<SessionView>('session_continue_task', { id, taskId }),
   sessionResume: (id: string, cols?: number, rows?: number) =>
     call<SessionView>('session_resume', { id, cols, rows }),
   shellList: () => call<ShellInfo[]>('shell_list'),

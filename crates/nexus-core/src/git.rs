@@ -107,6 +107,15 @@ pub fn status(repo: &Path) -> Result<GitStatus> {
     Ok(st)
 }
 
+/// URL of the remote `name`, with credentials removed.
+pub fn remote_url_of(repo: &Path, name: &str) -> Option<String> {
+    if name.starts_with('-') {
+        return None;
+    }
+    let out = run_git(Some(repo), &["remote", "get-url", name]).ok()?;
+    out.success().then(|| redact_url(out.stdout_str().trim()))
+}
+
 /// Remote URL of `origin` (or the first remote), with credentials removed.
 pub fn remote_url(repo: &Path) -> Option<String> {
     let out = run_git(Some(repo), &["remote"]).ok()?;
@@ -613,18 +622,41 @@ pub fn local_exclude_file(repo: &Path) -> Option<PathBuf> {
     Some(if p.is_absolute() { p } else { repo.join(p) })
 }
 
-/// Which of `paths` (repository-relative, forward slashes) Git ignores. Not a repository → none.
+/// Which of `paths` (repository-relative, forward slashes; a directory may end in `/`) Git ignores, returned as given.
+/// Not a repository → none.
+///
+/// Git is never asked with a trailing slash: `git check-ignore` (2.55 on Windows) then reports matches on blank lines
+/// of some `.gitignore` files — a Flutter project's whole tree showed as ignored, and `graphify-out/` looked excluded
+/// when it was not. An existing directory is asked without the slash (Git looks at the file system, so `build/`
+/// patterns still match it); one that does not exist yet is asked through a file inside it, since whatever is inside an
+/// ignored directory is ignored.
 pub fn ignored_paths(repo: &Path, paths: &[String]) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
-    if paths.is_empty() {
-        return out;
-    }
+    let asked: Vec<(String, &String)> = paths
+        .iter()
+        .filter(|p| !p.starts_with('-'))
+        .filter_map(|p| {
+            let dir = p.trim_end_matches('/');
+            let q = if dir.len() == p.len() {
+                p.clone()
+            } else if dir.is_empty() {
+                return None;
+            } else if repo.join(dir).is_dir() {
+                dir.to_string()
+            } else {
+                format!("{dir}/.nexus-ignore-probe")
+            };
+            Some((q, p))
+        })
+        .collect();
     // In chunks, as arguments (exit code 1 = none of them ignored, which is not an error).
-    for chunk in paths.chunks(150) {
+    for chunk in asked.chunks(150) {
         let mut args = vec!["check-ignore", "--no-index", "--"];
-        args.extend(chunk.iter().filter(|p| !p.starts_with('-')).map(String::as_str));
+        args.extend(chunk.iter().map(|(q, _)| q.as_str()));
         if let Ok(o) = run_git(Some(repo), &args) {
-            out.extend(o.stdout_str().lines().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string));
+            let text = o.stdout_str();
+            let hits: std::collections::HashSet<&str> = text.lines().map(str::trim).filter(|s| !s.is_empty()).collect();
+            out.extend(chunk.iter().filter(|(q, _)| hits.contains(q.as_str())).map(|(_, p)| (*p).clone()));
         }
     }
     out
@@ -926,6 +958,26 @@ fn first_line(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ignored_paths_are_right_for_folders_that_exist_and_folders_that_do_not() {
+        // Regression: a `.gitignore` with Windows line endings and a blank line (a lone `\r`) made `git check-ignore lib/`
+        // — asked with the slash — report a match on that blank line (Git 2.55 for Windows): a Flutter project's whole
+        // tree looked ignored, and `graphify-out/` looked excluded when it was not.
+        let t = tempfile::tempdir().unwrap();
+        let repo = t.path();
+        assert!(run_git(Some(repo), &["init", "-q"]).is_ok());
+        std::fs::write(repo.join(".gitignore"), "*.log\r\n\r\n/build/\r\nprojects/\r\n").unwrap();
+        for d in ["lib", "android", "build"] {
+            std::fs::create_dir_all(repo.join(d)).unwrap();
+        }
+        std::fs::write(repo.join("app.log"), "x").unwrap();
+        let ask: Vec<String> = ["lib/", "android/", "build/", "projects/", "graphify-out/", "app.log", "pubspec.yaml", "/", "-x"].map(String::from).to_vec();
+        let mut got: Vec<String> = ignored_paths(repo, &ask).into_iter().collect();
+        got.sort();
+        // build/ exists and matches `/build/`; projects/ does not exist yet and matches `projects/`; files as given.
+        assert_eq!(got, ["app.log", "build/", "projects/"]);
+    }
 
     #[test]
     fn remote_errors_are_classified_and_redacted() {

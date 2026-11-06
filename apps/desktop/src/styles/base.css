@@ -325,6 +325,13 @@ code,
   height: 15px;
 }
 
+/* Vertical rhythm: the sections of a page never touch. Zero specificity (:where), so a view's own spacing still wins;
+   vertical margins collapse with a previous margin-bottom (e.g. the page header's), so gaps are not doubled. A page that
+   lays itself out as a flex column with its own `gap` is marked `page-flex` and keeps that gap alone. */
+:where(.page:not(.page-flex)) > :where(* + *) {
+  margin-top: 16px;
+}
+
 .page {
   height: 100%;
   overflow: auto;

@@ -136,6 +136,11 @@ pub struct WorkflowLaunch {
     pub refused: Vec<String>,
 }
 
+/// The system-prompt line for sessions with NEXUS tools in a workspace (ADR-0042).
+pub const COMMIT_MESSAGE_NOTE: &str = "NEXUS: when your work changed this workspace (tasks, notes, decisions, drafts or other workspace files), \
+     finish by proposing a commit message for those changes with propose_commit_message. When project commits should be pushed but \
+     you may not push yourself, ask the user with request_push.";
+
 /// A learning session (ADR-0041): its depth and whether the built-in skill was given (or why not). The rules are in
 /// the system prompt either way.
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
@@ -240,6 +245,10 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
                 let _ = crate::notify::publish(r.conn, e);
             }
             rules = Some(lr);
+            // Commit messages come from the session that made the changes (ADR-0042) — NEXUS-authored, one line.
+            if matches!(mcp, IntegrationStatus::Enabled { .. }) {
+                parts.push(COMMIT_MESSAGE_NOTE.to_string());
+            }
             if let Some(tid) = r.task_id {
                 let v = tasks::view(r.conn, ws, tid, 4000)?;
                 if let (Some(tp), Some(p)) = (&v.project_id, &project)

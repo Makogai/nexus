@@ -129,8 +129,10 @@ pub struct ProjectDoc {
 pub struct ProjectKnowledge {
     /// Live Git state (Git is authoritative for branches).
     pub git: GitRef,
-    /// Open tasks of the project (and unscoped ones).
+    /// Open tasks of the project (and unscoped ones): ready for review first, then in progress, then the rest.
     pub tasks: Vec<ItemView>,
+    /// The most recently finished tasks (to reopen one).
+    pub done_tasks: Vec<ItemView>,
     /// Notes and decisions visible on the checked-out branch, with their relevance.
     pub notes: Vec<ProjectDoc>,
     /// Documents of other branches, hidden here.
@@ -153,19 +155,37 @@ pub async fn project_knowledge(ctx: State<'_, Ctx>, project_id: String) -> IpcRe
         let o = knowledge::overview(&db, &ctx.data_dir, &ws, false)?;
         let mine = |v: &ItemView| v.item.valid && v.item.conflict.is_none() && (v.item.project_id.is_none() || v.item.project_id.as_deref() == Some(p.id.as_str()));
         let mut tasks = Vec::new();
+        let mut done_tasks = Vec::new();
         let mut notes = Vec::new();
         let mut hidden = 0;
         for v in o.items.into_iter().filter(mine) {
             let rel = branches::relevance(&v.item, &git, &history);
             match v.item.kind.as_deref() {
-                Some("task") if v.item.status.as_deref() != Some("done") => tasks.push(v),
+                Some("task") if v.item.status.as_deref() == Some("done") => done_tasks.push(v),
+                Some("task") => tasks.push(v),
                 Some("note" | "decision") if rel.visible() => notes.push(ProjectDoc { view: v, relevance: rel }),
                 Some("note" | "decision") => hidden += 1,
                 _ => {}
             }
         }
         notes.sort_by_key(|n| n.relevance != Relevance::ThisBranch);
-        Ok(ProjectKnowledge { git, tasks, notes, hidden_other_branch: hidden })
+        // What needs the person first: work Claude says is complete, then work in progress; urgent before the rest.
+        let rank = |s: Option<&str>| match s {
+            Some("review") => 0,
+            Some("in-progress") => 1,
+            Some("blocked") => 2,
+            Some("ready") => 3,
+            _ => 4,
+        };
+        let urgency = |p: Option<&str>| match p {
+            Some("urgent") => 0,
+            Some("high") => 1,
+            _ => 2,
+        };
+        tasks.sort_by_key(|v| (rank(v.item.status.as_deref()), urgency(v.item.priority.as_deref())));
+        done_tasks.sort_by(|a, b| b.item.updated.cmp(&a.item.updated));
+        done_tasks.truncate(5);
+        Ok(ProjectKnowledge { git, tasks, done_tasks, notes, hidden_other_branch: hidden })
     })
     .await
 }

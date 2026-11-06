@@ -9,6 +9,7 @@ import type { ClaudeProfile, LaunchOptions, Project, SessionView } from '../src/
 const api = vi.hoisted(() => ({
   sessionStartClaude: vi.fn(),
   sessionResume: vi.fn(),
+  sessionContinueTask: vi.fn(),
   sessionInterrupt: vi.fn(),
   sessionTerminate: vi.fn(),
   sessionRename: vi.fn(),
@@ -40,6 +41,7 @@ import LaunchDialog from '../src/components/LaunchDialog.vue'
 import ProfileDialog from '../src/components/ProfileDialog.vue'
 import SessionRow from '../src/components/SessionRow.vue'
 import CommandPalette from '../src/components/CommandPalette.vue'
+import BaseModal from '../src/components/BaseModal.vue'
 import ConfirmDialog from '../src/components/ConfirmDialog.vue'
 import { useAppStore } from '../src/stores/app'
 import { useProfileStore } from '../src/stores/profiles'
@@ -220,10 +222,65 @@ describe('LaunchDialog', () => {
     api.sessionStartClaude.mockResolvedValue(session({ id: 'new', running: true, state: 'running' }))
     await w.findAll('footer .btn-primary')[0]!.trigger('click')
     await flushPromises()
-    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ projectId: 'p1', taskId: 'task-1', startTask: false, kickoff: false, title: null })
+    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ projectId: 'p1', taskId: 'task-1', startTask: false, kickoff: true, title: null })
   })
 
-  it('“start right away” is preselected only when asked, shows the exact first message and is sent', async () => {
+  it('a task launch starts right away by default and remembers when the person turns it off', async () => {
+    seed()
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-1', title: 'Ship login', projectId: 'p1' })
+    await flushPromises()
+    const box = () => w.find('[data-launch-kickoff] input').element as HTMLInputElement
+    expect(box().checked, 'on by default').toBe(true)
+    await w.find('[data-launch-kickoff] input').setValue(false)
+    api.sessionStartClaude.mockResolvedValue(session({ id: 'new', running: true, state: 'running' }))
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ taskId: 'task-1', kickoff: false })
+    expect(app.prefs.lastLaunch?.taskKickoff).toBe(false)
+    app.openLaunch(null, 'game', { id: 'task-2', title: 'Fix cart', projectId: 'p1' })
+    await flushPromises()
+    expect(box().checked, 'the last choice is remembered').toBe(false)
+  })
+
+  it('a task with its own earlier session resumes it by default — no new session', async () => {
+    seed()
+    useSessionStore().list = [session({ id: 'own', taskId: 'task-1', running: false, resumable: true, state: 'exited' })]
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-1', title: 'Ship login', projectId: 'p1' })
+    await flushPromises()
+    expect(w.find('[data-start-in="own"]').classes()).toContain('selected')
+    expect(w.find('[data-start-in-hint]').text()).toContain('cheapest')
+    api.sessionResume.mockResolvedValue(session({ id: 'own', running: true, state: 'running', taskId: 'task-1' }))
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionResume).toHaveBeenCalledWith('own', expect.anything(), expect.anything())
+    expect(api.sessionStartClaude).not.toHaveBeenCalled()
+  })
+
+  it('a task can be handed to a running session of its project that has NEXUS tools', async () => {
+    seed()
+    const running = session({ id: 'busy', title: 'Refactor cart', running: true, attached: true, state: 'running', integrations: { mcp: { state: 'enabled' } } as never })
+    const noTools = session({ id: 'plain', title: 'No tools', running: true, attached: true, state: 'running', integrations: { mcp: { state: 'blocked', reason: 'x' } } as never })
+    useSessionStore().list = [running, noTools]
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game', { id: 'task-2', title: 'Fix rounding', projectId: 'p1' })
+    await flushPromises()
+    expect(w.find('[data-start-in="new"]').classes(), 'handing over is never the default').toContain('selected')
+    await w.find('[data-start-in="continue"]').trigger('click')
+    expect(w.find('[data-start-in-hint]').text()).toContain('Refactor cart')
+    expect(w.find('[data-continue-session]').exists(), 'only one session qualifies (the other has no NEXUS tools)').toBe(false)
+    api.sessionContinueTask.mockResolvedValue({ ...running, taskId: 'task-2' })
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionContinueTask).toHaveBeenCalledWith('busy', 'task-2')
+    expect(api.sessionStartClaude).not.toHaveBeenCalled()
+  })
+
+  it('the Learn view preselects “start right away”, shows the exact first message and sends it', async () => {
     seed()
     const app = useAppStore()
     const w = mountWith(LaunchDialog)
@@ -237,7 +294,7 @@ describe('LaunchDialog', () => {
     expect(api.sessionStartClaude.mock.calls[0]![0]).toMatchObject({ taskId: 'task-1', kickoff: true })
     // Without a task there is nothing to start on.
     app.openLaunch('p1', 'game', null, { kickoff: true })
-    expect(app.launchDialog.kickoff).toBe(false)
+    expect(app.launchDialog.kickoff).toBeUndefined()
   })
 
   it('switching profile applies that profile’s defaults', async () => {
@@ -387,6 +444,27 @@ describe('SessionRow', () => {
     expect(api.sessionTerminate).toHaveBeenCalledWith('s1')
   })
 
+  it('a confirmation opened from a dialog is on top of it, and Escape closes only the confirmation', async () => {
+    seed()
+    // The confirmation is mounted first (as in App.vue) and the dialog later — the stack, not the order, decides.
+    const confirm = mountWith(ConfirmDialog)
+    const closed = vi.fn()
+    const dialog = mountWith(BaseModal, { open: true, title: 'Commit', onClose: closed })
+    await flushPromises()
+    const answer = useAppStore().confirm({ title: 'Commit these changes?', message: 'x', confirmLabel: 'Commit' })
+    await flushPromises()
+    const z = (w: ReturnType<typeof mountWith>) => Number((w.find('.backdrop').element as HTMLElement).style.zIndex)
+    expect(z(confirm)).toBeGreaterThan(z(dialog))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(await answer).toBe(false)
+    expect(closed).not.toHaveBeenCalled()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(closed).toHaveBeenCalledTimes(1)
+    dialog.unmount()
+    confirm.unmount()
+  })
+
   it('explains when NEXUS tools were blocked by organisation policy', () => {
     seed()
     const reason = 'organisation policy disables --mcp-config (disableSideloadFlags)'
@@ -447,6 +525,6 @@ describe('CommandPalette', () => {
     expect(first.text()).toContain('Launch Claude in Game')
     await w.find('.palette input').trigger('keydown', { key: 'Enter' })
     expect(app.paletteOpen).toBe(false)
-    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null, kickoff: false })
+    expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null, kickoff: undefined })
   })
 })

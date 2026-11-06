@@ -233,6 +233,48 @@ try {
   const approved = await cdp.waitFor(`!document.querySelector('[data-proposal]')`, 10000).catch(() => false)
   const files = decisionFiles()
   check('approving writes an accepted decision file', !!approved && files.length === 1 && readFileSync(join(decisionsDir, files[0]), 'utf8').includes('status: accepted'), files.join(','))
+
+  // Finished work: the task Claude put into review leads the list; Done moves it to "Recently done"; Reopen brings it back.
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}'; true`)
+  const review = await cdp.waitFor(`document.querySelector('[data-task="${setup.task.id}"].for-review')?.innerText`, 15000).catch(() => '')
+  check('a task in review shows as ready for review', review.includes('Ready for review'), review.replace(/\n/g, ' ').slice(0, 80))
+  await cdp.evaluate(`document.querySelector('[data-task="${setup.task.id}"] [data-task-done]').click(), true`)
+  const done = await cdp.waitFor(`!document.querySelector('[data-task="${setup.task.id}"]') && !!document.querySelector('[data-done-task="${setup.task.id}"]')`, 15000).catch(() => false)
+  check('Done moves it to Recently done (the file says done)', !!done && readFileSync(setup.task.path, 'utf8').includes('status: done'))
+  await cdp.evaluate(`document.querySelector('[data-project-done]').open = true; document.querySelector('[data-done-task="${setup.task.id}"] [data-task-reopen]').click(); true`)
+  const reopened = await cdp.waitFor(`!!document.querySelector('[data-task="${setup.task.id}"]')`, 15000).catch(() => false)
+  check('…and Reopen brings it back', !!reopened && readFileSync(setup.task.path, 'utf8').includes('status: ready'))
+
+  // Sessions can be filtered by project (kept in the URL).
+  await cdp.evaluate(`location.hash = '#/sessions?project=${setup.project.id}'; true`)
+  const filtered = await cdp.waitFor(`document.querySelector('[data-sessions-project]')?.value === ${JSON.stringify(setup.project.id)} && document.querySelectorAll('[data-session]').length`, 15000).catch(() => 0)
+  await cdp.evaluate(`location.hash = '#/sessions?project=none'; true`)
+  const none = await cdp.waitFor(`document.querySelector('[data-sessions-project]') && document.querySelectorAll('[data-session]').length === 0 ? 'empty' : ''`, 15000).catch(() => '')
+  check('the Sessions tab filters by project', filtered >= 1 && none === 'empty', `${filtered} session(s) for the project`)
+
+  // A push request: the session may not push, so it asks NEXUS; the person approves in a dialog; NEXUS pushes.
+  const bare = join(root, 'origin.git')
+  execFileSync('git', ['init', '-q', '--bare', bare])
+  git('remote', 'add', 'origin', bare)
+  git('push', '-q', '-u', 'origin', 'HEAD')
+  writeFileSync(join(repo, 'auth.js'), 'verify()\n')
+  git('add', '-A')
+  git('commit', '-qm', 'Fix the verify bypass')
+  const [asked] = await mcp(s1.id, [['request_push', { reason: 'Deploy the auth fix' }]])
+  check('request_push records a pending request (nothing is pushed)', asked?.structuredContent?.pushRequest?.status === 'pending', JSON.stringify(asked?.structuredContent ?? asked).slice(0, 120))
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}'; location.reload(); true`)
+  await cdp.waitFor(`!!document.querySelector('[data-push-open]')`, 20000)
+  await cdp.evaluate(`document.querySelector('[data-push-open]').click(), true`)
+  const reviewText = await cdp.waitFor(`document.querySelector('[data-push-review]')?.innerText`, 15000).catch(() => '')
+  check('the push dialog shows Claude’s reason and the outgoing commit', reviewText.includes('Deploy the auth fix') && reviewText.includes('Fix the verify bypass'), reviewText.replace(/\n/g, ' ').slice(0, 160))
+  await cdp.evaluate(`document.querySelector('[data-push-approve]').click(), true`)
+  const pushed = await cdp.waitFor(`!document.querySelector('[data-push-request]')`, 20000).catch(() => false)
+  const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim()
+  const remoteHead = execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${branch}`], { encoding: 'utf8' }).trim()
+  const localHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim()
+  check('Push sends exactly that commit to the remote', !!pushed && remoteHead === localHead, `${remoteHead.slice(0, 7)} / ${localHead.slice(0, 7)}`)
+  const [again] = await mcp(s1.id, [['request_push', {}]])
+  check('…and asking again tells Claude it was pushed', again?.structuredContent?.pushRequest?.status === 'pushed')
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

@@ -164,6 +164,7 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
             if let Err(e) = crate::knowledge::proposals::extract_for_session(conn, &s.id) {
                 tracing::debug!(error = %e, "memory proposal extraction skipped");
             }
+            sync_after_turn(conn, &s);
             Ok(Outcome::default())
         }
         HookEvent::PreCompact => {
@@ -179,6 +180,7 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
         HookEvent::Stop => {
             touch(conn, &s.id, ", turns = turns + 1")?;
             attention::apply(conn, &s, Signal::TurnEnded)?;
+            sync_after_turn(conn, &s);
             Ok(Outcome::default())
         }
         HookEvent::UserPrompt => {
@@ -265,6 +267,19 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
             attention::apply(conn, &s, Signal::Continued)?;
             Ok(Outcome::default())
         }
+    }
+}
+
+/// Claude finished a turn (or the session ended): under the autonomous sync policy, the session's workspace becomes due
+/// a little later — the host commits and pushes it (ADR-0042). Only a settings write here: hooks stay cheap, and the
+/// Git work happens in the host, never in the hook.
+fn sync_after_turn(conn: &Connection, s: &Session) {
+    let Some(ws) = s.workspace_id.as_deref() else { return };
+    use crate::workspace_sync::policy;
+    if policy::get(conn, ws).is_ok_and(|p| p.mode == policy::Mode::Autonomous)
+        && let Err(e) = policy::mark_due_in(conn, ws, policy::SETTLE_MS)
+    {
+        tracing::debug!(error = %e, "automatic sync not scheduled");
     }
 }
 
@@ -632,6 +647,27 @@ mod tests {
 
     fn get(conn: &Connection, id: &str) -> Session {
         session::get(conn, id).unwrap()
+    }
+
+    #[test]
+    fn a_finished_turn_schedules_autonomous_sync_only_for_autonomous_workspaces() {
+        use crate::workspace_sync::policy;
+        let conn = crate::db::open_in_memory().unwrap();
+        let t = tempfile::tempdir().unwrap();
+        let ws = crate::workspace::create(&conn, t.path().join("ws").to_str().unwrap(), "W", "").unwrap();
+        let s = session::insert_starting(
+            &conn,
+            NewSession { claude_session_id: Some(CSID.into()), workspace_id: Some(ws.id.clone()), title: "t".into(), cwd: t.path().to_path_buf(), program: "claude".into(), ..Default::default() },
+        )
+        .unwrap();
+        let due = |c: &Connection| crate::settings::get::<i64>(c, &format!("sync_due:{}", ws.id)).unwrap();
+        handle(&conn, &s.id, HookEvent::Stop, &json!({})).unwrap();
+        assert_eq!(due(&conn), None, "manual: nothing scheduled");
+        crate::settings::set(&conn, &format!("sync_policy:{}", ws.id), &policy::Policy { mode: policy::Mode::Autonomous, trust: None }).unwrap();
+        let before = now_ms();
+        handle(&conn, &s.id, HookEvent::Stop, &json!({})).unwrap();
+        let at = due(&conn).expect("scheduled");
+        assert!(at >= before + policy::SETTLE_MS && at <= now_ms() + policy::SETTLE_MS, "a little later, so a burst of turns is one commit");
     }
 
     #[test]

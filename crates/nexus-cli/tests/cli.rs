@@ -315,7 +315,7 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 22);
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 24);
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");
@@ -1820,4 +1820,26 @@ fn claude_drafts_project_documents_for_review() {
     assert!(arch.contains("_Not written yet._"), "the draft does not touch the architecture document");
     let notes: Vec<String> = std::fs::read_dir(ctx.join("memory")).into_iter().chain(std::fs::read_dir(ctx.join("notes"))).flatten().flatten().map(|f| std::fs::read_to_string(f.path()).unwrap_or_default()).collect();
     assert!(notes.iter().any(|n| n.contains("One crate (verified: Cargo.toml).") && n.contains("draft") && n.contains("architecture")), "a labelled draft note: {notes:?}");
+}
+
+#[test]
+fn claude_proposes_the_commit_message_for_its_workspace_changes() {
+    let e = Env::new();
+    e.setup();
+    let report = e.data.parent().unwrap().join("commit.json");
+    let out = e.cmd(&["launch", "--profile", "fake", "--project", "repo", "-q"]).env("FAKE_CLAUDE_REPORT", &report).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    // The session was told to propose one (NEXUS-authored line in the system prompt).
+    let launched: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    let args: Vec<String> = launched["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap_or_default().to_string()).collect();
+    let system = args.iter().position(|a| a == "--append-system-prompt").map(|i| args[i + 1].clone()).unwrap_or_default();
+    assert!(system.contains("propose_commit_message"), "{system}");
+    let sid = e.json(&["sessions"])[0]["id"].as_str().unwrap().to_string();
+    let r = mcp_calls(&e, &sid, &[
+        ("propose_commit_message", serde_json::json!({ "message": "Record the checkout decision\n\nStripe, because it handles VAT." })),
+        ("propose_commit_message", serde_json::json!({ "message": "   \n" })),
+    ]);
+    assert_eq!(r[0]["isError"], false, "{}", r[0]);
+    assert_eq!(r[0]["structuredContent"]["proposed"], "Record the checkout decision");
+    assert_eq!(r[1]["isError"], true, "an empty message is refused");
 }

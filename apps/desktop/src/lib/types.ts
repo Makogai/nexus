@@ -18,6 +18,8 @@ export interface AppInfo {
   /** A restore applied at this start (backup id) or why it failed. */
   restored: string | null
   restoreError: string | null
+  /** This build updates itself (release builds only). */
+  updates: boolean
 }
 
 export interface BackupInfo {
@@ -179,13 +181,14 @@ export interface DevHistory {
   blockers: [string, number][]
 }
 
-export type SyncPolicyMode = 'manual' | 'review' | 'trusted'
+export type SyncPolicyMode = 'manual' | 'review' | 'trusted' | 'autonomous'
 
 export interface SyncPolicyView {
   policy: { mode: SyncPolicyMode; trust: { remote: string; branch: string; authorizedAt: number } | null }
-  managed: { trustedAllowed: boolean; reviewAllowed: boolean; source: string | null }
+  managed: { trustedAllowed: boolean; reviewAllowed: boolean; autonomousAllowed: boolean; source: string | null }
   allowlist: string[]
   trustedUnavailable: string | null
+  autonomousUnavailable: string | null
   remote: string | null
   branch: string | null
 }
@@ -521,7 +524,7 @@ export interface AppNotification {
   sessionId: string | null
   taskId: string | null
   workflowId: string | null
-  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | 'workflow' | 'sync' | null
+  targetKind: 'session' | 'task' | 'proposals' | 'rules' | 'kit' | 'project' | 'profile' | 'workflow' | 'sync' | 'push' | null
   targetId: string | null
   dedupeKey: string | null
   occurrences: number
@@ -628,7 +631,10 @@ export interface UiPreferences {
   terminalOpen: boolean
   sidebarCollapsed: boolean
   defaultShell: string | null
-  lastLaunch: { profileId?: string; workProfile?: string; effort?: string | null } | null
+  /** Launch defaults; `taskKickoff` = the last “Start right away” choice for task launches (default: on). */
+  lastLaunch: { profileId?: string; workProfile?: string; effort?: string | null; taskKickoff?: boolean } | null
+  /** Install a published update by itself when NEXUS starts (default on; ADR-0044). */
+  autoUpdate?: boolean
 }
 
 export type ProfileDialogMode = 'register' | 'create' | 'edit'
@@ -761,7 +767,10 @@ export type Relevance = 'unbound' | 'this-branch' | 'inherited' | 'other-branch'
 
 export interface ProjectKnowledge {
   git: { branch: string | null; head: string | null }
+  /** Open tasks: ready for review first, then in progress, then the rest. */
   tasks: KnowledgeItem[]
+  /** The most recently finished tasks (to reopen one). */
+  doneTasks: KnowledgeItem[]
   notes: (KnowledgeItem & { relevance: Relevance })[]
   hiddenOtherBranch: number
 }
@@ -1676,6 +1685,8 @@ export interface SyncCommitReview {
   inspection: SyncInspection
   identity: boolean
   token: string
+  /** What the Claude sessions proposed for this work, or a message composed from the paths (ADR-0042). */
+  suggestedMessage: string
 }
 
 export interface SyncPushReview {
@@ -1685,6 +1696,49 @@ export interface SyncPushReview {
   commits: GitLogEntry[]
   files: GitDiffEntry[]
   behind: number
+  inspection: SyncInspection
+  token: string
+}
+
+export interface NexusTool {
+  name: string
+  title?: string
+  description: string
+  annotations?: { readOnlyHint?: boolean }
+}
+
+export interface NexusTools {
+  cli: string | null
+  tools: NexusTool[]
+  toolsError: string | null
+  hooks: string[]
+  skills: { id: string; description: string; givenTo: string; body: string }[]
+}
+
+/** A Claude session asked NEXUS to push its project's branch (ADR-0043). */
+export interface PushRequest {
+  id: string
+  sessionId: string | null
+  projectId: string
+  branch: string
+  head: string
+  reason: string
+  status: 'pending' | 'pushed' | 'declined' | 'failed'
+  message: string | null
+  createdAt: number
+  decidedAt: number | null
+}
+
+export interface PushReview {
+  request: PushRequest
+  projectName: string
+  remote: string
+  remoteUrl: string | null
+  remoteBranch: string
+  firstPush: boolean
+  head: string
+  moved: boolean
+  commits: GitLogEntry[]
   inspection: SyncInspection
   token: string
 }

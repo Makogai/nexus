@@ -265,6 +265,9 @@ pub struct CommitReview {
     pub identity: bool,
     /// Pass to [`commit`]: proves the commit is of exactly this reviewed state.
     pub token: String,
+    /// The message to start from (ADR-0042): what the Claude sessions proposed for this work, or one composed from the
+    /// paths. The person can change it before committing.
+    pub suggested_message: String,
 }
 
 pub(super) fn status_of(xy: &str) -> &'static str {
@@ -308,12 +311,15 @@ pub fn review_commit(s: &Sync<'_>, paths: Option<&[String]>) -> Result<CommitRev
         let content = std::fs::read(root.join(p)).map(|b| crate::knowledge::content_hash(&b)).unwrap_or_else(|_| "-".into());
         fingerprint.push_str(&format!("\0{st}\0{p}\0{content}"));
     }
+    let paths: Vec<String> = selected.iter().map(|(_, p)| p.clone()).collect();
+    let suggested_message = super::message::suggest(s.conn, &s.ws.id, root, &paths)?;
     Ok(CommitReview {
         branch: git::status(root)?.branch,
         files: selected.into_iter().map(|(status, path)| ReviewFile { status, path }).collect(),
         inspection,
         identity: git::identity_configured(root),
         token: crate::knowledge::content_hash(fingerprint.as_bytes()),
+        suggested_message,
     })
 }
 
@@ -353,6 +359,8 @@ pub fn commit(s: &Sync<'_>, message: &str, paths: Option<&[String]>, token: &str
     match git::commit_only(s.root(), message, &all, &new_files) {
         Ok(oid) => {
             history::finish(s.conn, &id, "ok", Some(&oid), 1, all.len(), None, Some(&format!("committed {} file(s)", all.len())))?;
+            // Claude's proposals so far belong to this commit; the next one starts fresh (ADR-0042).
+            super::message::mark_used(s.conn, &s.ws.id)?;
             Ok(Committed { oid, files: all.len() })
         }
         Err((msg, added)) => {

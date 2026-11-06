@@ -88,6 +88,16 @@ function run(args, stdin) {
 let cdp
 const inv = (cmd, args = {}) => cdp.evaluate(`window.__TAURI_INTERNALS__.invoke(${js(cmd)}, ${js(args)})`)
 const click = (sel) => cdp.evaluate(`(() => { const el = document.querySelector(${js(sel)}); if (!el) return false; el.click(); return true })()`)
+const textOf = (sel) => cdp.evaluate(`document.querySelector(${js(sel)})?.innerText ?? ''`)
+async function until(fn, ms = 15000) {
+  const deadline = Date.now() + ms
+  for (;;) {
+    const v = await fn().catch(() => null)
+    if (v) return v
+    if (Date.now() > deadline) return null
+    await sleep(250)
+  }
+}
 
 try {
   await waitForPort(port, 120_000)
@@ -145,6 +155,27 @@ try {
   await click('[data-tab="metrics"]')
   const metrics = await cdp.waitFor(`document.querySelector('[data-context-metrics]')?.innerText`, 10000).catch(() => '')
   check('retrieval metrics count calls, not queries', /2\s*retrievals/.test(metrics) && !metrics.includes('hosted payment'), metrics.slice(0, 160))
+
+  // 5. A task handed to the running session (it already has the project's context) instead of a new session.
+  const t2 = await inv('knowledge_create', { workspaceId: ws.id, input: { kind: 'task', title: 'Fix rounding', projectId: project.id, body: 'Round cents.\n' } })
+  await cdp.evaluate(`location.hash = '#/projects/${project.id}'; true`)
+  await cdp.waitFor(`!!document.querySelector('[data-task="${t2.id}"]')`, 15000)
+  await cdp.evaluate(`[...document.querySelectorAll('[data-task="${t2.id}"] .btn')].find((b) => b.innerText.includes('Launch'))?.click(); true`)
+  const startIn = await cdp.waitFor(`document.querySelector('[data-launch-start-in]')?.innerText`, 10000).catch(() => '')
+  check('a task launch offers the running session of its project', startIn.includes('A running session') && startIn.includes('New session'), startIn.replace(/\n/g, ' ').slice(0, 120))
+  await click('[data-start-in="continue"]')
+  const hint = await textOf('[data-start-in-hint]')
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] footer .btn-primary')][0].click(); true`)
+  const received = await cdp
+    .waitFor(`(() => { const t = [...document.querySelectorAll('.xterm-rows')].map((r) => r.innerText.replace(/\\n/g, '')).join(''); return t.includes('received: Next, please work on NEXUS task ${t2.id}') })()`, 15000)
+    .catch(() => false)
+  const linked = await until(async () => {
+    const x = await inv('session_get', { id: s.id })
+    return x.taskId === t2.id ? x : null
+  })
+  check('Hand over types NEXUS’s message with the task id into that session and links it', !!received && !!linked && hint.includes('Deep session'), hint.slice(0, 120))
+  const t2File = readFileSync(t2.path, 'utf8')
+  check('…and starts the task', t2File.includes('status: in-progress'))
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

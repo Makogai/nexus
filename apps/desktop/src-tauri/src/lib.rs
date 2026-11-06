@@ -70,15 +70,24 @@ fn spawn_heartbeat(ctx: Ctx) {
         loop {
             std::thread::sleep(host::HEARTBEAT_INTERVAL);
             let running = ctx.pty.running_ids();
-            let db = ctx.db();
-            if let Err(e) = host::heartbeat(&db, &ctx.host.id, &running)
-                .and_then(|_| host::reconcile(&db, now_ms()))
-                .and_then(|_| nexus_core::workflow::run::reconcile(&db, now_ms()))
-                .and_then(|_| nexus_core::workspace_sync::history::reconcile(&db, now_ms()))
-                .and_then(|_| nexus_core::devrecord::finalize_pending(&db, &ctx.data_dir))
-                .and_then(|_| nexus_core::workspace_sync::policy::run_due(&db, &ctx.data_dir, &ctx.home, &ctx.host.id, &nexus_core::workspace_sync::policy::default_managed_path()))
             {
-                tracing::warn!(error = %e, "host heartbeat failed");
+                let db = ctx.db();
+                if let Err(e) = host::heartbeat(&db, &ctx.host.id, &running)
+                    .and_then(|_| host::reconcile(&db, now_ms()))
+                    .and_then(|_| nexus_core::workflow::run::reconcile(&db, now_ms()))
+                    .and_then(|_| nexus_core::workspace_sync::history::reconcile(&db, now_ms()))
+                    .and_then(|_| nexus_core::devrecord::finalize_pending(&db, &ctx.data_dir))
+                {
+                    tracing::warn!(error = %e, "host heartbeat failed");
+                }
+            }
+            // Due workspace syncs (records; autonomous sync after Claude's turns, ADR-0042) talk to the remote: on their
+            // own connection, so a slow push never holds the connection the UI uses.
+            let due = nexus_core::db::open(&ctx.data_dir.join(nexus_core::db::DB_FILE)).and_then(|c| {
+                nexus_core::workspace_sync::policy::run_due(&c, &ctx.data_dir, &ctx.home, &ctx.host.id, &nexus_core::workspace_sync::policy::default_managed_path())
+            });
+            if let Err(e) = due {
+                tracing::warn!(error = %e, "workspace sync policy not applied");
             }
         }
     });
@@ -110,7 +119,10 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        // Signed updates (ADR-0044): every download is verified against the public key in tauri.conf.json.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
     #[cfg(not(windows))]
     let app = app.plugin(tauri_plugin_notification::init());
     let app = app
@@ -210,6 +222,11 @@ pub fn run() {
             commands::sessions::session_release,
             commands::sessions::session_rename,
             commands::sessions::session_set_archived,
+            commands::sessions::session_continue_task,
+            commands::projects::push_request_pending,
+            commands::projects::push_request_review,
+            commands::projects::push_request_decide,
+            commands::claude::nexus_tools,
             commands::knowledge::knowledge_overview,
             commands::knowledge::knowledge_read,
             commands::knowledge::knowledge_search,
@@ -331,8 +348,14 @@ pub fn run() {
 /// port) to the window's own browser arguments as well, next to wry's defaults. WebView2 on some systems (GitHub's
 /// Windows Server runners) ignores the variable once the app passes arguments itself. Release builds cannot contain
 /// this code: the e2e feature is refused at compile time there (ADR-0015, ADR-0033).
+///
+/// They also run under their own identifier (`<APP_ID>.e2e`), so a test can run while an installed NEXUS is open: the
+/// single-instance lock and the WebView2 data folder both follow the identifier — sharing them would hand the test's
+/// launch to the person's NEXUS, or start WebView2 with different switches on the same data folder. The bundle and
+/// the notifier keep using `APP_ID`.
 #[cfg(feature = "e2e-webview-debugging")]
 fn e2e_browser_args(context: &mut tauri::Context<tauri::Wry>) {
+    context.config_mut().identifier = format!("{APP_ID}.e2e");
     if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
         for w in context.config_mut().app.windows.iter_mut() {
             w.additional_browser_args = Some(format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection {extra}"));

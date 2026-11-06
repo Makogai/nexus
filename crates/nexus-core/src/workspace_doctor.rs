@@ -330,9 +330,9 @@ pub fn run(conn: &Connection, data_dir: &Path, ws: &Workspace, opts: &Options<'_
 fn ignored(root: &Path, rel: &str) -> bool {
     let rel = rel.trim_matches('/');
     if crate::workspace_sync::own_repository(root) {
-        let mut cmd = crate::proc::command("git");
-        cmd.current_dir(root).args(["check-ignore", "-q", "--no-index", "--", &format!("{rel}/")]);
-        return crate::proc::run(cmd, std::time::Duration::from_secs(10)).map(|o| o.success()).unwrap_or(false);
+        // Through git.rs (safe Git calls; directories asked without the trailing slash — see `git::ignored_paths`).
+        let dir = format!("{rel}/");
+        return crate::git::ignored_paths(root, std::slice::from_ref(&dir)).contains(&dir);
     }
     let text = std::fs::read_to_string(root.join(".gitignore")).unwrap_or_default();
     text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).any(|l| {

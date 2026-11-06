@@ -105,7 +105,11 @@ function toggle(path: string) {
 async function reviewCommit() {
   const paths = [...selected.value]
   const r = await run('review', () => api.syncReviewCommit(wsId.value!, paths))
-  if (r) commitReview.value = r
+  if (r) {
+    commitReview.value = r
+    // Claude's message for this work (or one NEXUS composed) — kept when you already wrote your own.
+    if (!commitMessage.value.trim()) commitMessage.value = r.suggestedMessage
+  }
 }
 
 async function commit() {
@@ -199,7 +203,7 @@ watch(wsId, () => {
 </script>
 
 <template>
-  <div class="page sync" data-sync-view :data-sync-state="st?.state ?? 'loading'">
+  <div class="page page-flex sync" data-sync-view :data-sync-state="st?.state ?? 'loading'">
     <div class="page-header">
       <div>
         <h1>Sync</h1>
@@ -235,9 +239,9 @@ watch(wsId, () => {
           <button class="btn btn-sm btn-ghost" data-sync-restore-open @click="showRestore">What does this machine need?</button>
           <button class="btn btn-sm btn-ghost" data-sync-clone-open @click="cloning = true">Open another from Git…</button>
         </div>
-        <p v-if="st.state === 'not-repo'" class="notice"><Info /> The workspace folder is not a Git repository of its own yet. Run <code>git init</code> in it and add a remote with your Git tool (for example a private repository) — then fetch, commit and push here.</p>
+        <p v-if="st.state === 'not-repo'" class="notice"><Info /> <span>The workspace folder is not a Git repository of its own yet. Run <code>git init</code> in it and add a remote with your Git tool (for example a private repository) — then fetch, commit and push here.</span></p>
         <p v-if="st.inProgress" class="notice notice-warn" data-sync-in-progress><TriangleAlert /> {{ st.inProgress }}</p>
-        <p v-if="st.readiness.repo && !st.identity" class="notice notice-warn"><TriangleAlert /> Git has no name and e-mail for commits here — set them with <code>git config user.name</code> and <code>user.email</code>. NEXUS does not invent an identity.</p>
+        <p v-if="st.readiness.repo && !st.identity" class="notice notice-warn"><TriangleAlert /> <span>Git has no name and e-mail for commits here — set them with <code>git config user.name</code> and <code>user.email</code>. NEXUS does not invent an identity.</span></p>
         <ul v-if="st.readiness.issues.length" class="issues">
           <li v-for="(i, n) in st.readiness.issues" :key="n" :class="`issue-${i.severity}`" :data-sync-issue="i.severity">
             <CircleAlert v-if="i.severity === 'error'" class="ic" /><TriangleAlert v-else-if="i.severity === 'warning'" class="ic" /><Info v-else class="ic" /> {{ i.message }}
@@ -351,7 +355,7 @@ watch(wsId, () => {
           </ul>
           <p v-if="commitReview.inspection.blocked" class="small">Leave the blocking files out (untick them) or remove what was found, then review again.</p>
         </div>
-        <textarea v-model="commitMessage" class="textarea message" rows="3" placeholder="Commit message" aria-label="Commit message" data-sync-message />
+        <textarea v-model="commitMessage" class="textarea message" rows="5" placeholder="Commit message" aria-label="Commit message" data-sync-message />
       </div>
       <template #footer>
         <button class="btn" @click="commitReview = null">Cancel</button>

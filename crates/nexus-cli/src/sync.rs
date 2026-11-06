@@ -57,10 +57,11 @@ pub enum SyncCmd {
     },
     /// Recent sync operations of this workspace.
     History,
-    /// The workspace's sync policy on this machine (manual, review, trusted) — or set it. Trusted needs --private (you
-    /// confirm the remote is private and approved) and is refused when your organisation's policy forbids it.
+    /// The workspace's sync policy on this machine (manual, review, trusted, autonomous) — or set it. Trusted and
+    /// autonomous need --private (you confirm the remote is private and approved) and are refused when your
+    /// organisation's policy forbids them.
     Policy {
-        #[arg(value_parser = ["manual", "review", "trusted"])]
+        #[arg(value_parser = ["manual", "review", "trusted", "autonomous"])]
         mode: Option<String>,
         #[arg(long)]
         private: bool,
@@ -265,6 +266,7 @@ fn run_inner(ctx: &Ctx, conn: &nexus_core::db::Connection, host_id: &str, c: Syn
                 let mode = match m.as_str() {
                     "review" => policy::Mode::Review,
                     "trusted" => policy::Mode::Trusted,
+                    "autonomous" => policy::Mode::Autonomous,
                     _ => policy::Mode::Manual,
                 };
                 policy::set(conn, &ws, mode, private, &policy::managed(&managed_path))?;
@@ -278,6 +280,7 @@ fn run_inner(ctx: &Ctx, conn: &nexus_core::db::Connection, host_id: &str, c: Syn
                 policy::Mode::Manual => "manual — nothing is committed or published until you review it",
                 policy::Mode::Review => "automatic with review — NEXUS asks when records are ready; you confirm the commit and push",
                 policy::Mode::Trusted => "trusted automatic — NEXUS publishes its records to the approved remote on its own",
+                policy::Mode::Autonomous => "autonomous — NEXUS commits and pushes every workspace change on its own when Claude finishes",
             };
             println!("{}: {mode}", ws.name);
             if let Some(t) = &v.policy.trust {
