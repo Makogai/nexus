@@ -102,6 +102,9 @@ async function archive() {
           :title="(s.status.detail ?? '') + (s.status.certainty === 'assumed' ? ' (not reported by Claude — NEXUS does not guess prompts)' : '')"
         >{{ attentionLabels[s.status.status] }}<template v-if="s.status.certainty === 'assumed'">?</template></span>
         <span v-if="s.taskId && s.integrations?.task" class="chip task-chip" :title="`Launched for task “${s.integrations.task.title}”`">Task: {{ s.integrations.task.title }}</span>
+        <span v-if="s.integrations?.learn?.folders?.length" class="chip" :title="`This learning session may also read: ${s.integrations.learn.folders.join(', ')}`" data-learn-folders-chip>
+          + {{ s.integrations.learn.folders.length }} folder{{ s.integrations.learn.folders.length === 1 ? '' : 's' }}
+        </span>
       </div>
       <div class="meta">
         <span :class="{ live: tone === 'live' }">{{ sessionStatus(s) }}</span>

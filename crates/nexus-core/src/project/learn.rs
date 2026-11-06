@@ -13,11 +13,15 @@
 //! Graphify stays optional and the person's choice: NEXUS types its offline, code-only build command into a terminal in
 //! the project folder for the person to run, and [`exclude_graph_output`] keeps `graphify-out/` out of Git through the
 //! clone's local exclude file (never a committed file).
+//!
+//! Extra context (ADR-0045): the person's **notes** go into the learning task (task text — it reaches Claude as data),
+//! and **folders** beyond the project — typically the repository the project lives in — are machine-local, checked
+//! ([`add_folder`]) and passed to the learning session only, as `--add-dir` with the read-only rule LEARN-8.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use serde::Serialize;
 
 use crate::error::{CoreError, Result};
@@ -25,8 +29,19 @@ use crate::knowledge::frontmatter::Value;
 use crate::knowledge::index::{self, Filter, Item};
 use crate::knowledge::service::{self, Author, CreateInput};
 use crate::knowledge::{Kind, store};
+use crate::paths::{self, Expect};
 use crate::workspace::Workspace;
 use crate::{git, project, toolchain};
+
+/// Folders a project's learning sessions may read besides the project (ADR-0045).
+pub const MAX_FOLDERS: usize = 5;
+/// The person's notes for the learning session.
+pub const MAX_NOTES_CHARS: usize = 2_000;
+/// The learning task's section with the person's notes — before NEXUS's map, so a shortened brief still carries them.
+const NOTES_HEADING: &str = "## Notes from the person";
+const MAP_HEADING: &str = "## NEXUS's map";
+/// Folder names whose contents never reach Claude as context: credentials and Claude's own configuration.
+const SENSITIVE_DIRS: [&str; 8] = [".ssh", ".aws", ".gnupg", ".kube", ".azure", ".docker", ".config", ".claude"];
 
 pub const GRAPH_DIR: &str = "graphify-out";
 /// The build NEXUS offers, both steps offline (Graphify 0.9.93 help, run on a synthetic repository 2026-11-05):
@@ -81,6 +96,26 @@ pub struct LearnTask {
     pub title: String,
     pub status: Option<String>,
     pub depth: Depth,
+    /// The person's notes in the task (its "Notes from the person" section).
+    pub notes: Option<String>,
+}
+
+/// A folder the learning session may read besides the project (ADR-0045).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnFolder {
+    pub path: String,
+    pub name: String,
+    /// The folder exists on this computer (a missing one is skipped at launch).
+    pub available: bool,
+}
+
+/// The Git repository the project's folder sits in — a monorepo or a wrapper repository — when there is one.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Surrounding {
+    pub path: String,
+    pub name: String,
 }
 
 /// How much a learning session may spend (ADR-0041): one Claude session in every case; the depth limits how many
@@ -108,9 +143,9 @@ pub struct DepthInfo {
 }
 
 impl DepthInfo {
-    fn of(d: Depth) -> DepthInfo {
+    fn of(d: Depth, folders: &[PathBuf]) -> DepthInfo {
         let b = d.budget();
-        DepthInfo { id: d, files: b.files, overview_words: b.overview_words, architecture_words: b.architecture_words, memories: b.memories, rules: rules(d) }
+        DepthInfo { id: d, files: b.files, overview_words: b.overview_words, architecture_words: b.architecture_words, memories: b.memories, rules: rules(d, folders) }
     }
 }
 
@@ -155,16 +190,17 @@ impl Depth {
     }
 }
 
-/// The learning session's rules (ADR-0041) for the system prompt: NEXUS-authored, built from the validated depth only
-/// — no task text (T22). Stable ids so they can be referred to; they hold even where the work profile asks for more.
-pub fn rules(depth: Depth) -> String {
+/// The learning session's rules (ADR-0041) for the system prompt: NEXUS-authored, built from the validated depth and
+/// the checked folders the person added on this machine (ADR-0045) only — no task text (T22). Stable ids so they can be
+/// referred to; they hold even where the work profile asks for more.
+pub fn rules(depth: Depth, folders: &[PathBuf]) -> String {
     let b = depth.budget();
     let files = match b.files {
         Some(n) => format!("open at most {n} files"),
         None => "no file limit, but read selectively".to_string(),
     };
-    format!(
-        "NEXUS learning session — rules LEARN-1 to LEARN-7 (they apply even where the work profile suggests reviews or more depth):\n\
+    let mut text = format!(
+        "NEXUS learning session — rules LEARN-1 to LEARN-{last} (they apply even where the work profile suggests reviews or more depth):\n\
          LEARN-1 Follow the {skill} skill for this session's task.\n\
          LEARN-2 Work alone in this session: do not start subagents, agent teams or multi-agent workflows unless the user asks for them.\n\
          LEARN-3 Read only: do not change, create or delete files in the repository, and do not run builds, tests or installs.\n\
@@ -178,7 +214,18 @@ pub fn rules(depth: Depth) -> String {
         aw = b.architecture_words,
         m0 = b.memories.0,
         m1 = b.memories.1,
-    )
+        last = if folders.is_empty() { 7 } else { 8 },
+    );
+    if !folders.is_empty() {
+        // Checked paths the person chose on this machine (no control characters or backticks, see `check_folder`).
+        let list = folders.iter().map(|f| format!("`{}`", f.display())).collect::<Vec<_>>().join(", ");
+        text.push_str(&format!(
+            "\nLEARN-8 Besides the project, the user lets you read these folders for context: {list}. Read only what explains this project \
+             (its README, CLAUDE.md, docs, shared code the project uses), within the same budget; never change them; name the folder when a \
+             statement in a draft comes from it."
+        ));
+    }
+    text
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -203,6 +250,10 @@ pub struct ProjectMap {
     pub depths: Vec<DepthInfo>,
     /// The built-in skill learning sessions get (`nexus:learn-project`).
     pub skill: &'static str,
+    /// Folders the learning session may also read (ADR-0045), chosen on this machine.
+    pub extra_folders: Vec<LearnFolder>,
+    /// The repository the project's folder sits in, offered as an extra folder.
+    pub surrounding: Option<Surrounding>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -330,22 +381,20 @@ pub fn map(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str)
     context.decisions = project_items(conn, ws, project_id, Kind::Decision)?.len();
     let tasks = project_items(conn, ws, project_id, Kind::Task)?;
     context.open_tasks = tasks.iter().filter(|t| t.status.as_deref() != Some("done")).count();
-    let task = tasks
-        .iter()
-        .filter(|t| t.status.as_deref() != Some("done") && labels(t).iter().any(|l| l == LEARN_LABEL))
-        .find_map(|t| Some(LearnTask { id: t.id.clone()?, title: t.title.clone(), status: t.status.clone(), depth: Depth::of_labels(&labels(t)).unwrap_or_default() }));
+    let task = tasks.iter().filter(|t| t.status.as_deref() != Some("done") && labels(t).iter().any(|l| l == LEARN_LABEL)).find_map(|t| {
+        Some(LearnTask {
+            id: t.id.clone()?,
+            title: t.title.clone(),
+            status: t.status.clone(),
+            depth: Depth::of_labels(&labels(t)).unwrap_or_default(),
+            notes: store::read(&t.path).ok().and_then(|(d, _)| notes_of(&d.body)),
+        })
+    });
 
-    let report = root.join(GRAPH_DIR).join("GRAPH_REPORT.md");
-    let built_ms = std::fs::metadata(&report).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64);
-    let graph = GraphStatus {
-        installed: toolchain::find("graphify").is_some(),
-        built: built_ms.is_some(),
-        report: built_ms.map(|_| format!("{GRAPH_DIR}/GRAPH_REPORT.md")),
-        built_ms,
-        ignored: git::ignored_paths(&root, &[format!("{GRAPH_DIR}/")]).contains(&format!("{GRAPH_DIR}/")),
-        command: GRAPH_COMMAND,
-    };
+    let graph = graph_status(&root);
     let drafts = open_draft_notes(conn, ws, project_id)?.len();
+    let extra_folders = self::folders(conn, project_id)?;
+    let launch_folders = checked(conn, &root, &extra_folders);
 
     Ok(ProjectMap {
         project_id: p.id.clone(),
@@ -363,9 +412,198 @@ pub fn map(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str)
         graph,
         task,
         drafts,
-        depths: Depth::ALL.into_iter().map(DepthInfo::of).collect(),
+        depths: Depth::ALL.into_iter().map(|d| DepthInfo::of(d, &launch_folders)).collect(),
         skill: crate::claude::builtin::LEARN_SKILL,
+        extra_folders,
+        surrounding: surrounding(&root),
     })
+}
+
+/// Whether the project's Graphify graph is built — cheap (a file's metadata and one ignore check), so the Learn tab can
+/// watch for a build the person runs in a terminal without reading the whole map again.
+pub fn graph(conn: &Connection, project_id: &str) -> Result<GraphStatus> {
+    let p = project::get(conn, project_id)?;
+    let root = p.local_path.filter(|_| p.available).ok_or_else(|| CoreError::invalid(format!("{} is not on this computer", p.name)))?;
+    Ok(graph_status(&root))
+}
+
+fn graph_status(root: &Path) -> GraphStatus {
+    let report = root.join(GRAPH_DIR).join("GRAPH_REPORT.md");
+    let built_ms = std::fs::metadata(&report).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64);
+    GraphStatus {
+        installed: toolchain::find("graphify").is_some(),
+        built: built_ms.is_some(),
+        report: built_ms.map(|_| format!("{GRAPH_DIR}/GRAPH_REPORT.md")),
+        built_ms,
+        ignored: git::ignored_paths(root, &[format!("{GRAPH_DIR}/")]).contains(&format!("{GRAPH_DIR}/")),
+        command: GRAPH_COMMAND,
+    }
+}
+
+/// The repository the project's folder sits in (its parent folder belongs to another Git working tree).
+fn surrounding(root: &Path) -> Option<Surrounding> {
+    let top = git::toplevel(root.parent()?)?;
+    (root.starts_with(&top) && top != root).then(|| Surrounding {
+        name: top.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| top.display().to_string()),
+        path: top.display().to_string(),
+    })
+}
+
+// ---- extra folders (ADR-0045) ---------------------------------------------------------------------------------------
+
+/// The folders the person added for the project's learning sessions, oldest first.
+pub fn folders(conn: &Connection, project_id: &str) -> Result<Vec<LearnFolder>> {
+    let mut stmt = conn.prepare("SELECT path FROM learn_folders WHERE project_id = ?1 ORDER BY added_at, path")?;
+    let paths = stmt.query_map(params![project_id], |r| r.get::<_, String>(0))?.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(paths
+        .into_iter()
+        .map(|path| {
+            let p = Path::new(&path);
+            LearnFolder { name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone()), available: p.is_dir(), path }
+        })
+        .collect())
+}
+
+/// Let the project's learning sessions read `raw` too. The folder must exist and pass [`check_folder`]; adding one
+/// twice is a no-op.
+pub fn add_folder(conn: &Connection, project_id: &str, raw: &str) -> Result<Vec<LearnFolder>> {
+    let root = project_root(conn, project_id)?;
+    let dir = check_folder(conn, &root, raw)?;
+    let current = folders(conn, project_id)?;
+    if current.iter().any(|f| Path::new(&f.path) == dir) {
+        return Ok(current);
+    }
+    if current.len() >= MAX_FOLDERS {
+        return Err(CoreError::invalid(format!("at most {MAX_FOLDERS} folders — remove one first")));
+    }
+    conn.execute("INSERT INTO learn_folders(project_id, path, added_at) VALUES (?1, ?2, ?3)", params![project_id, dir.display().to_string(), crate::now_ms()])?;
+    folders(conn, project_id)
+}
+
+pub fn remove_folder(conn: &Connection, project_id: &str, path: &str) -> Result<Vec<LearnFolder>> {
+    conn.execute("DELETE FROM learn_folders WHERE project_id = ?1 AND path = ?2", params![project_id, path])?;
+    folders(conn, project_id)
+}
+
+/// The folders a learning session of the project gets as `--add-dir`: the stored ones that exist and still pass the
+/// check (a folder can change after it was added).
+pub fn session_folders(conn: &Connection, project_id: &str) -> Vec<PathBuf> {
+    let Ok(root) = project_root(conn, project_id) else { return Vec::new() };
+    folders(conn, project_id).map(|f| checked(conn, &root, &f)).unwrap_or_default()
+}
+
+fn checked(conn: &Connection, root: &Path, folders: &[LearnFolder]) -> Vec<PathBuf> {
+    folders.iter().filter(|f| f.available).filter_map(|f| check_folder(conn, root, &f.path).ok()).collect()
+}
+
+fn project_root(conn: &Connection, project_id: &str) -> Result<PathBuf> {
+    let p = project::get(conn, project_id)?;
+    p.local_path.filter(|_| p.available).ok_or_else(|| CoreError::invalid(format!("{} is not on this computer", p.name)))
+}
+
+/// A folder Claude may read for context: an existing directory outside the project, not a drive, not the home folder
+/// (or above it), never a credentials folder or a Claude configuration folder, and with a path NEXUS can quote in the
+/// rules (no control characters or backticks).
+fn check_folder(conn: &Connection, project_root: &Path, raw: &str) -> Result<PathBuf> {
+    let dir = paths::validate_user_path(raw, Expect::ExistingDir)?;
+    if dir.display().to_string().chars().any(|c| c.is_control() || c == '`') {
+        return Err(CoreError::invalid("this folder's path has characters NEXUS does not pass to Claude"));
+    }
+    if dir.parent().is_none() {
+        return Err(CoreError::invalid("a whole drive is too broad — choose the folder that explains the project"));
+    }
+    if let Ok(home) = paths::home_dir()
+        && dunce::canonicalize(&home).unwrap_or(home).starts_with(&dir)
+    {
+        return Err(CoreError::invalid("your home folder (or a folder that contains it) is too broad — choose the folder that explains the project"));
+    }
+    if dir.starts_with(project_root) {
+        return Err(CoreError::invalid("this folder is part of the project already"));
+    }
+    if dir.components().any(|c| SENSITIVE_DIRS.iter().any(|s| c.as_os_str().eq_ignore_ascii_case(s))) {
+        return Err(CoreError::invalid("folders with credentials or Claude's configuration are never given to Claude as context"));
+    }
+    for profile in crate::claude::profile::list(conn, true)? {
+        if let Some(cfg) = profile.config_dir {
+            let cfg = dunce::canonicalize(&cfg).unwrap_or(cfg);
+            if cfg.starts_with(&dir) || dir.starts_with(&cfg) {
+                return Err(CoreError::invalid(format!("this folder holds the configuration of the Claude profile “{}” — never given to Claude as context", profile.name)));
+            }
+        }
+    }
+    Ok(dir)
+}
+
+// ---- the person's notes ----------------------------------------------------------------------------------------------
+
+/// The notes section of a learning task's description, if it has one.
+fn notes_of(body: &str) -> Option<String> {
+    let (desc, _) = split_at_log(body);
+    let start = heading_at(desc, NOTES_HEADING)?;
+    let text = &desc[start + NOTES_HEADING.len()..];
+    let end = next_heading(text).unwrap_or(text.len());
+    Some(text[..end].trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// `body` with its notes section replaced by `notes` (removed when empty) — placed before NEXUS's map and always above
+/// the log, so the part of the task Claude reads carries it.
+fn with_notes(body: &str, notes: &str) -> String {
+    let (desc, log) = split_at_log(body);
+    let mut desc = desc.to_string();
+    if let Some(start) = heading_at(&desc, NOTES_HEADING) {
+        let after = start + NOTES_HEADING.len();
+        let end = next_heading(&desc[after..]).map(|e| after + e).unwrap_or(desc.len());
+        desc.replace_range(start..end, "");
+    }
+    let notes = clean_notes(notes);
+    if !notes.is_empty() {
+        let section = format!("{NOTES_HEADING}\n\n{notes}\n\n");
+        match heading_at(&desc, MAP_HEADING) {
+            Some(at) => desc.insert_str(at, &section),
+            None => {
+                let trimmed = desc.trim_end().len();
+                desc.truncate(trimmed);
+                desc.push_str(&format!("\n\n{}", section.trim_end()));
+            }
+        }
+    }
+    let desc = desc.trim_end();
+    match log {
+        Some(log) => format!("{desc}\n\n{log}"),
+        None => format!("{desc}\n"),
+    }
+}
+
+/// The notes as plain task text: bounded, no control characters, and no line that would read as a heading or a
+/// checklist item of the task.
+fn clean_notes(notes: &str) -> String {
+    let text: String = notes.replace("\r\n", "\n").chars().filter(|c| *c == '\n' || *c == '\t' || !c.is_control()).take(MAX_NOTES_CHARS).collect();
+    text.trim()
+        .lines()
+        .map(|l| {
+            let t = l.trim_start();
+            if t.starts_with('#') || t.starts_with("- [") || t.starts_with("* [") { format!("\\{t}") } else { l.to_string() }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// (description, `## Log` section) of a task body.
+fn split_at_log(body: &str) -> (&str, Option<&str>) {
+    match heading_at(body, "## Log") {
+        Some(i) => (&body[..i], Some(&body[i..])),
+        None => (body, None),
+    }
+}
+
+/// Byte position of `heading` where it starts a line.
+fn heading_at(text: &str, heading: &str) -> Option<usize> {
+    text.match_indices(heading).map(|(i, _)| i).find(|i| *i == 0 || text[..*i].ends_with('\n'))
+}
+
+/// Byte position of the next `## ` heading line in `text` (which starts inside a section).
+fn next_heading(text: &str) -> Option<usize> {
+    text.match_indices("\n## ").map(|(i, _)| i + 1).next()
 }
 
 /// The checklist step for a built graph (also added to a learning task created before the graph existed).
@@ -411,7 +649,8 @@ fn brief(m: &ProjectMap) -> String {
 }
 
 /// Create (or reuse the open) learning task for the project at `depth`; the desktop then launches Claude on it.
-pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str, depth: Depth) -> Result<LearnTask> {
+/// `notes` (when given) replace the task's "Notes from the person" section; empty notes remove it.
+pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &str, depth: Depth, notes: Option<&str>) -> Result<LearnTask> {
     let m = map(conn, data_dir, ws, project_id)?;
     if let Some(mut t) = m.task.clone() {
         if m.graph.built {
@@ -421,12 +660,24 @@ pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &st
             set_depth(conn, data_dir, ws, &t.id, depth)?;
             t.depth = depth;
         }
+        if let Some(notes) = notes
+            && t.notes.as_deref().unwrap_or("") != clean_notes(notes)
+        {
+            let item = index::get(conn, &ws.id, &t.id)?;
+            let privacy = index::root_privacy(conn, &item.path)?;
+            store::update(&item.path, None, privacy, |d| {
+                d.body = with_notes(&d.body, notes);
+                Ok(())
+            })?;
+            service::refresh(conn, data_dir, ws)?;
+            t.notes = Some(clean_notes(notes)).filter(|n| !n.is_empty());
+        }
         return Ok(t);
     }
     let input = CreateInput {
         kind: "task".into(),
         title: format!("Learn {} — build its knowledge base", m.name),
-        body: brief(&m),
+        body: with_notes(&brief(&m), notes.unwrap_or("")),
         project_id: Some(project_id.to_string()),
         priority: Some("medium".into()),
         status: Some("ready".into()),
@@ -434,7 +685,7 @@ pub fn start(conn: &Connection, data_dir: &Path, ws: &Workspace, project_id: &st
         ..Default::default()
     };
     let item = service::create(conn, data_dir, ws, &input, Author::Human)?;
-    Ok(LearnTask { id: item.id.clone().unwrap_or_default(), title: item.title, status: item.status, depth })
+    Ok(LearnTask { id: item.id.clone().unwrap_or_default(), title: item.title, status: item.status, depth, notes: Some(clean_notes(notes.unwrap_or(""))).filter(|n| !n.is_empty()) })
 }
 
 /// The learning task's depth label, replaced (the person chose another depth before starting again).
@@ -668,10 +919,10 @@ mod tests {
         assert!(!m.graph.built && m.task.is_none());
 
         // The learning task carries the map as its brief; starting again reuses it.
-        let task = start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap();
+        let task = start(&conn, &data, &ws, &p.id, Depth::Standard, None).unwrap();
         let brief = service::read(&conn, &ws, &task.id, 50_000).unwrap().body;
         assert!(brief.contains("draft_project_document") && brief.contains("TypeScript (2)") && brief.contains("do not change any file"), "{brief}");
-        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap().id, task.id);
+        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard, None).unwrap().id, task.id);
 
         // Claude drafts; the person applies one and discards the other.
         let ov = record_draft(&conn, &data, &ws, &p.id, "overview", "## What it is\n\nA web shop (verified: src/main.ts).").unwrap();
@@ -703,7 +954,7 @@ mod tests {
         assert!(!finish_if_reviewed(&conn, &data, &ws, &p.id).unwrap(), "nothing left to close");
 
         // Learning again starts a new task (before any graph exists).
-        let task = start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap();
+        let task = start(&conn, &data, &ws, &p.id, Depth::Standard, None).unwrap();
         assert!(!service::read(&conn, &ws, &task.id, 50_000).unwrap().body.contains("GRAPH_REPORT"));
 
         // graphify-out/ is excluded in this clone only (nothing committed changes).
@@ -718,8 +969,8 @@ mod tests {
         assert!(m.graph.built && m.graph.report.as_deref() == Some("graphify-out/GRAPH_REPORT.md"));
 
         // A graph built after the task was created joins its checklist, after the first step, once.
-        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap().id, task.id);
-        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard).unwrap().id, task.id);
+        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard, None).unwrap().id, task.id);
+        assert_eq!(start(&conn, &data, &ws, &p.id, Depth::Standard, None).unwrap().id, task.id);
         let brief = service::read(&conn, &ws, &task.id, 50_000).unwrap().body;
         assert_eq!(brief.matches("graphify-out/GRAPH_REPORT.md").count(), 1, "{brief}");
         let steps: Vec<&str> = brief.lines().filter(|l| l.starts_with("- [")).collect();
@@ -729,7 +980,7 @@ mod tests {
         // The depth is a label on the task; choosing another one replaces it (one depth label, the learn label stays).
         let labels_of = |id: &str| index::get(&conn, &ws.id, id).map(|i| labels(&i)).unwrap();
         assert_eq!(Depth::of_labels(&labels_of(&task.id)), Some(Depth::Standard));
-        let t = start(&conn, &data, &ws, &p.id, Depth::Quick).unwrap();
+        let t = start(&conn, &data, &ws, &p.id, Depth::Quick, None).unwrap();
         assert_eq!((t.id.as_str(), t.depth), (task.id.as_str(), Depth::Quick));
         let l = labels_of(&task.id);
         assert!(l.contains(&LEARN_LABEL.to_string()) && l.contains(&"learn-quick".to_string()) && !l.contains(&"learn-standard".to_string()), "{l:?}");
@@ -744,9 +995,9 @@ mod tests {
         assert_eq!(Depth::of_labels(&s(&["learn", "learn-deep"])), Some(Depth::Deep));
         assert_eq!(Depth::parse(" Quick "), Some(Depth::Quick));
         assert_eq!(Depth::parse("huge"), None);
-        let quick = rules(Depth::Quick);
+        let quick = rules(Depth::Quick, &[]);
         assert!(quick.contains("LEARN-2") && quick.contains("open at most 20 files") && quick.contains("at most 250 words") && quick.contains("nexus:learn-project"), "{quick}");
-        assert!(rules(Depth::Deep).contains("no file limit"));
+        assert!(rules(Depth::Deep, &[]).contains("no file limit"));
         assert_eq!((1..=7).filter(|i| quick.contains(&format!("LEARN-{i} "))).count(), 7, "seven stable rule ids");
         assert!(quick.chars().count() < 1200, "compact: {} chars", quick.chars().count());
     }
@@ -756,5 +1007,131 @@ mod tests {
         assert_eq!(with_step_after_first("Intro\n\n- [ ] a\n- [x] b\n", "- [ ] g"), "Intro\n\n- [ ] a\n- [ ] g\n- [x] b\n");
         assert_eq!(with_step_after_first("Only text.", "- [ ] g"), "Only text.\n\n- [ ] g\n");
         assert_eq!(with_step_after_first("", "- [ ] g"), "- [ ] g\n");
+    }
+
+    /// ADR-0045: the person's notes live in the learning task, before NEXUS's map and above the log (the part Claude
+    /// reads); they are plain text — never a heading or a checklist item of the task.
+    #[test]
+    fn notes_go_before_the_map_and_above_the_log() {
+        let brief = "Intro.\n\n- [ ] Read\n\n## NEXUS's map (read by NEXUS)\n\n- Tracked files: 3\n";
+        let with = with_notes(brief, "drivebay is one app of the maiw monorepo.\r\n## Log\n- [ ] not a step\n\u{7}bell");
+        assert_eq!(
+            with,
+            "Intro.\n\n- [ ] Read\n\n## Notes from the person\n\ndrivebay is one app of the maiw monorepo.\n\\## Log\n\\- [ ] not a step\nbell\n\n## NEXUS's map (read by NEXUS)\n\n- Tracked files: 3\n"
+        );
+        assert_eq!(notes_of(&with).as_deref(), Some("drivebay is one app of the maiw monorepo.\n\\## Log\n\\- [ ] not a step\nbell"));
+        assert_eq!(crate::knowledge::tasks::split_log(&with).1.len(), 0, "no log was made up");
+
+        // Replaced in place, kept above an existing log, removed when empty.
+        let logged = format!("{with}\n## Log\n- 2026-11-06 [claude] read README.md\n");
+        let replaced = with_notes(&logged, "Shared code is in maiw/packages.");
+        assert!(replaced.contains("## Notes from the person\n\nShared code is in maiw/packages.\n\n## NEXUS's map") && !replaced.contains("drivebay is one app"), "{replaced}");
+        assert!(replaced.ends_with("## Log\n- 2026-11-06 [claude] read README.md\n"), "{replaced}");
+        let (desc, log) = crate::knowledge::tasks::split_log(&replaced);
+        assert!(desc.contains("maiw/packages") && log.len() == 1);
+        let removed = with_notes(&replaced, "  ");
+        assert!(!removed.contains("Notes from the person") && notes_of(&removed).is_none() && removed.contains("## NEXUS's map") && removed.contains("## Log"), "{removed}");
+        assert_eq!(with_notes("Only text.", "n"), "Only text.\n\n## Notes from the person\n\nn\n", "no map: at the end");
+        assert_eq!(clean_notes(&"x".repeat(MAX_NOTES_CHARS + 50)).chars().count(), MAX_NOTES_CHARS);
+    }
+
+    /// ADR-0045: extra folders are checked, machine-local and bounded; the repository a project sits in is offered;
+    /// the notes reach the learning task through `start`.
+    #[test]
+    fn extra_folders_are_checked_and_the_surrounding_repository_is_offered() {
+        let t = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(t.path()).unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        let data = base.join("data");
+        let ws = crate::workspace::create(&conn, base.join("ws").to_str().unwrap(), "W", "").unwrap();
+        // A wrapper repository with the app as its own repository inside (like maiw/apps/drivebay).
+        let mono = base.join("maiw");
+        let app = mono.join("apps").join("drivebay");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(mono.join("README.md"), "# maiw\n").unwrap();
+        std::fs::write(app.join("main.ts"), "export {}\n").unwrap();
+        git(&mono, &["init", "-q"]);
+        git(&app, &["init", "-q"]);
+        git(&app, &["add", "-A"]);
+        git(&app, &["commit", "-qm", "init"]);
+        let p = project::register_with_context(&conn, &data, &ws.id, app.to_str().unwrap(), None).unwrap();
+
+        let m = map(&conn, &data, &ws, &p.id).unwrap();
+        assert_eq!(m.surrounding, Some(Surrounding { path: mono.display().to_string(), name: "maiw".into() }));
+        assert!(m.extra_folders.is_empty() && !m.depths[0].rules.contains("LEARN-8"));
+        let alone = base.join("alone");
+        std::fs::create_dir_all(&alone).unwrap();
+        git(&alone, &["init", "-q"]);
+        assert_eq!(surrounding(&alone), None, "a repository that sits in no other repository");
+
+        let added = add_folder(&conn, &p.id, mono.to_str().unwrap()).unwrap();
+        assert_eq!(added, [LearnFolder { path: mono.display().to_string(), name: "maiw".into(), available: true }]);
+        assert_eq!(add_folder(&conn, &p.id, mono.to_str().unwrap()).unwrap().len(), 1, "adding twice is a no-op");
+        let m = map(&conn, &data, &ws, &p.id).unwrap();
+        assert!(m.depths.iter().all(|d| d.rules.contains(&format!("`{}`", mono.display()))), "the rules the Learn tab shows are the session's");
+
+        // Refused: the project itself or a folder in it, a drive, the home folder, credentials, a Claude profile's
+        // configuration, and anything that is not an existing folder.
+        let refuse = |raw: &Path, why: &str| {
+            let e = add_folder(&conn, &p.id, raw.to_str().unwrap()).unwrap_err().to_string();
+            assert!(e.contains(why), "{raw:?}: {e}");
+        };
+        refuse(&app, "part of the project");
+        refuse(&app.join(".git"), "part of the project");
+        refuse(Path::new(base.ancestors().last().unwrap()), "whole drive");
+        refuse(&paths::home_dir().unwrap(), "home folder");
+        let ssh = base.join("keys").join(".ssh");
+        std::fs::create_dir_all(&ssh).unwrap();
+        refuse(&ssh, "credentials");
+        let cfg = base.join("profiles").join("work");
+        std::fs::create_dir_all(&cfg).unwrap();
+        crate::claude::profile::create_managed(&conn, &crate::claude::profile::ProfileInput { name: "Work".into(), config_dir: Some(cfg.to_string_lossy().into_owned()), ..Default::default() }, &base.join("home")).unwrap();
+        refuse(&base.join("profiles"), "Claude profile “Work”");
+        refuse(&cfg, "Claude profile “Work”");
+        refuse(&base.join("missing"), "");
+        for i in 0..MAX_FOLDERS - 1 {
+            let d = base.join(format!("extra{i}"));
+            std::fs::create_dir_all(&d).unwrap();
+            add_folder(&conn, &p.id, d.to_str().unwrap()).unwrap();
+        }
+        let one_more = base.join("one-more");
+        std::fs::create_dir_all(&one_more).unwrap();
+        refuse(&one_more, &format!("at most {MAX_FOLDERS}"));
+
+        // Removed again; a folder that disappeared is listed as missing and not given to sessions.
+        assert_eq!(remove_folder(&conn, &p.id, &base.join("extra0").display().to_string()).unwrap().len(), MAX_FOLDERS - 1);
+        std::fs::remove_dir(base.join("extra1")).unwrap();
+        assert!(folders(&conn, &p.id).unwrap().iter().any(|f| f.name == "extra1" && !f.available));
+        let given = session_folders(&conn, &p.id);
+        assert_eq!(given.len(), MAX_FOLDERS - 2);
+        assert_eq!(given[0], mono);
+
+        // The notes reach the learning task (and change with it); the task the map shows carries them.
+        let task = start(&conn, &data, &ws, &p.id, Depth::Quick, Some("drivebay is one app of maiw.")).unwrap();
+        assert_eq!(task.notes.as_deref(), Some("drivebay is one app of maiw."));
+        let body = service::read(&conn, &ws, &task.id, 50_000).unwrap().body;
+        assert!(body.find("## Notes from the person").unwrap() < body.find("## NEXUS's map").unwrap(), "{body}");
+        let again = start(&conn, &data, &ws, &p.id, Depth::Quick, Some("Shared code: maiw/packages.")).unwrap();
+        assert_eq!(again.id, task.id);
+        assert_eq!(map(&conn, &data, &ws, &p.id).unwrap().task.unwrap().notes.as_deref(), Some("Shared code: maiw/packages."));
+        start(&conn, &data, &ws, &p.id, Depth::Quick, None).unwrap();
+        assert_eq!(map(&conn, &data, &ws, &p.id).unwrap().task.unwrap().notes.as_deref(), Some("Shared code: maiw/packages."), "no notes given: kept");
+    }
+
+    #[test]
+    fn the_graph_status_is_read_on_its_own() {
+        let t = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(t.path()).unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        let ws = crate::workspace::create(&conn, base.join("ws").to_str().unwrap(), "W", "").unwrap();
+        let repo = base.join("r");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        let p = project::register(&conn, &ws.id, repo.to_str().unwrap(), None).unwrap();
+        assert!(!graph(&conn, &p.id).unwrap().built);
+        std::fs::create_dir_all(repo.join(GRAPH_DIR)).unwrap();
+        std::fs::write(repo.join(GRAPH_DIR).join("GRAPH_REPORT.md"), "# Report\n").unwrap();
+        let g = graph(&conn, &p.id).unwrap();
+        assert!(g.built && g.built_ms.is_some() && g.report.as_deref() == Some("graphify-out/GRAPH_REPORT.md"));
     }
 }

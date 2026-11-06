@@ -101,6 +101,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
     })?;
     let settings_path = prepared.settings.clone();
     let plugin_dirs = prepared.plugin_dirs.clone();
+    let add_dirs = prepared.add_dirs.clone();
     let claude_name = prepared.claude_name.clone().unwrap_or_else(|| plan.title.clone());
     let integrations = prepared.integrations;
     let spec = launch::build(
@@ -121,6 +122,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             settings: settings_path.as_deref(),
             context_prompt: prepared.prompt.as_deref(),
             plugin_dirs: &plugin_dirs,
+            add_dirs: &add_dirs,
             first_prompt: None,
         },
         &base_env,

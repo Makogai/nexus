@@ -457,7 +457,7 @@ export interface SessionView {
     task?: { id: string; title: string; status: string; delivery: 'session-start' | 'tools' | 'none' }
     isolation?: { claudeMdExcludes: string[] }
     /** A learning session (ADR-0041): its depth and the built-in skill it got (or why not). */
-    learn?: { depth: LearnDepth; skill: string | null; withheld: string | null }
+    learn?: { depth: LearnDepth; skill: string | null; withheld: string | null; folders?: string[] }
   } | null
   turns: number
   prompts: number
@@ -1837,6 +1837,24 @@ export interface LearnTask {
   title: string
   status: string | null
   depth: LearnDepth
+  /** The person's notes in the task ("Notes from the person"). */
+  notes: string | null
+}
+
+export interface LearnGraph {
+  installed: boolean
+  built: boolean
+  report: string | null
+  builtMs: number | null
+  ignored: boolean
+  command: string
+}
+
+/** A folder the learning session may read besides the project (ADR-0045), chosen on this machine. */
+export interface LearnFolder {
+  path: string
+  name: string
+  available: boolean
 }
 
 export interface ProjectMap {
@@ -1861,8 +1879,12 @@ export interface ProjectMap {
     decisions: number
     openTasks: number
   }
-  graph: { installed: boolean; built: boolean; report: string | null; builtMs: number | null; ignored: boolean; command: string }
+  graph: LearnGraph
   task: LearnTask | null
+  /** Folders the learning session may also read (ADR-0045). */
+  extraFolders: LearnFolder[]
+  /** The repository the project's folder sits in (a monorepo or wrapper repository), offered as an extra folder. */
+  surrounding: { path: string; name: string } | null
   /** The depths to choose from, with their budgets and the exact rules a learning session gets. */
   depths: LearnDepthInfo[]
   /** The built-in skill learning sessions get. */

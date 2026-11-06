@@ -2,10 +2,12 @@
 // Learn a project (W4): build its knowledge base in reviewed steps. NEXUS maps what it can read itself (no model,
 // nothing executed); a guided Claude session drafts the overview and the architecture summary and records memories;
 // the person decides what enters the knowledge base. Graphify is optional: the person runs its offline build in a
-// terminal NEXUS prepares.
-import { computed, onMounted, ref, watch } from 'vue'
+// terminal NEXUS prepares, and the tab watches for the report. Extra context (ADR-0045): notes for Claude go into the
+// learning task; folders it may also read (e.g. the repository the project lives in) stay on this computer.
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { BookOpenCheck, Check, FileSearch, GraduationCap, Lightbulb, Network, RefreshCw, Sparkles, X } from '@lucide/vue'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { BookOpenCheck, Check, FileSearch, Folder, FolderPlus, GraduationCap, Lightbulb, Network, RefreshCw, Sparkles, X } from '@lucide/vue'
 import { api, toIpcError } from '../lib/ipc'
 import { relativeTime } from '../lib/format'
 import { typeIntoTerminal } from '../lib/terminal'
@@ -27,6 +29,15 @@ const error = ref<string | null>(null)
 /** How much the learning session may spend (ADR-0041); follows the open learning task's depth. */
 const depth = ref<LearnDepth>('standard')
 const showRules = ref(false)
+/** Notes for Claude, saved into the learning task when the session starts. */
+const notes = ref('')
+const notesTouched = ref(false)
+const NOTES_MAX = 2000
+/** After "Build", the tab watches for graphify-out/GRAPH_REPORT.md (cheap check) until this time. */
+const graphWatchUntil = ref(0)
+const checkingGraph = ref(false)
+let graphTimer: number | null = null
+let lastLoad = 0
 const depthInfo = computed(() => map.value?.depths.find((d) => d.id === depth.value) ?? null)
 const depthNames: Record<LearnDepth, string> = { quick: 'Quick', standard: 'Standard', deep: 'Deep' }
 
@@ -35,9 +46,11 @@ async function load() {
   if (!ws) return
   busy.value = true
   error.value = null
+  lastLoad = Date.now()
   try {
     ;[map.value, drafts.value] = await Promise.all([api.projectLearnMap(ws.id, props.projectId), api.projectLearnDrafts(ws.id, props.projectId)])
     if (map.value.task) depth.value = map.value.task.depth
+    if (!notesTouched.value) notes.value = map.value.task?.notes ?? ''
     open.value = drafts.value[0]?.id ?? null
   } catch (e) {
     error.value = toIpcError(e).message
@@ -64,7 +77,8 @@ async function startSession() {
   const ws = workspaces.active
   if (!ws) return
   try {
-    const task = await api.projectLearnStart(ws.id, props.projectId, depth.value)
+    const task = await api.projectLearnStart(ws.id, props.projectId, depth.value, notes.value)
+    notesTouched.value = false
     app.openLaunch(props.projectId, null, { id: task.id, title: task.title, projectId: props.projectId }, { kickoff: true })
     await load()
   } catch (e) {
@@ -79,10 +93,86 @@ async function buildGraph() {
     const added = await api.projectLearnExcludeGraph(props.projectId)
     if (added) app.toast('info', 'graphify-out/ is now ignored in this clone (.git/info/exclude — not committed).')
     await typeIntoTerminal(m.graph.command, { projectId: props.projectId })
+    graphWatchUntil.value = Date.now() + 30 * 60_000
+    startGraphTimer()
   } catch (e) {
     app.toast('error', toIpcError(e).message)
   }
 }
+
+/** The tab is watching for a graph build the person runs in a terminal. */
+const watchingGraph = ref(false)
+
+function startGraphTimer() {
+  stopGraphTimer()
+  graphTimer = window.setInterval(() => void checkGraph(false), 4000)
+  watchingGraph.value = true
+}
+
+function stopGraphTimer() {
+  if (graphTimer !== null) window.clearInterval(graphTimer)
+  graphTimer = null
+  watchingGraph.value = false
+}
+
+/** Cheap check for a (re)built graph; a new report reloads the map. `manual`: the person asked, so say the result. */
+async function checkGraph(manual: boolean) {
+  const m = map.value
+  if (!m || checkingGraph.value) return
+  checkingGraph.value = true
+  try {
+    const g = await api.projectLearnGraph(props.projectId)
+    if (g.built && g.builtMs !== m.graph.builtMs) {
+      graphWatchUntil.value = 0
+      stopGraphTimer()
+      await load()
+      app.toast('success', 'The graph is ready — the learning session reads it first.')
+    } else {
+      m.graph = g
+      if (manual) app.toast('info', g.built ? 'The graph is up to date.' : 'No graph yet — Graphify writes graphify-out/GRAPH_REPORT.md when the build finishes.')
+    }
+  } catch (e) {
+    if (manual) app.toast('error', toIpcError(e).message)
+    stopGraphTimer()
+  } finally {
+    checkingGraph.value = false
+    if (graphTimer !== null && Date.now() > graphWatchUntil.value) stopGraphTimer()
+  }
+}
+
+/** Coming back to NEXUS (e.g. from another window): look for a graph built meanwhile. */
+function onWindowFocus() {
+  if (map.value && graphTimer === null) void checkGraph(false)
+}
+
+async function addFolder(path?: string) {
+  let dir = path
+  if (!dir) {
+    const picked = await openDialog({ directory: true, title: 'A folder Claude may read while learning this project' })
+    if (typeof picked !== 'string') return
+    dir = picked
+  }
+  try {
+    await api.projectLearnAddFolder(props.projectId, dir)
+    await load()
+  } catch (e) {
+    app.toast('error', `Not added: ${toIpcError(e).message}`)
+  }
+}
+
+async function removeFolder(path: string) {
+  try {
+    await api.projectLearnRemoveFolder(props.projectId, path)
+    await load()
+  } catch (e) {
+    app.toast('error', toIpcError(e).message)
+  }
+}
+
+const offerSurrounding = computed(() => {
+  const m = map.value
+  return m?.surrounding && !m.extraFolders.some((f) => f.path === m.surrounding!.path) ? m.surrounding : null
+})
 
 async function decide(d: LearnDraft, apply: boolean) {
   const ws = workspaces.active
@@ -117,8 +207,33 @@ const steps = computed(() => {
   ]
 })
 
-onMounted(load)
-watch(() => props.projectId, load)
+onMounted(() => {
+  void load()
+  window.addEventListener('focus', onWindowFocus)
+})
+// The project page is kept alive: coming back to it (e.g. from the terminal) reads the project again.
+onActivated(() => {
+  window.addEventListener('focus', onWindowFocus)
+  if (Date.now() - lastLoad > 1500) void load()
+  if (graphWatchUntil.value > Date.now()) startGraphTimer()
+})
+onDeactivated(() => {
+  window.removeEventListener('focus', onWindowFocus)
+  stopGraphTimer()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', onWindowFocus)
+  stopGraphTimer()
+})
+watch(
+  () => props.projectId,
+  () => {
+    notesTouched.value = false
+    graphWatchUntil.value = 0
+    stopGraphTimer()
+    void load()
+  },
+)
 </script>
 
 <template>
@@ -168,12 +283,19 @@ watch(() => props.projectId, load)
         <section class="card" data-learn-graph>
           <h2 class="card-title"><Network /> Knowledge graph <span class="faint small">Graphify · optional</span></h2>
           <template v-if="map.graph.built">
-            <p class="small">Graph ready: <code>{{ map.graph.report }}</code><template v-if="map.graph.builtMs"> · built {{ relativeTime(map.graph.builtMs) }}</template>. The learning session reads it first.</p>
-            <button class="btn btn-sm" data-learn-graph-build @click="buildGraph"><RefreshCw /> Rebuild in a terminal</button>
+            <p class="small" data-learn-graph-ready>Graph ready: <code>{{ map.graph.report }}</code><template v-if="map.graph.builtMs"> · built {{ relativeTime(map.graph.builtMs) }}</template>. The learning session reads it first.</p>
+            <div class="row">
+              <button class="btn btn-sm" data-learn-graph-build @click="buildGraph"><RefreshCw /> Rebuild in a terminal</button>
+              <span v-if="watchingGraph" class="faint small" data-learn-graph-watching>Watching for the new report…</span>
+            </div>
           </template>
           <template v-else-if="map.graph.installed">
             <p class="small">Graphify can turn the code into a queryable graph for Claude. NEXUS types <code>{{ map.graph.command }}</code> into a terminal in the project — code-only, it runs fully offline — and you press Enter. <code>graphify-out/</code> is kept out of Git in this clone.</p>
-            <button class="btn btn-sm btn-primary" data-learn-graph-build @click="buildGraph"><Network /> Build the graph in a terminal</button>
+            <div class="row">
+              <button class="btn btn-sm btn-primary" data-learn-graph-build @click="buildGraph"><Network /> Build the graph in a terminal</button>
+              <button class="btn btn-sm btn-ghost" :disabled="checkingGraph" data-learn-graph-check @click="checkGraph(true)"><RefreshCw :class="{ spin: checkingGraph }" /> Check again</button>
+            </div>
+            <p v-if="watchingGraph" class="faint small" data-learn-graph-watching>Watching for <code>graphify-out/GRAPH_REPORT.md</code> — this ticks by itself when the build finishes.</p>
           </template>
           <template v-else>
             <p class="small faint" data-learn-graph-missing>Graphify is not installed on this computer — it is optional. To use it, install it yourself (<code>uv tool install graphifyy</code>, the PyPI package with a double y; see the Graphify manifest in the workspace's <code>integrations/</code>), then read again.</p>
@@ -210,6 +332,40 @@ watch(() => props.projectId, load)
             <button class="link" data-learn-rules-toggle @click="showRules = !showRules">{{ showRules ? 'Hide' : 'Show' }} the rules Claude gets</button>
           </span>
           <pre v-if="showRules && depthInfo" class="rules" data-learn-rules>{{ depthInfo.rules }}</pre>
+        </div>
+        <div class="field">
+          <label for="learn-notes">Notes for Claude <span class="faint">optional</span></label>
+          <textarea
+            id="learn-notes"
+            v-model="notes"
+            class="input"
+            rows="3"
+            :maxlength="NOTES_MAX"
+            data-learn-notes
+            placeholder="What the code does not say — e.g. “drivebay is one app of my maiw monorepo; shared code lives in maiw/packages; billing is being rewritten.”"
+            @input="notesTouched = true"
+          />
+          <span class="hint">Saved in the learning task when the session starts — Claude reads them as part of the task.</span>
+        </div>
+        <div class="field" data-learn-folders>
+          <label>Also let Claude read <span class="faint">optional · on this computer only</span></label>
+          <div v-if="offerSurrounding" class="suggest" data-learn-surrounding>
+            <span class="small"><strong>{{ map.name }}</strong> lives inside the Git repository <strong>{{ offerSurrounding.name }}</strong> <code>{{ offerSurrounding.path }}</code> — its README, docs and shared code may explain the project.</span>
+            <button class="btn btn-sm" data-learn-add-surrounding @click="addFolder(offerSurrounding.path)"><FolderPlus /> Let Claude read {{ offerSurrounding.name }} too</button>
+          </div>
+          <ul v-if="map.extraFolders.length" class="extra-folders">
+            <li v-for="f in map.extraFolders" :key="f.path" :data-learn-folder="f.name">
+              <Folder class="ic" />
+              <strong>{{ f.name }}</strong>
+              <code class="faint path">{{ f.path }}</code>
+              <span v-if="!f.available" class="badge badge-warn">missing — skipped</span>
+              <button class="btn btn-sm btn-ghost btn-icon" :aria-label="`Stop letting Claude read ${f.name}`" :title="`Remove ${f.name}`" @click="removeFolder(f.path)"><X /></button>
+            </li>
+          </ul>
+          <div>
+            <button class="btn btn-sm btn-ghost" data-learn-add-folder @click="addFolder()"><FolderPlus /> Add a folder…</button>
+          </div>
+          <span class="hint">Read-only context for the learning session only (rule LEARN-8, within the same budget). Credential folders, Claude's configuration, your home folder and whole drives are refused.</span>
         </div>
         <div class="row">
           <button class="btn btn-primary" data-learn-start @click="startSession"><Sparkles /> {{ map.task ? 'Continue the learning session' : 'Start a learning session' }}</button>
@@ -407,6 +563,48 @@ watch(() => props.projectId, load)
   margin-left: 4px;
   font: inherit;
   text-decoration: underline;
+}
+.suggest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+.suggest .small {
+  flex: 1;
+  min-width: 240px;
+  overflow-wrap: anywhere;
+}
+.extra-folders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.extra-folders li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+.extra-folders .ic {
+  width: 14px;
+  height: 14px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.extra-folders .path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rules {
   margin: 6px 0 0;

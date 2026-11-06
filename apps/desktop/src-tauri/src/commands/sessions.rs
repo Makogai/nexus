@@ -253,6 +253,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
         };
         let settings_path = prepared.settings.clone();
         let plugin_dirs = prepared.plugin_dirs.clone();
+        let add_dirs = prepared.add_dirs.clone();
         let claude_name = prepared.claude_name.clone();
         let integrations = prepared.integrations;
         let spec = launch::build(
@@ -273,6 +274,7 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                 settings: settings_path.as_deref(),
                 context_prompt: prepared.prompt.as_deref(),
                 plugin_dirs: &plugin_dirs,
+                add_dirs: &add_dirs,
                 // Only for a task whose text reaches Claude (session start or tools) — otherwise nothing to start on.
                 first_prompt: (args.kickoff == Some(true) && integrations.task.as_ref().is_some_and(|t| t.delivery != "none"))
                     .then_some(nexus_core::knowledge::tasks::KICKOFF),
@@ -366,6 +368,7 @@ pub async fn session_resume(
         )?;
         let settings_path = prepared.settings.clone();
         let plugin_dirs = prepared.plugin_dirs.clone();
+        let add_dirs = prepared.add_dirs.clone();
         let integrations = prepared.integrations;
         let spec = launch::build(
             &LaunchRequest {
@@ -385,6 +388,7 @@ pub async fn session_resume(
                 settings: settings_path.as_deref(),
                 context_prompt: prepared.prompt.as_deref(),
                 plugin_dirs: &plugin_dirs,
+                add_dirs: &add_dirs,
                 first_prompt: None, // a resumed conversation continues where it was
             },
             &env::current(),

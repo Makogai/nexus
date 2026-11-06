@@ -43,6 +43,8 @@ pub struct LaunchRequest<'a> {
     pub context_prompt: Option<&'a str>,
     /// AI Kit overlays for this profile (`--plugin-dir`, ADR-0024).
     pub plugin_dirs: &'a [PathBuf],
+    /// Folders Claude may also read (`--add-dir`): a learning session's extra folders (ADR-0045).
+    pub add_dirs: &'a [PathBuf],
     /// A first message for a new conversation, sent on the person's request (e.g. "start the task now"). A `'static`
     /// NEXUS constant by type — never workspace text (threat T22). Ignored when resuming.
     pub first_prompt: Option<&'static str>,
@@ -149,6 +151,12 @@ pub fn build(req: &LaunchRequest<'_>, base_env: &[(String, String)]) -> Result<L
         }
         args.extend(["--plugin-dir".to_string(), dir.display().to_string()]);
     }
+    for dir in req.add_dirs {
+        if !dir.is_absolute() {
+            return Err(CoreError::invalid("an added folder must be absolute"));
+        }
+        args.extend(["--add-dir".to_string(), dir.display().to_string()]);
+    }
     // After `--`, or a variadic option before it (`--mcp-config <configs...>`) would take the message as a file.
     if let (Some(first), Mode::New) = (req.first_prompt, &req.mode) {
         args.extend(["--".to_string(), first.to_string()]);
@@ -236,6 +244,7 @@ mod tests {
             settings: None,
             context_prompt: None,
             plugin_dirs: &[],
+            add_dirs: &[],
             first_prompt: None,
         }
     }
@@ -251,6 +260,15 @@ mod tests {
         let resumed = LaunchRequest { first_prompt: Some("Start now."), ..request(&p, t.path(), Mode::Resume) };
         let args = build(&resumed, &base_env()).unwrap().args;
         assert!(!args.iter().any(|a| a == "--" || a == "Start now."), "{args:?}");
+
+        // Added folders (ADR-0045): one variadic --add-dir per folder, before the message's `--`.
+        let dirs = [t.path().join("maiw"), t.path().join("shared")];
+        let req = LaunchRequest { add_dirs: &dirs, first_prompt: Some("Start now."), ..request(&p, t.path(), Mode::New) };
+        let args = build(&req, &base_env()).unwrap().args;
+        let (a, b) = (dirs[0].display().to_string(), dirs[1].display().to_string());
+        assert_eq!(&args[args.len() - 6..], ["--add-dir", &a, "--add-dir", &b, "--", "Start now."]);
+        let relative = [PathBuf::from("maiw")];
+        assert!(build(&LaunchRequest { add_dirs: &relative, ..request(&p, t.path(), Mode::New) }, &base_env()).is_err());
     }
 
     #[test]
