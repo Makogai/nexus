@@ -28,6 +28,8 @@ pub struct AppInfo {
     /// The outcome of a restore applied at this start: `ok` + backup id, or the reason it failed.
     pub restored: Option<String>,
     pub restore_error: Option<String>,
+    /// This build updates itself (release builds; development and E2E builds never check — ADR-0044).
+    pub updates: bool,
 }
 
 #[tauri::command]
@@ -49,6 +51,7 @@ pub async fn app_info(ctx: State<'_, Ctx>) -> IpcResult<AppInfo> {
             pending_restore: db::backup::pending(&ctx.data_dir),
             restored: ctx.restore.as_ref().and_then(|r| r.as_ref().ok().cloned()),
             restore_error: ctx.restore.as_ref().and_then(|r| r.as_ref().err().cloned()),
+            updates: cfg!(not(debug_assertions)),
         })
     })
     .await

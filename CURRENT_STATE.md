@@ -81,7 +81,8 @@ _Last updated: 2026-11-05 (session 10: Project workbench, first release v0.1.0, 
     *Start right away* on by default; sessions filter by project.
   * **NEXUS tools page:** built-in skills, the MCP tools (`nexus mcp --list-tools`), the hook events.
   * **Tests:** E2E builds run under `<APP_ID>.e2e`, so suites run beside an installed NEXUS.
-  * **Open:** signed auto-updates wait for the owner's update-signing key (W7).
+  * **Updates (ADR-0044):** signed with the owner's key (public key in `tauri.conf.json`, private key only in the
+    repository secrets); release builds check on start (install by themselves) and every 6 h (offer).
 * **Built-in learning skill (ADR-0041, branch `milestone/learn-skill`, off `fix/learn-session`)** — owner feedback:
   a learning session fanned out into a multi-agent plan and burned tokens.
   * **Skill:** NEXUS ships a plugin `nexus` with the skill `learn-project` (`crates/nexus-core/builtin/`, written to

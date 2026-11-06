@@ -18,6 +18,8 @@ export interface AppInfo {
   /** A restore applied at this start (backup id) or why it failed. */
   restored: string | null
   restoreError: string | null
+  /** This build updates itself (release builds only). */
+  updates: boolean
 }
 
 export interface BackupInfo {
@@ -631,6 +633,8 @@ export interface UiPreferences {
   defaultShell: string | null
   /** Launch defaults; `taskKickoff` = the last “Start right away” choice for task launches (default: on). */
   lastLaunch: { profileId?: string; workProfile?: string; effort?: string | null; taskKickoff?: boolean } | null
+  /** Install a published update by itself when NEXUS starts (default on; ADR-0044). */
+  autoUpdate?: boolean
 }
 
 export type ProfileDialogMode = 'register' | 'create' | 'edit'

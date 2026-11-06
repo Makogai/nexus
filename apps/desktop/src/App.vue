@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useAppStore } from './stores/app'
+import { useUpdateStore } from './stores/updates'
 import { useWorkspaceStore } from './stores/workspaces'
 import { useProjectStore } from './stores/projects'
 import { useProfileStore } from './stores/profiles'
@@ -53,6 +54,8 @@ async function boot() {
     await notifications.start().catch(() => undefined)
     app.watchExternalChanges()
     ready.value = true
+    // Signed updates (ADR-0044): release builds check now (and install by themselves at start), then every few hours.
+    useUpdateStore().start()
   } catch (e) {
     fatal.value = toIpcError(e).message
   }

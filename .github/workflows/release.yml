@@ -43,9 +43,14 @@ jobs:
         run: cargo test --workspace --locked --no-fail-fast
       - name: Test double for the installed-app check
         run: cargo build -p fake-claude --locked
-      - name: Release installer (CLI bundled as sidecar)
+      - name: Release installer (CLI bundled as sidecar), signed for updates
         working-directory: apps/desktop
-        run: npx tauri build --config src-tauri/tauri.installer.conf.json
+        env:
+          # Signed updates (ADR-0044): the updater files are signed with the owner's key; NEXUS verifies them against
+          # the public key in tauri.conf.json before installing.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --config src-tauri/tauri.installer.conf.json --config src-tauri/tauri.updater.conf.json
       # Code signing (decision pending, ADR-0033): sign nexus-desktop.exe, nexus.exe and the installer here, before the
       # checksums and attestations — e.g. Azure Trusted Signing or `signtool` with a certificate from repository secrets.
       - name: T18 — the release program ignores WebView2 debugging overrides
@@ -61,7 +66,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nexus-windows
-          path: target/release/bundle/nsis/*-setup.exe
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/nsis/*-setup.exe.sig
           if-no-files-found: error
 
   macos:
@@ -97,13 +104,29 @@ jobs:
         run: cargo test --workspace --locked --no-fail-fast
       # Not notarized yet (needs an Apple Developer ID, ADR-0033): the bundle is ad-hoc signed (`signingIdentity: "-"`),
       # so macOS asks the person to confirm the first start.
-      - name: App bundle and disk image (CLI bundled as sidecar)
+      - name: App bundle and disk image (CLI bundled as sidecar), signed for updates
         working-directory: apps/desktop
-        run: npx tauri build --config src-tauri/tauri.installer.conf.json --target ${{ matrix.target }} --bundles app,dmg
+        env:
+          # Signed updates (ADR-0044): the updater files are signed with the owner's key; NEXUS verifies them against
+          # the public key in tauri.conf.json before installing.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --config src-tauri/tauri.installer.conf.json --config src-tauri/tauri.updater.conf.json --target ${{ matrix.target }} --bundles app,dmg
+      - name: Update archive named by architecture (both builds make NEXUS.app.tar.gz)
+        shell: bash
+        run: |
+          ver=$(node -p "require('./apps/desktop/package.json').version")
+          arch=${{ matrix.target == 'aarch64-apple-darwin' && 'aarch64' || 'x64' }}
+          cd target/${{ matrix.target }}/release/bundle/macos
+          mv NEXUS.app.tar.gz "NEXUS_${ver}_${arch}.app.tar.gz"
+          mv NEXUS.app.tar.gz.sig "NEXUS_${ver}_${arch}.app.tar.gz.sig"
       - uses: actions/upload-artifact@v4
         with:
           name: nexus-macos-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          path: |
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
 
   linux:
@@ -135,14 +158,20 @@ jobs:
         run: npm ci
       - name: Tests
         run: cargo test --workspace --locked --no-fail-fast
-      - name: AppImage and Debian package (CLI bundled as sidecar)
+      - name: AppImage and Debian package (CLI bundled as sidecar), AppImage signed for updates
         working-directory: apps/desktop
-        run: npx tauri build --config src-tauri/tauri.installer.conf.json --bundles appimage,deb
+        env:
+          # Signed updates (ADR-0044): the updater files are signed with the owner's key; NEXUS verifies them against
+          # the public key in tauri.conf.json before installing.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --config src-tauri/tauri.installer.conf.json --config src-tauri/tauri.updater.conf.json --bundles appimage,deb
       - uses: actions/upload-artifact@v4
         with:
           name: nexus-linux
           path: |
             target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/*.AppImage.sig
             target/release/bundle/deb/*.deb
           if-no-files-found: error
 
@@ -169,6 +198,13 @@ jobs:
           find . -mindepth 2 -type f -exec mv -n -t . {} +
           find . -mindepth 1 -type d -empty -delete
           if [ -n "$(find . -mindepth 1 -type d)" ]; then echo "::error::two release files share a name"; exit 1; fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Update manifest (latest.json, ADR-0044)
+        run: |
+          node apps/desktop/scripts/updater-manifest.mjs dist "${{ github.ref_name }}" "${{ github.repository }}" docs/RELEASE_NOTES.md
+          rm dist/*.sig
       - name: Licences and third-party notices (MIT OR Apache-2.0, ADR-0035)
         run: cp LICENSE-MIT LICENSE-APACHE THIRD_PARTY_NOTICES.md dist/
       - name: Checksums

@@ -5,12 +5,14 @@ import { ArrowLeft, ArrowRight, Check, ChevronDown, Layers, Plus, Search, Sparkl
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
 import { useProfileStore } from '../stores/profiles'
+import { useUpdateStore } from '../stores/updates'
 import NotificationBell from './NotificationBell.vue'
 
 const app = useAppStore()
 const workspaces = useWorkspaceStore()
 const profiles = useProfileStore()
 const router = useRouter()
+const updates = useUpdateStore()
 
 const menuOpen = ref(false)
 const menuRoot = ref<HTMLElement>()
@@ -117,6 +119,10 @@ onBeforeUnmount(() => {
 
     <div class="spacer" />
 
+    <button v-if="updates.available && updates.phase !== 'installing'" class="btn btn-sm btn-primary update" :disabled="updates.phase === 'downloading'" :title="`NEXUS ${updates.available.version} is available — the download is verified against NEXUS's signing key`" data-update-install @click="updates.install()">
+      {{ updates.phase === 'downloading' ? `Updating… ${updates.progress ?? ''}${updates.progress != null ? '%' : ''}` : `Update to v${updates.available.version}` }}
+    </button>
+    <span v-else-if="updates.phase === 'installing'" class="faint small">Installing the update…</span>
     <span v-if="app.info" class="version" :title="`NEXUS ${app.info.version} · data in ${app.info.dataDir}`" data-app-version>v{{ app.info.version }}</span>
 
     <NotificationBell />

@@ -8,9 +8,11 @@ import type { BackupInfo, ShellInfo } from '../lib/types'
 import { relativeTime } from '../lib/format'
 import NewWorkspaceForm, { type WorkspaceSource } from '../components/NewWorkspaceForm.vue'
 import { useAppStore } from '../stores/app'
+import { useUpdateStore } from '../stores/updates'
 import { useWorkspaceStore } from '../stores/workspaces'
 
 const app = useAppStore()
+const updates = useUpdateStore()
 const workspaces = useWorkspaceStore()
 const shells = ref<ShellInfo[]>([])
 /** The inline "new workspace" form, when open. */
@@ -194,6 +196,24 @@ async function reveal(path: string) {
         NEXUS stores no credentials. It never modifies Claude configurations it did not create, and it removes inherited
         Claude session variables, telemetry settings and API keys before launching Claude.
       </p>
+    </section>
+
+    <section class="card" data-updates>
+      <h2 class="card-title">Version and updates</h2>
+      <p>NEXUS {{ app.info?.version }}<template v-if="updates.available"> · <strong>v{{ updates.available.version }} is available</strong></template><template v-else-if="updates.checkedAt"> · up to date <span class="faint">(checked {{ relativeTime(updates.checkedAt) }})</span></template></p>
+      <template v-if="app.info?.updates">
+        <label class="checkbox">
+          <input :checked="app.prefs.autoUpdate !== false" type="checkbox" data-auto-update @change="app.prefs.autoUpdate = ($event.target as HTMLInputElement).checked" />
+          <span>Install updates by themselves when NEXUS starts</span>
+        </label>
+        <div class="row actions">
+          <button class="btn" :disabled="updates.phase === 'checking' || updates.phase === 'downloading'" @click="updates.checkNow(false)">Check now</button>
+          <button v-if="updates.available" class="btn btn-primary" :disabled="updates.phase === 'downloading'" @click="updates.install()">Update to v{{ updates.available.version }}</button>
+        </div>
+        <p v-if="updates.error" class="hint">Last check: {{ updates.error }}</p>
+        <p class="hint">NEXUS checks the latest published release on start and every few hours. Every download is verified against NEXUS's update-signing key before it is installed; an update never starts while Claude sessions run without asking you.</p>
+      </template>
+      <p v-else class="hint">This is a development build — it does not update itself.</p>
     </section>
 
     <section class="card" data-cli>

@@ -119,7 +119,10 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        // Signed updates (ADR-0044): every download is verified against the public key in tauri.conf.json.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
     #[cfg(not(windows))]
     let app = app.plugin(tauri_plugin_notification::init());
     let app = app

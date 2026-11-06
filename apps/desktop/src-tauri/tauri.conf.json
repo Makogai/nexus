@@ -54,5 +54,16 @@
         "installerHooks": "./windows/hooks.nsh"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFEOThBMTA3NzY0MUY1MzgKUldRNDlVRjJCNkdZSFo5WE41ODNaVGRxR0ZwRllsUVUzU0IzMDh6WDIyOGRQQU4vcEUyWGNWdGIK",
+      "endpoints": [
+        "https://github.com/Makogai/nexus/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
