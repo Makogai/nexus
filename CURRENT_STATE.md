@@ -65,7 +65,14 @@ _Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning contex
     out of Git via `.git/info/exclude`. A graph built later joins the open learning task's checklist.
   * **Start right away** (branch `fix/learn-session`, owner feedback): the launch from *Learn* sends Claude a fixed
     first message so the session starts working; any task launch can tick it.
-* **Learning context (branch `milestone/learn-context`, ADR-0045, not merged yet)** — owner feedback, 2026-11-06:
+* **One pipeline per release (owner feedback, 2026-11-06):** a release used to take three rounds (a CI run started by
+  hand on the branch, CI on `main`, then the release run) — over an hour. Now `release.yml` calls `ci.yml`
+  (`workflow_call`: clippy and tests on all platforms, frontend, the Windows E2E suites) and creates the draft only when
+  those and the builds pass; its own Windows and macOS workspace-test steps are gone (the `ci` job covers them; Linux
+  keeps them on Ubuntu 22.04). The standalone CI run skips a `release:` commit on `main`. Release flow: verify locally,
+  merge, `release:` commit + tag, then ONE push: `git push --atomic origin main vX.Y.Z` (≈ 20 minutes to the draft).
+  Branch pushes start nothing (CI: `main`, pull requests, manual).
+* **Learning context (branch `milestone/learn-context`, ADR-0045, merged and released as v0.1.3)** — owner feedback, 2026-11-06:
   * **Graph build noticed:** the Learn tab kept a stale map while the kept-alive project page sat behind the terminal
     (NEXUS's map itself recognised the graph). Now it watches for `graphify-out/GRAPH_REPORT.md` after *Build* (cheap
     `learn::graph`, every 4 s, 30 min), re-reads when the page or window becomes active again, and has *Check again*.

@@ -6,6 +6,10 @@ name: Release (draft)
 #
 #   git tag v0.1.0 && git push origin v0.1.0     → builds + draft release
 #   Actions → Release (draft) → Run workflow      → builds only (artifacts on the run, no release)
+#
+# One pipeline: the run includes every CI check (`ci`: clippy and tests on all platforms, frontend, the Windows E2E
+# suites) and the draft appears only when they and the builds pass. Push the `release:` commit on main together with its
+# tag (`git push --atomic origin main vX.Y.Z`); the standalone CI run skips that commit.
 
 on:
   push:
@@ -39,8 +43,7 @@ jobs:
       - name: Install frontend dependencies
         working-directory: apps/desktop
         run: npm ci
-      - name: Tests
-        run: cargo test --workspace --locked --no-fail-fast
+      # Workspace tests on Windows run in the `ci` job of this run (the critical path stays the installer build).
       - name: Test double for the installed-app check
         run: cargo build -p fake-claude --locked
       - name: Release installer (CLI bundled as sidecar), signed for updates
@@ -99,9 +102,7 @@ jobs:
       - name: Install frontend dependencies
         working-directory: apps/desktop
         run: npm ci
-      - name: Tests (the runner's own architecture)
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: cargo test --workspace --locked --no-fail-fast
+      # Workspace tests on macOS (Apple silicon) run in the `ci` job of this run.
       # Not notarized yet (needs an Apple Developer ID, ADR-0033): the bundle is ad-hoc signed (`signingIdentity: "-"`),
       # so macOS asks the person to confirm the first start.
       - name: App bundle and disk image (CLI bundled as sidecar), signed for updates
@@ -175,9 +176,13 @@ jobs:
             target/release/bundle/deb/*.deb
           if-no-files-found: error
 
+  ci:
+    name: CI checks
+    uses: ./.github/workflows/ci.yml
+
   draft-release:
     name: Draft release
-    needs: [windows, macos, linux]
+    needs: [ci, windows, macos, linux]
     timeout-minutes: 20
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
