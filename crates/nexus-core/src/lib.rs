@@ -26,6 +26,7 @@ pub mod restoration;
 pub mod resume;
 pub mod session;
 pub mod settings;
+pub mod skills;
 pub mod templates;
 pub mod toolchain;
 pub mod usage;

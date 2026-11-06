@@ -10,6 +10,7 @@ pub mod knowledge;
 pub mod notifications;
 pub mod projects;
 pub mod sessions;
+pub mod skills;
 pub mod sync;
 pub mod usage;
 pub mod workflows;
