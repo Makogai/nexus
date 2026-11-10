@@ -1,28 +1,47 @@
-# NEXUS 0.1.5 — write and edit your skills in NEXUS
+# NEXUS 0.5 alpha — the app you work in all day
 
-A new **Skills** page shows every skill your Claude sessions can get, and lets you write and edit your own — for the
-whole workspace or for one project. NEXUS 0.1.4 installs this update on its own.
+NEXUS 0.5.0 is the first alpha: every project's sessions and tasks one click away, every action that says it is working
+and how it ended, and Git pushes that never fail silently. NEXUS 0.1.x installs this update on its own.
 
 ## What's new
 
-- **All skills in one place.** NEXUS's own skills, your workspace's skills, each project's skills and those of your AI
-  Kits, with the name Claude knows them by, which sessions get them and whether they are active.
-- **New skill.** Give it a name and a one-line description of what it does and when Claude should use it, choose the
-  workspace (every project, synced with your workspace) or one project (saved in its repository), and write the steps.
-- **Edit in place.** Open a skill, change it, save (Ctrl+S). NEXUS never overwrites a newer version on disk. Workspace
-  skills you save are active on this computer right away; skills that arrived from another computer still wait for
-  your review in AI Kits.
-- **Project skills live in the project.** They go into the project's `.claude/skills` folder, so Claude Code uses them
-  there — commit them with the project.
+- **Pushes never fail silently.** When Claude asks you to push, NEXUS first fetches the remote branch. If a teammate
+  pushed first, you see their commits and Push waits until the branch is integrated — with the next step spelled out.
+  A push that still fails stays on the project page (why, what next, *Review again*, *Dismiss*), lands in your
+  notifications, and Claude learns the reason when it asks again. **Tell Claude** types a ready message into its
+  terminal; you press Enter. NEXUS never force-pushes, merges or rebases for you.
+- **Conflicts in view.** The project page shows conflicted files, a merge or rebase in progress, and how far the branch
+  is ahead of or behind its remote.
+- **A project page with tabs.** Overview · Sessions · Tasks · Knowledge · Learn · Files · Commits · Settings, with
+  counts on the tabs (running sessions, a dot when one waits for you, tasks ready for review) and Ctrl+1…8. The
+  header keeps *Launch Claude* and *Shell*; the rest is under *More*.
+- **Needs you.** Home lists what waits for you across projects — sessions waiting for an answer, push requests, tasks
+  to review, learning drafts, rules and kits to approve, workflow sign-offs. One click opens the place to act. Each
+  project's Overview shows its own.
+- **Sessions tab.** Every session of the project, the ones waiting for you first; filters for running, ended and
+  archived; each row shows its task, workflow run, context strategy and last activity.
+- **Tasks tab.** The project's tasks as a list or a board; *Done* and *Reopen* happen at once; *New task* is ready for
+  this project.
+- **Every action shows it is working.** Buttons show a spinner and cannot be pressed twice while they run; approving a
+  learning draft says what happens and offers *Open overview* when it is done. Errors stay on screen until you dismiss
+  them, with *Copy details*; failed clones, gate runs and automatic syncs also reach the notification center.
+- **Terminals name their project**, in a colour per project, and a project page can show only its own terminals.
+- **Fresher knowledge.** Files you edit outside NEXUS show up when you come back to the window or a session ends.
+
+## What "alpha" means
+
+The features are complete enough to use all day, and the automated tests pass on Windows, macOS and Linux. They have not
+yet had much use outside the author's machine. Expect rough edges, report them, and keep your workspace in Git (NEXUS's
+sync does that for you). Your data stays compatible: 0.5 adds one database migration and takes a backup before it.
 
 ## Download
 
 | Platform | File | Notes |
 | --- | --- | --- |
-| Windows 10/11 (x64) | `NEXUS_0.1.5_x64-setup.exe` | Per-user install, no administrator rights |
-| macOS 11+ (Apple silicon) | `NEXUS_0.1.5_aarch64.dmg` | Drag NEXUS to Applications |
-| macOS 11+ (Intel) | `NEXUS_0.1.5_x64.dmg` | Drag NEXUS to Applications |
-| Linux (x64) | `NEXUS_0.1.5_amd64.AppImage` / `NEXUS_0.1.5_amd64.deb` | AppImage: make it executable and run it; deb: `sudo apt install ./NEXUS_0.1.5_amd64.deb` |
+| Windows 10/11 (x64) | `NEXUS_0.5.0_x64-setup.exe` | Per-user install, no administrator rights |
+| macOS 11+ (Apple silicon) | `NEXUS_0.5.0_aarch64.dmg` | Drag NEXUS to Applications |
+| macOS 11+ (Intel) | `NEXUS_0.5.0_x64.dmg` | Drag NEXUS to Applications |
+| Linux (x64) | `NEXUS_0.5.0_amd64.AppImage` / `NEXUS_0.5.0_amd64.deb` | AppImage: make it executable and run it; deb: `sudo apt install ./NEXUS_0.5.0_amd64.deb` |
 
 Already on 0.1.2 or later? NEXUS updates itself when it starts (or from the top bar). The `.app.tar.gz` files and `latest.json`
 are for NEXUS's own updates — you don't need to download them.
@@ -34,7 +53,7 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 - **Windows:** SmartScreen says "Windows protected your PC". Choose **More info → Run anyway**.
 - **macOS:** the app is ad-hoc signed but not notarized. Open it once with **right-click → Open**, or allow it under
   **System Settings → Privacy & Security → Open Anyway**.
-- **Linux:** no prompt. For the AppImage, run `chmod +x NEXUS_0.1.5_amd64.AppImage` first.
+- **Linux:** no prompt. For the AppImage, run `chmod +x NEXUS_0.5.0_amd64.AppImage` first.
 
 ## Verify what you downloaded
 
@@ -43,11 +62,16 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 - **Build provenance:** every file carries an attestation; check it with
   `gh attestation verify <file> --repo Makogai/nexus`.
 
-## Known limitations
+## Known issues
 
 - **Platforms:** NEXUS is developed and tested end to end on Windows. The macOS and Linux builds pass the automated
-  tests, but have had less hands-on use. Please report anything odd.
+  tests, but have had less hands-on use.
 - **Notifications:** on macOS and Linux they are display-only. Clicking one does not open the session.
+- **Knowledge files are not watched:** changes made outside NEXUS appear when the window regains focus or a session
+  ends, not instantly.
+- **Graphify builds** run in your terminal: NEXUS sees when the report appears, not why a build failed — look at the
+  terminal.
+- **Error messages stay** until you dismiss them; several at once can stack up (at most four).
 - **Signing:** the installers are not code-signed (see above); updates are signed with NEXUS's own update key.
 
 The guides are in `docs/user/`: first run, user guide, portable workspace, backups, troubleshooting.
