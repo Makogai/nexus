@@ -61,7 +61,11 @@ function startApp(report) {
 }
 async function stopApp(child) {
   // Hard kill of the whole tree (app, WebView2, fake Claude): the worst case a restart must recover from.
-  execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+  try {
+    execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'pipe', encoding: 'utf8' })
+  } catch (e) {
+    throw new Error(`taskkill failed (app exited: ${child.exitCode ?? 'no'}): ${String(e.stderr || e.stdout || e.message).trim().slice(0, 300)}`)
+  }
   const deadline = Date.now() + 20000
   for (;;) {
     try {
@@ -139,7 +143,7 @@ try {
   const taskFile = setup.task.path
 
   // 1. Select the project, then the task, then launch Claude from the UI.
-  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}'; location.reload(); true`)
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}?tab=tasks'; location.reload(); true`)
   const listed = await cdp.waitFor(`document.querySelector('[data-project-tasks]')?.innerText.includes('Ship checkout')`, 20000).catch(() => false)
   check('the project page lists its open task', !!listed)
   await cdp.evaluate(`document.querySelector('[data-task="${setup.task.id}"] .btn-primary').click(), true`)
@@ -213,7 +217,7 @@ try {
   const resumed = (await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)).find((s) => s.resumedFrom === s1.id)
   check('the resumed session keeps the task', resumed?.taskId === setup.task.id && resumed?.running === true)
   check('resuming does not reset the task', readFileSync(taskFile, 'utf8').includes('status: review'))
-  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}', true`)
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}?tab=knowledge', true`)
   const note = await cdp.waitFor(`document.querySelector('[data-project-notes]')?.innerText.includes('Checkout uses the payment sandbox')`, 15000).catch(() => false)
   check('the branch note appears for the checked-out branch', !!note)
   const inspector = await cdp.waitFor(`document.querySelector('[data-instructions]')?.innerText.includes('NEXUS appends')`, 15000).catch(() => false)
@@ -235,15 +239,25 @@ try {
   check('approving writes an accepted decision file', !!approved && files.length === 1 && readFileSync(join(decisionsDir, files[0]), 'utf8').includes('status: accepted'), files.join(','))
 
   // Finished work: the task Claude put into review leads the list; Done moves it to "Recently done"; Reopen brings it back.
-  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}'; true`)
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}?tab=tasks'; true`)
   const review = await cdp.waitFor(`document.querySelector('[data-task="${setup.task.id}"].for-review')?.innerText`, 15000).catch(() => '')
   check('a task in review shows as ready for review', review.includes('Ready for review'), review.replace(/\n/g, ' ').slice(0, 80))
   await cdp.evaluate(`document.querySelector('[data-task="${setup.task.id}"] [data-task-done]').click(), true`)
   const done = await cdp.waitFor(`!document.querySelector('[data-task="${setup.task.id}"]') && !!document.querySelector('[data-done-task="${setup.task.id}"]')`, 15000).catch(() => false)
-  check('Done moves it to Recently done (the file says done)', !!done && readFileSync(setup.task.path, 'utf8').includes('status: done'))
+  // The list moves at once (optimistic); the file follows when the write finishes.
+  const fileSays = async (status) => {
+    for (let i = 0; i < 100; i++) {
+      if (readFileSync(setup.task.path, 'utf8').includes(`status: ${status}`)) return true
+      await new Promise((r) => setTimeout(r, 150))
+    }
+    return false
+  }
+  const doneWritten = await fileSays('done')
+  const toasts = await cdp.waitFor(`[...document.querySelectorAll('.toast')].map((t) => t.innerText).join(' | ').includes('Done:') && !document.querySelector('[data-done-task="${setup.task.id}"] [data-task-reopen]').disabled`, 10000).catch(() => false)
+  check('Done moves it to Recently done (the file says done)', !!done && doneWritten && !!toasts)
   await cdp.evaluate(`document.querySelector('[data-project-done]').open = true; document.querySelector('[data-done-task="${setup.task.id}"] [data-task-reopen]').click(); true`)
   const reopened = await cdp.waitFor(`!!document.querySelector('[data-task="${setup.task.id}"]')`, 15000).catch(() => false)
-  check('…and Reopen brings it back', !!reopened && readFileSync(setup.task.path, 'utf8').includes('status: ready'))
+  check('…and Reopen brings it back', !!reopened && (await fileSays('ready')))
 
   // Sessions can be filtered by project (kept in the URL).
   await cdp.evaluate(`location.hash = '#/sessions?project=${setup.project.id}'; true`)
@@ -275,6 +289,53 @@ try {
   check('Push sends exactly that commit to the remote', !!pushed && remoteHead === localHead, `${remoteHead.slice(0, 7)} / ${localHead.slice(0, 7)}`)
   const [again] = await mcp(s1.id, [['request_push', {}]])
   check('…and asking again tells Claude it was pushed', again?.structuredContent?.pushRequest?.status === 'pushed')
+  const pushedPanel = await cdp.waitFor(`document.querySelector('[data-push-result="pushed"]')?.innerText`, 10000).catch(() => '')
+  check('the dialog stays open with the result and a way to the commits', pushedPanel.includes('Pushed') && !!(await cdp.evaluate(`!!document.querySelector('[data-push-open-commits]')`)), pushedPanel.replace(/\n/g, ' ').slice(0, 100))
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Close')?.click(); true`)
+
+  // ADR-0047 (the anilist case): a teammate pushed first. The review fetches and shows it; Push stays disabled.
+  const mate = join(root, 'teammate')
+  execFileSync('git', ['clone', '-q', '-b', branch, bare, mate])
+  const mateGit = (...args) => execFileSync('git', ['-c', 'user.name=Bo', '-c', 'user.email=bo@example.invalid', '-c', 'core.autocrlf=false', ...args], { cwd: mate })
+  writeFileSync(join(mate, 'theirs.js'), 'theirs()\n')
+  mateGit('add', '-A')
+  mateGit('commit', '-qm', 'Teammate change')
+  mateGit('push', '-q', 'origin', `HEAD:${branch}`)
+  writeFileSync(join(repo, 'ours.js'), 'ours()\n')
+  git('add', '-A')
+  git('commit', '-qm', 'Our change')
+  await mcp(s1.id, [['request_push', { reason: 'Ship our change' }]])
+  await cdp.evaluate(`location.reload(); true`)
+  await cdp.waitFor(`!!document.querySelector('[data-push-request] [data-push-open]')`, 20000)
+  await cdp.evaluate(`document.querySelector('[data-push-request] [data-push-open]').click(), true`)
+  const behind = await cdp.waitFor(`document.querySelector('[data-push-behind]')?.innerText`, 20000).catch(() => '')
+  const disabled = await cdp.evaluate(`document.querySelector('[data-push-approve]')?.disabled === true`)
+  check('the review shows the remote is ahead (fetched first) and Push is disabled', behind.includes('has 1 commit you don') && behind.includes('Teammate change') && disabled, behind.replace(/\n/g, ' ').slice(0, 140))
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.getAttribute('aria-label') === 'Close')?.click(); true`)
+
+  // Integrated — then the remote refuses the push anyway (a declining hook stands in for a push that lands first).
+  git('pull', '-q', '--rebase', '--autostash', 'origin', branch)
+  await mcp(s1.id, [['request_push', { reason: 'Ship our change' }]])
+  const hook = join(bare, 'hooks', 'pre-receive')
+  writeFileSync(hook, '#!/bin/sh\necho "rejected by policy" >&2\nexit 1\n')
+  await cdp.evaluate(`location.reload(); true`)
+  await cdp.waitFor(`!!document.querySelector('[data-push-request] [data-push-open]')`, 20000)
+  await cdp.evaluate(`document.querySelector('[data-push-request] [data-push-open]').click(), true`)
+  await cdp.waitFor(`document.querySelector('[data-push-approve]') && !document.querySelector('[data-push-approve]').disabled`, 20000)
+  await cdp.evaluate(`document.querySelector('[data-push-approve]').click(), true`)
+  const failedPanel = await cdp.waitFor(`document.querySelector('[data-push-result="failed"]')?.getAttribute('data-push-failure') === 'rejected' && document.querySelector('[data-push-result="failed"]').innerText`, 20000).catch(() => '')
+  const tell = await cdp.evaluate(`!!document.querySelector('[data-push-tell-claude]')`)
+  check('a rejected push shows the outcome with guidance and offers Tell Claude', failedPanel.includes('pull --rebase or merge') && tell, failedPanel.replace(/\n/g, ' ').slice(0, 140))
+  await cdp.evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.getAttribute('aria-label') === 'Close')?.click(); true`)
+  const banner = await cdp.waitFor(`document.querySelector('[data-push-failed="rejected"]')?.innerText`, 15000).catch(() => '')
+  check('the failed request stays on the project page (why and what next)', banner.includes('failed') && banner.includes('NEXUS never force-pushes'), banner.replace(/\n/g, ' ').slice(0, 140))
+  const [told] = await mcp(s1.id, [['request_push', {}]])
+  const tp = told?.structuredContent?.pushRequest
+  check('request_push tells Claude: failed, rejected, integrate first', tp?.status === 'failed' && tp?.failureKind === 'rejected' && String(told?.structuredContent?.next).includes('git pull --rebase'), JSON.stringify(tp ?? told).slice(0, 140))
+  rmSync(hook)
+  await cdp.evaluate(`document.querySelector('[data-push-failed] [data-push-banner-dismiss]').click(), true`)
+  const dismissed = await cdp.waitFor(`!document.querySelector('[data-push-request]')`, 15000).catch(() => false)
+  check('Dismiss sets the failure aside', !!dismissed)
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)

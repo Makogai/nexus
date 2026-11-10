@@ -7,13 +7,16 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { BookOpenCheck, Check, FileSearch, Folder, FolderPlus, GraduationCap, Lightbulb, Network, RefreshCw, Sparkles, X } from '@lucide/vue'
+import { BookOpenCheck, Check, CircleCheck, FileSearch, Folder, FolderPlus, GraduationCap, Lightbulb, LoaderCircle, Network, RefreshCw, Sparkles, TriangleAlert, X } from '@lucide/vue'
 import { api, toIpcError } from '../lib/ipc'
 import { relativeTime } from '../lib/format'
 import { typeIntoTerminal } from '../lib/terminal'
-import type { LearnDepth, LearnDraft, ProjectMap } from '../lib/types'
+import type { KnowledgeItem, LearnDepth, LearnDraft, ProjectMap } from '../lib/types'
+import { useAction } from '../composables/useAction'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
+import ActionButton from './ActionButton.vue'
+import KnowledgeDocDialog from './KnowledgeDocDialog.vue'
 import MarkdownView from './MarkdownView.vue'
 
 const props = defineProps<{ projectId: string }>()
@@ -60,45 +63,44 @@ async function load() {
 }
 
 /** The drafts are reviewed but the learning task is still open (e.g. reviewed before NEXUS closed it on its own). */
-async function finishLearning() {
-  const ws = workspaces.active
-  const t = map.value?.task
-  if (!ws || !t) return
-  try {
+const finishing = useAction(
+  async () => {
+    const ws = workspaces.active
+    const t = map.value?.task
+    if (!ws || !t) return
     await api.knowledgeUpdateTask(ws.id, t.id, { status: 'done', log: 'Learning reviewed: marked done' })
-    app.toast('success', 'Learning finished — the task is done')
     await load()
-  } catch (e) {
-    app.toast('error', toIpcError(e).message)
-  }
-}
+  },
+  { success: 'Learning finished — the task is done', failure: 'Could not finish learning' },
+)
 
-async function startSession() {
-  const ws = workspaces.active
-  if (!ws) return
-  try {
+const starting = useAction(
+  async () => {
+    const ws = workspaces.active
+    if (!ws) return
     const task = await api.projectLearnStart(ws.id, props.projectId, depth.value, notes.value)
     notesTouched.value = false
     app.openLaunch(props.projectId, null, { id: task.id, title: task.title, projectId: props.projectId }, { kickoff: true })
     await load()
-  } catch (e) {
-    app.toast('error', `Could not prepare the learning session: ${toIpcError(e).message}`)
-  }
-}
+  },
+  { failure: 'Could not prepare the learning session' },
+)
 
-async function buildGraph() {
-  const m = map.value
-  if (!m) return
-  try {
+/** No report appeared while the tab watched (30 minutes): said until dismissed or the next build. */
+const graphTimedOut = ref(false)
+const building = useAction(
+  async () => {
+    const m = map.value
+    if (!m) return
     const added = await api.projectLearnExcludeGraph(props.projectId)
     if (added) app.toast('info', 'graphify-out/ is now ignored in this clone (.git/info/exclude — not committed).')
     await typeIntoTerminal(m.graph.command, { projectId: props.projectId })
+    graphTimedOut.value = false
     graphWatchUntil.value = Date.now() + 30 * 60_000
     startGraphTimer()
-  } catch (e) {
-    app.toast('error', toIpcError(e).message)
-  }
-}
+  },
+  { failure: 'Could not prepare the graph build' },
+)
 
 /** The tab is watching for a graph build the person runs in a terminal. */
 const watchingGraph = ref(false)
@@ -136,7 +138,10 @@ async function checkGraph(manual: boolean) {
     stopGraphTimer()
   } finally {
     checkingGraph.value = false
-    if (graphTimer !== null && Date.now() > graphWatchUntil.value) stopGraphTimer()
+    if (graphTimer !== null && Date.now() > graphWatchUntil.value) {
+      stopGraphTimer()
+      graphTimedOut.value = true
+    }
   }
 }
 
@@ -152,42 +157,81 @@ async function addFolder(path?: string) {
     if (typeof picked !== 'string') return
     dir = picked
   }
-  try {
+  await adding.run(dir)
+}
+const adding = useAction(
+  async (dir: string) => {
     await api.projectLearnAddFolder(props.projectId, dir)
     await load()
-  } catch (e) {
-    app.toast('error', `Not added: ${toIpcError(e).message}`)
-  }
-}
+  },
+  { failure: 'Not added' },
+)
 
-async function removeFolder(path: string) {
-  try {
+const removing = useAction(
+  async (path: string) => {
     await api.projectLearnRemoveFolder(props.projectId, path)
     await load()
-  } catch (e) {
-    app.toast('error', toIpcError(e).message)
-  }
-}
+  },
+  { failure: 'Could not remove the folder', key: (path: string) => path },
+)
 
 const offerSurrounding = computed(() => {
   const m = map.value
   return m?.surrounding && !m.extraFolders.some((f) => f.path === m.surrounding!.path) ? m.surrounding : null
 })
 
+/**
+ * The latest draft decision (ADR-0048): the draft leaves the list at once (and comes back on an error); this line says
+ * what is happening, how it ended and, for an accepted draft, where it went.
+ */
+const decision = ref<{ topic: string; apply: boolean; state: 'pending' | 'done' | 'failed'; message: string } | null>(null)
 async function decide(d: LearnDraft, apply: boolean) {
   const ws = workspaces.active
-  if (!ws || !map.value) return
+  if (!ws || !map.value || decision.value?.state === 'pending') return
   if (apply && d.topic === 'overview' && !map.value.context.overviewGenerated) {
     const ok = await app.confirm({ title: 'Replace the overview?', message: 'The project overview already has text you wrote or accepted. This draft replaces it (the draft stays as a note).', confirmLabel: 'Replace' })
     if (!ok) return
   }
+  const target = d.topic === 'overview' ? 'the project overview' : 'the architecture summary'
+  const before = drafts.value
+  drafts.value = drafts.value.filter((x) => x.id !== d.id)
+  decision.value = { topic: d.topic, apply, state: 'pending', message: apply ? `Writing the draft into ${target}…` : 'Setting the draft aside…' }
   try {
     await api.projectLearnDecide(ws.id, props.projectId, d.id, apply)
-    app.toast('success', apply ? (d.topic === 'overview' ? 'The draft is now the project overview' : 'The draft is now the architecture summary') : 'Draft set aside')
+    decision.value = { ...decision.value, state: 'done', message: apply ? `The draft is now ${target}.` : 'Draft set aside — it stays as a note.' }
     await load()
   } catch (e) {
-    app.toast('error', toIpcError(e).message)
+    drafts.value = before
+    decision.value = { ...decision.value, state: 'failed', message: `Could not ${apply ? 'use' : 'set aside'} the draft: ${toIpcError(e).message}` }
   }
+}
+
+/**
+ * Drafts arrive while the tab is open — Claude writes them through MCP, files change on disk (watcher, ADR-0049). Only
+ * the drafts are read again (the map walks the repository); a decision in flight is never undone, errors stay.
+ */
+let active = true
+const deciding = () => decision.value?.state === 'pending'
+async function reloadDrafts() {
+  const ws = workspaces.active
+  if (!active || !ws || !map.value || busy.value || deciding()) return
+  const d = await api.projectLearnDrafts(ws.id, props.projectId).catch(() => null)
+  const same = (a: LearnDraft[]) => a.map((x) => `${x.id}@${x.updated}`).join()
+  if (!d || deciding() || same(d) === same(drafts.value)) return
+  drafts.value = d
+  if (!d.some((x) => x.id === open.value)) open.value = d[0]?.id ?? null
+}
+watch(() => [app.externalChanges, app.freshness], reloadDrafts)
+
+/** "Open overview" / "Open architecture" after a draft was accepted. */
+const viewing = ref<KnowledgeItem | null>(null)
+async function openDecided() {
+  const ws = workspaces.active
+  const id = decision.value?.topic === 'overview' ? map.value?.context.overviewId : map.value?.context.architectureId
+  if (!ws || !id) return
+  const o = await api.knowledgeOverview(ws.id, false).catch(() => null)
+  viewing.value = o?.items.find((i) => i.id === id) ?? null
+  if (!viewing.value) app.toast('error', 'That document is not in the knowledge index yet — read again.')
 }
 
 const languages = computed(() => {
@@ -213,11 +257,13 @@ onMounted(() => {
 })
 // The project page is kept alive: coming back to it (e.g. from the terminal) reads the project again.
 onActivated(() => {
+  active = true
   window.addEventListener('focus', onWindowFocus)
   if (Date.now() - lastLoad > 1500) void load()
   if (graphWatchUntil.value > Date.now()) startGraphTimer()
 })
 onDeactivated(() => {
+  active = false
   window.removeEventListener('focus', onWindowFocus)
   stopGraphTimer()
 })
@@ -277,7 +323,7 @@ watch(
               {{ map.context.notes }} notes · {{ map.context.decisions }} decisions · {{ map.context.openTasks }} open tasks
             </dd>
           </dl>
-          <button class="btn btn-sm btn-ghost" :disabled="busy" @click="load"><RefreshCw :class="{ spin: busy }" /> Read again</button>
+          <button class="btn btn-sm btn-ghost" :disabled="busy" :aria-busy="busy" @click="load"><RefreshCw :class="{ spin: busy }" /> Read again</button>
         </section>
 
         <section class="card" data-learn-graph>
@@ -285,17 +331,22 @@ watch(
           <template v-if="map.graph.built">
             <p class="small" data-learn-graph-ready>Graph ready: <code>{{ map.graph.report }}</code><template v-if="map.graph.builtMs"> · built {{ relativeTime(map.graph.builtMs) }}</template>. The learning session reads it first.</p>
             <div class="row">
-              <button class="btn btn-sm" data-learn-graph-build @click="buildGraph"><RefreshCw /> Rebuild in a terminal</button>
+              <ActionButton class="btn-sm" :pending="building.pending.value" pending-label="Preparing…" data-learn-graph-build @click="building.run()"><template #icon><RefreshCw /></template>Rebuild in a terminal</ActionButton>
               <span v-if="watchingGraph" class="faint small" data-learn-graph-watching>Watching for the new report…</span>
             </div>
           </template>
           <template v-else-if="map.graph.installed">
             <p class="small">Graphify can turn the code into a queryable graph for Claude. NEXUS types <code>{{ map.graph.command }}</code> into a terminal in the project — code-only, it runs fully offline — and you press Enter. <code>graphify-out/</code> is kept out of Git in this clone.</p>
             <div class="row">
-              <button class="btn btn-sm btn-primary" data-learn-graph-build @click="buildGraph"><Network /> Build the graph in a terminal</button>
-              <button class="btn btn-sm btn-ghost" :disabled="checkingGraph" data-learn-graph-check @click="checkGraph(true)"><RefreshCw :class="{ spin: checkingGraph }" /> Check again</button>
+              <ActionButton class="btn-sm btn-primary" :pending="building.pending.value" pending-label="Preparing…" data-learn-graph-build @click="building.run()"><template #icon><Network /></template>Build the graph in a terminal</ActionButton>
+              <ActionButton class="btn-sm btn-ghost" :pending="checkingGraph" data-learn-graph-check @click="checkGraph(true)"><template #icon><RefreshCw /></template>Check again</ActionButton>
             </div>
-            <p v-if="watchingGraph" class="faint small" data-learn-graph-watching>Watching for <code>graphify-out/GRAPH_REPORT.md</code> — this ticks by itself when the build finishes.</p>
+            <p v-if="watchingGraph" class="faint small" data-learn-graph-watching><LoaderCircle class="spin inline-ic" /> Graphify is building in the terminal — watching for <code>graphify-out/GRAPH_REPORT.md</code>; this ticks by itself when the build finishes.</p>
+            <p v-if="graphTimedOut" class="notice notice-warn small" data-learn-graph-timeout>
+              <TriangleAlert />
+              <span>No graph report appeared in 30 minutes. Look at the terminal where Graphify ran for its error, then build again or use <em>Check again</em>.</span>
+              <button class="btn btn-ghost btn-icon btn-sm" aria-label="Dismiss" @click="graphTimedOut = false"><X /></button>
+            </p>
           </template>
           <template v-else>
             <p class="small faint" data-learn-graph-missing>Graphify is not installed on this computer — it is optional. To use it, install it yourself (<code>uv tool install graphifyy</code>, the PyPI package with a double y; see the Graphify manifest in the workspace's <code>integrations/</code>), then read again.</p>
@@ -351,7 +402,7 @@ watch(
           <label>Also let Claude read <span class="faint">optional · on this computer only</span></label>
           <div v-if="offerSurrounding" class="suggest" data-learn-surrounding>
             <span class="small"><strong>{{ map.name }}</strong> lives inside the Git repository <strong>{{ offerSurrounding.name }}</strong> <code>{{ offerSurrounding.path }}</code> — its README, docs and shared code may explain the project.</span>
-            <button class="btn btn-sm" data-learn-add-surrounding @click="addFolder(offerSurrounding.path)"><FolderPlus /> Let Claude read {{ offerSurrounding.name }} too</button>
+            <ActionButton class="btn-sm" :pending="adding.pending.value" data-learn-add-surrounding @click="addFolder(offerSurrounding.path)"><template #icon><FolderPlus /></template>Let Claude read {{ offerSurrounding.name }} too</ActionButton>
           </div>
           <ul v-if="map.extraFolders.length" class="extra-folders">
             <li v-for="f in map.extraFolders" :key="f.path" :data-learn-folder="f.name">
@@ -359,17 +410,17 @@ watch(
               <strong>{{ f.name }}</strong>
               <code class="faint path">{{ f.path }}</code>
               <span v-if="!f.available" class="badge badge-warn">missing — skipped</span>
-              <button class="btn btn-sm btn-ghost btn-icon" :aria-label="`Stop letting Claude read ${f.name}`" :title="`Remove ${f.name}`" @click="removeFolder(f.path)"><X /></button>
+              <ActionButton class="btn-sm btn-ghost btn-icon" :pending="removing.isPending(f.path)" :disabled="removing.pending.value" :aria-label="`Stop letting Claude read ${f.name}`" :title="`Remove ${f.name}`" @click="removing.run(f.path)"><template #icon><X /></template></ActionButton>
             </li>
           </ul>
           <div>
-            <button class="btn btn-sm btn-ghost" data-learn-add-folder @click="addFolder()"><FolderPlus /> Add a folder…</button>
+            <ActionButton class="btn-sm btn-ghost" :pending="adding.pending.value" pending-label="Adding…" data-learn-add-folder @click="addFolder()"><template #icon><FolderPlus /></template>Add a folder…</ActionButton>
           </div>
           <span class="hint">Read-only context for the learning session only (rule LEARN-8, within the same budget). Credential folders, Claude's configuration, your home folder and whole drives are refused.</span>
         </div>
         <div class="row">
-          <button class="btn btn-primary" data-learn-start @click="startSession"><Sparkles /> {{ map.task ? 'Continue the learning session' : 'Start a learning session' }}</button>
-          <button v-if="map.task && !map.drafts && !map.context.overviewGenerated && map.context.architectureSummary" class="btn" data-learn-finish @click="finishLearning"><Check /> Finish learning</button>
+          <ActionButton class="btn-primary" :pending="starting.pending.value" pending-label="Preparing the session…" data-learn-start @click="starting.run()"><template #icon><Sparkles /></template>{{ map.task ? 'Continue the learning session' : 'Start a learning session' }}</ActionButton>
+          <ActionButton v-if="map.task && !map.drafts && !map.context.overviewGenerated && map.context.architectureSummary" :pending="finishing.pending.value" pending-label="Finishing…" data-learn-finish @click="finishing.run()"><template #icon><Check /></template>Finish learning</ActionButton>
           <span v-if="map.task" class="faint small">Task: {{ map.task.title }} · {{ map.task.status }}</span>
           <span class="spacer" />
           <button class="btn btn-sm btn-ghost" @click="router.push({ name: 'knowledge', query: { tab: 'proposals' } })"><Lightbulb /> Memory proposals</button>
@@ -378,6 +429,14 @@ watch(
 
       <section class="drafts" data-learn-drafts>
         <h2 class="section-title"><BookOpenCheck class="title-ic" /> Drafts to review <span class="count">{{ drafts.length }}</span></h2>
+        <p v-if="decision" class="notice decision" :class="{ 'notice-error': decision.state === 'failed', 'notice-ok': decision.state === 'done' }" :aria-busy="decision.state === 'pending'" :data-draft-decision="decision.state">
+          <LoaderCircle v-if="decision.state === 'pending'" class="spin" />
+          <CircleCheck v-else-if="decision.state === 'done'" />
+          <TriangleAlert v-else />
+          <span class="selectable">{{ decision.message }}</span>
+          <button v-if="decision.state === 'done' && decision.apply" class="btn btn-sm" data-draft-open @click="openDecided">{{ decision.topic === 'overview' ? 'Open overview' : 'Open architecture' }}</button>
+          <button v-if="decision.state !== 'pending'" class="btn btn-ghost btn-icon btn-sm" aria-label="Dismiss" @click="decision = null"><X /></button>
+        </p>
         <p v-if="!drafts.length" class="faint small">No drafts waiting. Drafts appear here when Claude proposes an overview or an architecture summary.</p>
         <article v-for="d in drafts" :key="d.id" class="draft card" :data-draft="d.topic">
           <header class="draft-head" @click="open = open === d.id ? null : d.id">
@@ -387,17 +446,30 @@ watch(
           </header>
           <MarkdownView v-if="open === d.id" class="draft-body" :source="d.body" />
           <div class="row">
-            <button class="btn btn-sm btn-primary" data-draft-apply @click="decide(d, true)"><Check /> {{ d.topic === 'overview' ? 'Use as overview' : 'Use as architecture summary' }}</button>
-            <button class="btn btn-sm btn-ghost" data-draft-discard @click="decide(d, false)"><X /> Set aside</button>
+            <button class="btn btn-sm btn-primary" :disabled="decision?.state === 'pending'" data-draft-apply @click="decide(d, true)"><Check /> {{ d.topic === 'overview' ? 'Use as overview' : 'Use as architecture summary' }}</button>
+            <button class="btn btn-sm btn-ghost" :disabled="decision?.state === 'pending'" data-draft-discard @click="decide(d, false)"><X /> Set aside</button>
           </div>
         </article>
       </section>
     </template>
     <p v-else-if="busy" class="faint">Reading the project…</p>
+    <KnowledgeDocDialog v-if="workspaces.active" :item="viewing" :workspace-id="workspaces.active.id" @close="viewing = null" @changed="load" />
   </div>
 </template>
 
 <style scoped>
+.decision {
+  align-items: center;
+  margin-bottom: 10px;
+}
+.decision span {
+  flex: 1;
+}
+.inline-ic {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
+}
 .learn {
   display: flex;
   flex-direction: column;

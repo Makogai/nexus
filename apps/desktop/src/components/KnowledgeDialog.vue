@@ -6,7 +6,7 @@ import { KIND_LABELS } from '../lib/knowledge'
 import type { KnowledgeEntry, KnowledgeKind, Project } from '../lib/types'
 import BaseModal from './BaseModal.vue'
 
-const props = defineProps<{ open: boolean; workspaceId: string; projects: Project[]; initialKind?: KnowledgeKind }>()
+const props = defineProps<{ open: boolean; workspaceId: string; projects: Project[]; initialKind?: KnowledgeKind; initialProject?: string | null }>()
 const emit = defineEmits<{ close: []; created: [item: KnowledgeEntry] }>()
 
 const kind = ref<KnowledgeKind>('task')
@@ -27,7 +27,7 @@ watch(
     kind.value = props.initialKind ?? 'task'
     title.value = ''
     body.value = ''
-    projectId.value = ''
+    projectId.value = props.initialProject ?? ''
     where.value = 'shared'
     priority.value = 'medium'
     applies.value = 'on-demand'

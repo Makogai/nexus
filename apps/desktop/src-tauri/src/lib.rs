@@ -17,6 +17,7 @@ pub mod notifier;
 pub mod pty;
 pub mod shells;
 pub mod state;
+pub mod watcher;
 pub mod webview_guard;
 
 use std::sync::Arc;
@@ -54,6 +55,12 @@ fn open_context() -> Result<AppCtx, Box<dyn std::error::Error>> {
     let _ = nexus_core::workspace_sync::history::reconcile(&conn, now_ms());
     if interrupted > 0 {
         tracing::info!(interrupted, "sessions whose host is gone are no longer attached");
+    }
+    // Session folders and kit overlays nothing will use again (sessions ended more than 30 days ago, gone profiles).
+    match nexus_core::prune::artifacts(&conn, &data_dir, now_ms()) {
+        Ok(p) if p.session_dirs + p.overlays > 0 => tracing::info!(session_dirs = p.session_dirs, overlays = p.overlays, "pruned old session artifacts"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "session artifacts not pruned"),
     }
     // Sessions that ended without a development record (e.g. the previous host crashed) get one now (ADR-0038).
     if let Err(e) = nexus_core::devrecord::finalize_pending(&conn, &data_dir) {
@@ -146,6 +153,7 @@ pub fn run() {
             notifier::spawn_poller(app.handle().clone(), ctx.clone());
             commands::workflows::spawn_runner(app.handle().clone(), ctx.clone());
             commands::usage::spawn_scanner(app.handle().clone(), ctx.clone());
+            watcher::spawn(app.handle().clone(), ctx.clone());
             app.manage(ctx);
             Ok(())
         })
@@ -231,7 +239,8 @@ pub fn run() {
             commands::sessions::session_rename,
             commands::sessions::session_set_archived,
             commands::sessions::session_continue_task,
-            commands::projects::push_request_pending,
+            commands::projects::push_request_open,
+            commands::projects::push_request_dismiss,
             commands::projects::push_request_review,
             commands::projects::push_request_decide,
             commands::claude::nexus_tools,
@@ -244,6 +253,7 @@ pub fn run() {
             commands::knowledge::knowledge_update,
             commands::knowledge::knowledge_task,
             commands::knowledge::project_knowledge,
+            commands::knowledge::needs_you,
             commands::knowledge::instructions_inspect,
             commands::knowledge::project_resume,
             commands::knowledge::knowledge_proposals,
@@ -383,5 +393,50 @@ mod app_id_tests {
         assert_eq!(conf["identifier"], super::APP_ID);
         assert_eq!(conf["bundle"]["publisher"], "Makogai", "the installer manufacturer is explicit, not derived from the id");
         assert_ne!(super::APP_ID, super::LEGACY_APP_ID);
+    }
+}
+
+#[cfg(test)]
+mod ipc_docs_tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    fn read(rel: &str) -> String {
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).unwrap().replace("\r\n", "\n")
+    }
+
+    /// Command names registered in `generate_handler!` (this file).
+    fn registered() -> BTreeSet<String> {
+        let src = read("src/lib.rs");
+        let start = src.find("generate_handler![").expect("generate_handler! block") + "generate_handler![".len();
+        let block = &src[start..start + src[start..].find("])").unwrap()];
+        block.split(',').filter_map(|e| e.trim().strip_prefix("commands::")).map(|p| p.rsplit("::").next().unwrap().to_string()).collect()
+    }
+
+    /// Backticked snake_case names in the table rows of docs/ARCHITECTURE.md §8.
+    fn documented() -> BTreeSet<String> {
+        let doc = read("../../../docs/ARCHITECTURE.md");
+        let start = doc.find("## 8. IPC surface").expect("§8 heading");
+        let section = &doc[start..start + doc[start..].find("\n## 9.").unwrap()];
+        let mut out = BTreeSet::new();
+        for line in section.lines().filter(|l| l.starts_with("| ")) {
+            for (i, part) in line.split('`').enumerate() {
+                if i % 2 == 1 && part.contains('_') && part.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+                    out.insert(part.to_string());
+                }
+            }
+        }
+        out
+    }
+
+    /// Drift guard (NX-3): the IPC table in docs/ARCHITECTURE.md lists exactly the commands the desktop registers.
+    #[test]
+    fn every_ipc_command_is_documented_and_every_documented_command_exists() {
+        let (reg, doc) = (registered(), documented());
+        assert!(reg.len() > 100, "parsed only {} commands from generate_handler!", reg.len());
+        let missing: Vec<_> = reg.difference(&doc).collect();
+        let stale: Vec<_> = doc.difference(&reg).collect();
+        assert!(missing.is_empty(), "add these commands to docs/ARCHITECTURE.md §8: {missing:?}");
+        assert!(stale.is_empty(), "docs/ARCHITECTURE.md §8 names commands that are not registered: {stale:?}");
     }
 }

@@ -13,12 +13,15 @@ const api = vi.hoisted(() => ({
   projectLearnAddFolder: vi.fn(),
   projectLearnRemoveFolder: vi.fn(),
   projectLearnExcludeGraph: vi.fn(),
+  projectLearnDecide: vi.fn(),
+  knowledgeOverview: vi.fn(),
 }))
 const terminal = vi.hoisted(() => ({ typeIntoTerminal: vi.fn() }))
 vi.mock('../src/lib/ipc', () => ({ api, toIpcError: (e: unknown) => ({ code: 'invalid', message: String(e) }) }))
 vi.mock('../src/lib/terminal', () => terminal)
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('../src/router', () => ({ router: { push: vi.fn() } }))
 
 import ProjectLearn from '../src/components/ProjectLearn.vue'
 import { useAppStore } from '../src/stores/app'
@@ -141,5 +144,73 @@ describe('ProjectLearn', () => {
     await w.find('[data-learn-graph-check]').trigger('click')
     await flushPromises()
     expect(toast).toHaveBeenCalledWith('info', expect.stringContaining('No graph yet'))
+  })
+
+  // Owner report (2026-11-10): approving a draft showed no loading indicator (ADR-0048).
+  it('a draft decision shows at once that it is working, how it ended and where the draft went', async () => {
+    const draft = { id: 'd1', topic: 'overview' as const, title: 'drivebay — overview draft', updated: null, body: 'Drivebay rents cars.' }
+    api.projectLearnDrafts.mockResolvedValueOnce([draft]).mockResolvedValue([])
+    api.projectLearnMap.mockResolvedValue(map({ drafts: 1, context: { ...map().context, overviewId: 'ov1' } }))
+    let finish: () => void = () => undefined
+    api.projectLearnDecide.mockImplementation(() => new Promise<void>((r) => (finish = r)))
+    api.knowledgeOverview.mockResolvedValue({ items: [{ id: 'ov1', title: 'drivebay overview', kind: 'note', path: 'overview.md' }] })
+    const w = mount(ProjectLearn, { props: { projectId: 'p1' }, global: { stubs: { KnowledgeDocDialog: { props: ['item'], template: '<div data-doc-open>{{ item?.title }}</div>' } } } })
+    await flushPromises()
+    await w.find('[data-draft="overview"] [data-draft-apply]').trigger('click')
+    await flushPromises()
+    // Working: the draft left the list at once, a pending line says what happens.
+    expect(w.find('[data-draft="overview"]').exists()).toBe(false)
+    const pending = w.find('[data-draft-decision="pending"]')
+    expect(pending.attributes('aria-busy')).toBe('true')
+    expect(pending.text()).toContain('Writing the draft into the project overview')
+    finish()
+    await flushPromises()
+    // Ended: the result names where it went and links onward.
+    expect(w.find('[data-draft-decision="done"]').text()).toContain('The draft is now the project overview.')
+    await w.find('[data-draft-open]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-doc-open]').text()).toBe('drivebay overview')
+  })
+
+  it('a draft Claude writes appears without a click; a decision in flight is not undone by it (ADR-0049)', async () => {
+    const overview = { id: 'd1', topic: 'overview' as const, title: 'drivebay — overview draft', updated: '2026-11-10T10:00:00Z', body: 'Drivebay rents cars.' }
+    const architecture = { id: 'd2', topic: 'architecture' as const, title: 'drivebay — architecture draft', updated: '2026-11-10T10:05:00Z', body: 'One module.' }
+    const w = mount(ProjectLearn, { props: { projectId: 'p1' } })
+    await flushPromises()
+    expect(w.find('[data-draft]').exists()).toBe(false)
+    const app = useAppStore()
+    api.projectLearnDrafts.mockResolvedValue([overview])
+    app.externalChanges++
+    await flushPromises()
+    expect(w.find('[data-draft="overview"]').exists()).toBe(true)
+    expect(api.projectLearnMap).toHaveBeenCalledTimes(1) // the map (a walk of the repository) is not read again
+
+    let finish: () => void = () => undefined
+    api.projectLearnDecide.mockImplementation(() => new Promise<void>((r) => (finish = r)))
+    await w.find('[data-draft="overview"] [data-draft-apply]').trigger('click')
+    await flushPromises()
+    api.projectLearnDrafts.mockResolvedValue([overview, architecture]) // the index has not caught up with the decision
+    app.freshness++
+    await flushPromises()
+    expect(w.find('[data-draft="overview"]').exists()).toBe(false)
+    api.projectLearnDrafts.mockResolvedValue([architecture])
+    finish()
+    await flushPromises()
+    expect(w.find('[data-draft-decision="done"]').exists()).toBe(true)
+    expect(w.find('[data-draft="architecture"]').exists()).toBe(true)
+  })
+
+  it('a failed draft decision puts the draft back and keeps the error until dismissed', async () => {
+    const draft = { id: 'd1', topic: 'architecture' as const, title: 'drivebay — architecture draft', updated: null, body: 'One module.' }
+    api.projectLearnDrafts.mockResolvedValue([draft])
+    api.projectLearnDecide.mockRejectedValue('the note changed on disk')
+    const w = mount(ProjectLearn, { props: { projectId: 'p1' } })
+    await flushPromises()
+    await w.find('[data-draft="architecture"] [data-draft-discard]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-draft="architecture"]').exists()).toBe(true)
+    expect(w.find('[data-draft-decision="failed"]').text()).toContain('Could not set aside the draft: the note changed on disk')
+    await w.find('[data-draft-decision="failed"] [aria-label="Dismiss"]').trigger('click')
+    expect(w.find('[data-draft-decision]').exists()).toBe(false)
   })
 })

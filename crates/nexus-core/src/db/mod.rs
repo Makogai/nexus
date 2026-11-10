@@ -124,6 +124,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0019_learn_folders.sql"),
         disable_foreign_keys: false,
     },
+    Migration {
+        name: "0020_push_request_failure",
+        sql: include_str!("migrations/0020_push_request_failure.sql"),
+        disable_foreign_keys: false,
+    },
 ];
 
 /// Schema version this build understands.
@@ -597,6 +602,19 @@ mod tests {
         std::fs::write(&path, &bytes).unwrap();
         let (_conn, recovery) = open_or_recover(&path).unwrap();
         assert!(recovery.is_some(), "corruption must be detected by quick_check");
+    }
+
+    /// Drift guard (NX-3): every schema version is described in docs/ARCHITECTURE.md §7 (`-- vN …`).
+    #[test]
+    fn every_migration_is_described_in_the_architecture_schema() {
+        let doc = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/ARCHITECTURE.md")).unwrap();
+        let start = doc.find("## 7. SQLite schema").expect("§7 heading");
+        let section = &doc[start..start + doc[start..].find("\n## 8.").unwrap()];
+        let missing: Vec<String> = (2..=MIGRATIONS.len())
+            .filter(|v| !section.match_indices(&format!("-- v{v}")).any(|(i, m)| !section[i + m.len()..].starts_with(|c: char| c.is_ascii_digit())))
+            .map(|v| format!("v{v} ({})", MIGRATIONS[v - 1].name))
+            .collect();
+        assert!(missing.is_empty(), "describe these schema versions in docs/ARCHITECTURE.md §7: {missing:?}");
     }
 
     #[test]

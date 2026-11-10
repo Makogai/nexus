@@ -7,7 +7,12 @@ export interface Toast {
   id: number
   tone: 'info' | 'success' | 'error'
   message: string
+  /** The same error again while it is still shown (collapsed into one toast). */
+  count?: number
 }
+
+/** At most this many error toasts stay on screen; the oldest goes first. */
+const MAX_ERROR_TOASTS = 4
 
 export interface ConfirmRequest {
   title: string
@@ -49,6 +54,8 @@ export const useAppStore = defineStore('app', () => {
   const pushRequestsChanged = ref(0)
   /** Increments when another process (nexus CLI, MCP server) committed to the database (ADR-0009). */
   const externalChanges = ref(0)
+  /** Bumped when NEXUS looked for files changed outside it (window focus, a session ended) — ADR-0048. */
+  const freshness = ref(0)
   let toastSeq = 0
 
   const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)')
@@ -88,10 +95,23 @@ export const useAppStore = defineStore('app', () => {
     { deep: true },
   )
 
-  function toast(tone: Toast['tone'], message: string, ms = tone === 'error' ? 7000 : 3500) {
+  /**
+   * Show a toast. Errors stay until the person dismisses them (ADR-0048) — an error that vanished on its own was one
+   * nobody read; the same error again is counted on the toast already shown. Others go after `ms`.
+   */
+  function toast(tone: Toast['tone'], message: string, ms = tone === 'error' ? 0 : 3500) {
+    if (tone === 'error') {
+      const same = toasts.value.find((t) => t.tone === 'error' && t.message === message)
+      if (same) {
+        same.count = (same.count ?? 1) + 1
+        return
+      }
+      const errors = toasts.value.filter((t) => t.tone === 'error')
+      if (errors.length >= MAX_ERROR_TOASTS) dismiss(errors[0]!.id)
+    }
     const id = ++toastSeq
     toasts.value.push({ id, tone, message })
-    setTimeout(() => dismiss(id), ms)
+    if (ms > 0) setTimeout(() => dismiss(id), ms)
   }
   function dismiss(id: number) {
     toasts.value = toasts.value.filter((t) => t.id !== id)
@@ -161,6 +181,7 @@ export const useAppStore = defineStore('app', () => {
     paletteOpen,
     launchDialog,
     externalChanges,
+    freshness,
     markDataBaseline,
     watchExternalChanges,
     load,

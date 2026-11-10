@@ -109,6 +109,11 @@ machine it is a row in SQLite; if another tool owns it NEXUS only reads it** (AD
 * **`nexus mcp`** — started by Claude from the per-session `--mcp-config`; bound to one NEXUS session; opens the same
   SQLite file (WAL, busy timeout). The desktop notices commits from these processes by polling `PRAGMA data_version`
   (a few-byte read) instead of running a network endpoint (ADR-0009).
+* **Knowledge watcher** (ADR-0049) — a desktop thread watches the active workspace's knowledge roots (one recursive
+  watch per root; `knowledge::watch` decides which changes count, by the index walk's rules), waits for a burst to
+  settle (400 ms, at most 2 s), refreshes the index on its own connection and emits `nexus://knowledge` when the index
+  changed. Files written by NEXUS are indexed in the same call, so they cause no event. Window focus and session end
+  still refresh, as the fallback.
 * **Notifications** (ADR-0025) — every process writes typed events into the `notifications` table through
   `notify::publish` (hooks, MCP, CLI, desktop). Only the desktop shows them: a poller thread (750 ms) decides each
   pending row once against preferences and focus, shows it through the platform notifier (WinRT toast with click
@@ -231,6 +236,29 @@ knowledge_approvals(path PK, content_hash, approved_at)                         
 -- v9: kits(id, name, source_kind, location, git_ref, subdir, kind, version, content_hash, approved_hash, commit_sha, …),
 --     kit_profiles(kit_id FK, profile_id FK, skills_json, agents, commands, hooks, mcp, enabled_at) (ADR-0024)
 -- v8: memory_proposals(id, workspace_id, project_id, session_id FK, kind, title, body, source, branch, fingerprint, status, document_id, …) (ADR-0022)
+-- v10: notifications(id, category, priority CHECK(critical|action|success|warning|info), source, title, body, workspace_id,
+--      project_id, profile_id, session_id, task_id, workflow_id, target_kind, target_id, dedupe_key, occurrences, created_at,
+--      updated_at, read_at, dismissed_at, snoozed_until, resolved_at, desktop_state, desktop_reason);
+--      sessions.attention_kind (permission|input|idle|error), attention_at (ADR-0025)
+-- v11: context_configs(project_id PK FK, strategy CHECK(minimal|balanced|deep|custom), custom, updated_at),
+--      project_docs(project_id FK, path, title, content_hash, size, mtime_ms, indexed_at) (ADR-0028)
+-- v12: quality_gates(id, project_id FK, name, title, program, args, timeout_secs, …), workflow_runs(id, workspace_id FK,
+--      project_id, workflow_id, workflow_title, workflow_hash, definition, task_id, goal, rigor, profile_id, skills, status,
+--      error, …), workflow_steps(run_id FK, step_id, position, kind, status, verification, attempts, max_attempts, report,
+--      criteria_met, last_failure, updated_at), gate_results(id, project_id, run_id, step_id, gate_name, command, status,
+--      exit_code, duration_ms, output_tail, host_id, started_at, ended_at) (ADR-0029)
+-- v13: quality_gates.version, command_hash, approved_hash, approved_at; gate_results.gate_version, command_hash;
+--      workflow_steps.blocked_on (each gate command version approved separately)
+-- v14: usage_sources, usage_messages, usage_costs, usage_state, session_conversations, profile_billing;
+--      sessions.session_start_chars (numbers only, ADR-0030)
+-- v15: sync_history(id, workspace_id, op, status CHECK(running|ok|refused|failed|interrupted), host_id, branch, head_before,
+--      head_after, commits, files, error_kind, message, started_at, ended_at) (ADR-0031)
+-- v16: kits.workspace_id (one workspace kit per workspace)
+-- v17: sessions.head_start, record_path, record_at (development records); sync_history.op gains `auto-sync` (rebuilt)
+-- v18: push_requests(id, session_id FK, project_id FK, branch, head, reason, status CHECK(pending|pushed|declined|failed),
+--      message, created_at, decided_at) (ADR-0043)
+-- v19: learn_folders(project_id FK, path, added_at) — extra folders for learning sessions (ADR-0045)
+-- v20: push_requests.failure_kind (rejected|auth|offline|remote-missing|timeout|other), dismissed_at (ADR-0047)
 ```
 
 Timestamps are Unix milliseconds (INTEGER). Foreign keys enforced (`PRAGMA foreign_keys=ON`).
@@ -245,14 +273,19 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 
 | Area | Commands |
 | --- | --- |
-| App | `app_info` |
-| Workspaces | `workspace_list`, `workspace_create`, `workspace_import`, `workspace_activate`, `workspace_active` |
-| Projects | `project_list`, `project_inspect_path`, `project_register`, `project_unregister`, `project_get`, `project_git_status` |
-| Claude | `claude_installations`, `profile_list`, `profile_detect`, `profile_register`, `profile_create`, `profile_update`, `profile_archive`, `profile_inspect` |
-| Work profiles | `work_profile_list` |
-| Sessions | `session_list`, `session_start_claude`, `session_resume`, `session_open_shell`, `session_attach`, `session_write`, `session_resize`, `session_stop`, `session_rename`, `session_archive` |
+| App | `app_info`, `ui_preferences_get`, `ui_preferences_set`, `db_data_version`, `app_restart` |
+| Backups | `backup_list`, `backup_create`, `backup_schedule_restore`, `backup_cancel_restore`, `backup_delete` (ADR-0032) |
+| Workspaces | `workspace_list`, `workspace_active`, `workspace_create`, `workspace_import`, `workspace_activate`, `workspace_forget`, `workspace_migration_plan`, `workspace_migrate`, `workspace_doctor`, `workspace_restoration`, `workspace_repair_plan`, `workspace_repair` (ADR-0036) |
+| Templates | `template_list`, `template_plan`, `template_apply` (ADR-0037) |
+| Projects | `project_list`, `project_get`, `project_inspect_path`, `project_register`, `project_unregister`, `project_locate`, `project_refresh`, `project_git_status`, `project_checkpoints`, `project_scan`, `project_clone`, `project_clone_new`, `project_context_init`, `project_environment`, `project_history` |
+| Project explorer | `project_tree`, `project_file`, `project_log`, `project_commit`, `project_commit_diff` (read-only, ADR-0040) |
+| Learn | `project_learn_map`, `project_learn_start`, `project_learn_drafts`, `project_learn_decide`, `project_learn_exclude_graph`, `project_learn_graph`, `project_learn_add_folder`, `project_learn_remove_folder` (ADR-0041, ADR-0045) |
+| Push requests | `push_request_open` (pending, and failed until dismissed or superseded), `push_request_review` (fetches first), `push_request_decide`, `push_request_dismiss` (ADR-0043, ADR-0047) |
+| Skills | `skills_list`, `skills_read`, `skills_create`, `skills_save`, `skills_delete` (ADR-0046) |
+| Claude | `claude_setup_status`, `claude_installations`, `profile_list`, `profile_detect`, `profile_register`, `profile_create`, `profile_update`, `profile_set_archived`, `profile_forget`, `profile_details`, `profile_auth_status`, `launch_options`, `nexus_tools` |
+| Sessions | `session_list`, `session_get`, `session_start_claude`, `session_resume`, `session_open_shell`, `session_attach`, `session_write`, `session_resize`, `session_interrupt`, `session_terminate`, `session_release`, `session_rename`, `session_set_archived`, `session_continue_task` |
 | Shell | `shell_list` |
-| Knowledge | `knowledge_overview` (refresh or rebuild + health), `knowledge_read`, `knowledge_search`, `knowledge_create`, `knowledge_update_task` (status, log, checklist, expected hash), `knowledge_approve`, `knowledge_task`, `project_knowledge` (open tasks + branch-relevant notes) |
+| Knowledge | `knowledge_overview` (refresh or rebuild + health), `knowledge_read`, `knowledge_search`, `knowledge_create`, `knowledge_update_task` (status, log, checklist, expected hash), `knowledge_approve`, `knowledge_update` (edit a document, expected hash), `knowledge_task`, `project_knowledge` (open tasks + branch-relevant notes), `needs_you` (what waits for the person, workspace or project — ADR-0048); event `nexus://knowledge` (`{ workspaceId, changed, removed }`) from the desktop's knowledge watcher (ADR-0049) |
 | Instructions | `instructions_inspect` (Claude's own instruction layers + NEXUS append, read-only) |
 | Resume | `project_resume` (verified Git state, saved history, next action — ADR-0021) |
 | Proposals | `knowledge_proposals` (extract + list pending), `knowledge_proposal_approve` (with edits/scope), `knowledge_proposal_reject` (ADR-0022) |
@@ -260,10 +293,10 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Kits | `kit_list`, `kit_register` (local/Git), `kit_approve`, `kit_update`, `kit_remove`, `kit_enable` (selection), `kit_disable`, `kit_validate` (ADR-0024) |
 | Workflows | `workflow_templates`, `workflow_list`, `workflow_get`, `workflow_create`, `workflow_save`, `workflow_save_raw`, `workflow_start`, `workflow_runs`, `workflow_run`, `workflow_review`, `workflow_cancel`, `workflow_retry`, `gates_list`, `gate_upsert`, `gate_approve`, `gate_approval_impact`, `gate_revoke`, `gate_remove`, `gate_suggest`, `gate_run` (ADR-0029) |
 | Usage | `usage_report`, `usage_sessions`, `usage_scan`; event `nexus://usage` from the desktop's usage scanner thread (ADR-0030) |
-| Sync | `sync_status`, `sync_fetch`, `sync_pull`, `sync_diff`, `sync_review_commit`, `sync_commit`, `sync_review_push`, `sync_push`, `sync_clone`, `sync_restore`; event `nexus://sync`; each opens its own database connection (network operations must not hold the shared one) (ADR-0031) |
+| Sync | `sync_status`, `sync_fetch`, `sync_pull`, `sync_diff`, `sync_review_commit`, `sync_commit`, `sync_review_push`, `sync_push`, `sync_clone`, `sync_clone_new`, `sync_restore`, `sync_policy_get`, `sync_policy_set` (ADR-0042); event `nexus://sync`; each opens its own database connection (network operations must not hold the shared one) (ADR-0031) |
 | Context | `context_get`, `context_set` (strategy, custom settings), `context_presets`, `context_analyze`, `context_docs`, `context_inspect` (project, profile for the prediction) (ADR-0028) |
 | Constitutions | `constitution_list`, `constitution_get`, `constitution_create`, `constitution_save` (structure, expected hash), `constitution_save_raw`, `constitution_effective` (project, task, what-if), `constitution_search`, `constitution_history`, `constitution_version` (ADR-0027); approval via `knowledge_approve` |
-| Notifications | `notifications_list` (filters), `notifications_counts`, `notifications_mark_read`, `notifications_dismiss`, `notifications_snooze`, `notifications_prefs`, `notifications_set_prefs`, `notifications_set_view` (visible terminal, time zone), `notifications_availability`, `notifications_test`, `notification_target`; E2E builds only: `e2e_notifications_recorded`, `e2e_notification_activate`, `e2e_focus_state` (ADR-0025) |
+| Notifications | `notifications_list` (filters), `notifications_counts`, `notifications_mark_read`, `notifications_dismiss`, `notifications_snooze`, `notifications_prefs`, `notifications_set_prefs`, `notifications_set_view` (visible terminal, time zone), `notifications_availability`, `notifications_test`, `notification_target`, `notifications_take_activation`; E2E builds only: `e2e_notifications_recorded`, `e2e_notifications_withdrawn`, `e2e_notification_activate`, `e2e_focus_state` (ADR-0025) |
 
 Tauri capabilities grant only `core:default`, `dialog:allow-open` (folder picker) and
 `opener:allow-open-path`/`allow-reveal-item-in-dir`. There is **no** generic filesystem or shell plugin:
@@ -304,3 +337,18 @@ working (session tracking falls back to PTY exit + `claude agents --json`).
   `ops` (fetch, fast-forward pull, reviewed commit and push, clone and restore, file diffs), `history` (machine-local,
   one operation at a time, interrupted operations reconciled by hosts). Git calls in `git.rs` (no shell, no prompts,
   no external diff drivers, `ext::`/`fd::` disabled).
+
+## Push outcomes, "Needs you" and housekeeping (ADR-0047, ADR-0048)
+
+* `nexus_core::push_request` — `review` fetches the request's remote branch first (`git::fetch_branch`, 60 s) and
+  reports ahead/behind/diverged and the incoming commits; `decide` records failures with their kind (migration 0020) and
+  publishes an action notification; `open` lists pending requests and failed ones until dismissed or superseded.
+* `nexus_core::inbox::needs_you` — what waits for the person in a workspace or one project, from existing records only
+  (sessions' attention, push requests, workflow steps, the knowledge index, approvals, kits); IPC `needs_you`.
+* `nexus_core::prune::artifacts` — at desktop start: `<data>/sessions/<id>/` of sessions ended more than 30 days ago
+  (never live ones) and kit overlays of profiles that no longer exist.
+* `claude::prepare` — `prepare` and `preview` share one builder for the appended text (the inspector counts what a launch
+  sends).
+* Desktop: `useAction` / `ActionButton` for every backend call (pending, re-entrancy guard, persistent errors); the
+  project page's tabs; knowledge refresh on window focus and session end — since ADR-0049 the fallback behind the
+  knowledge watcher.

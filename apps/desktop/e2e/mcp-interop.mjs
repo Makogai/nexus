@@ -38,9 +38,12 @@ const client = new Client({ name: 'nexus-interop-check', version: '1.0.0' })
 await client.connect(new StdioClientTransport({ command: nexus, args: ['--data-dir', data, 'mcp', '--session', session.id] }))
 check('initialize handshake with the official SDK', client.getServerVersion()?.name === 'nexus', JSON.stringify(client.getServerVersion()))
 
+// Expected tools come from the server's own definitions, not a literal count that drifts with every new tool.
+const defs = JSON.parse(execFileSync(nexus, ['mcp', '--list-tools'], { encoding: 'utf8' }))
 const { tools } = await client.listTools()
-check('tools/list parsed by the SDK', tools.length === 24, tools.map((t) => t.name).join(', '))
-check('read-only tools are annotated', tools.filter((t) => t.annotations?.readOnlyHint).length === 15)
+check('tools/list parsed by the SDK', defs.length >= 20 && tools.map((t) => t.name).join() === defs.map((t) => t.name).join(), tools.map((t) => t.name).join(', '))
+const readOnly = defs.filter((t) => t.annotations?.readOnlyHint).length
+check('read-only tools are annotated', readOnly > 0 && tools.filter((t) => t.annotations?.readOnlyHint).length === readOnly)
 
 const cp = await client.callTool({ name: 'checkpoint', arguments: { kind: 'progress', summary: 'Player movement works' } })
 check('checkpoint tool call', cp.isError === false)

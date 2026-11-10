@@ -184,32 +184,132 @@ pub fn preview(r: &PreviewRequest<'_>) -> Result<Preview> {
     let mut nexus = NexusAppend {
         work_profile: wp.map(|w| w.name.to_string()),
         work_profile_chars: wp.map(|w| w.prompt.chars().count()).unwrap_or(0),
-        mcp: (!pol.sideload_allowed() || pol.allow_managed_mcp_servers_only || pol.strict_plugin_only_customization)
-            .then(|| "blocked by organisation policy".to_string()),
+        mcp: mcp::blocked_by(&pol).map(|_| "blocked by organisation policy".to_string()),
         hooks: (!pol.session_hooks_allowed()).then(|| "blocked by organisation policy".to_string()),
         isolation_excludes: isolation_excludes(r.home, r.profile, r.cwd),
         ..Default::default()
     };
+    let mut appended = 0;
     if let Some(ws) = r.workspace_id.and_then(|id| workspace::get(r.conn, id).ok()).filter(|w| w.available) {
         service::refresh(r.conn, r.data_dir, &ws)?;
         let project = r.project_id.and_then(|id| project::get(r.conn, id).ok());
-        let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
-        let scope = project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice()));
         let ctx = crate::context::settings_for(r.conn, r.project_id);
-        let rules = context::launch_rules_with(r.conn, &ws.id, scope, Some(&claude), r.task_id, &context::RuleOptions::from(&ctx))?;
-        if let Some(tid) = r.task_id {
-            let v = tasks::view(r.conn, &ws, tid, 4000)?;
-            nexus.task_brief_chars = tasks::pointer(&v.id, "session-start").chars().count()
-                + crate::project::learn::Depth::of_labels(&v.labels)
-                    .map(|d| crate::project::learn::rules(d, &learn_folders(r.conn, v.project_id.as_deref())).chars().count() + 2)
-                    .unwrap_or(0);
-            nexus.task = Some(v.title);
-        }
-        nexus.appended_chars = rules.text.as_deref().map(|t| t.chars().count()).unwrap_or(0) + nexus.task_brief_chars;
-        nexus.rules = Some(rules);
+        let run = r.task_id.and_then(|t| crate::workflow::run::active_for_task(r.conn, t).ok().flatten());
+        // The same builder as a launch, read-only (no task is started): the inspector's counts are the launch's.
+        let a = build_append(&AppendInput {
+            conn: r.conn,
+            data_dir: r.data_dir,
+            ws: &ws,
+            project: project.as_ref(),
+            task_id: r.task_id,
+            inspection: &claude,
+            ctx: &ctx,
+            mcp_on: nexus.mcp.is_none(),
+            hooks_on: nexus.hooks.is_none(),
+            run: run.as_ref(),
+            start_task: false,
+        })?;
+        appended = a.chars();
+        nexus.task_brief_chars = a.task_chars;
+        nexus.task = a.task.map(|v| v.title);
+        nexus.rules = a.rules;
     }
-    nexus.appended_chars += nexus.work_profile_chars;
+    // Launch joins the work profile and NEXUS's text with a blank line (`claude::launch`).
+    nexus.appended_chars = nexus.work_profile_chars + appended + if nexus.work_profile_chars > 0 && appended > 0 { 2 } else { 0 };
     Ok(Preview { claude, nexus })
+}
+
+/// NEXUS-authored text appended after the work profile — approved rules, the commit-message note, the task pointer,
+/// the workflow line, a learning task's rules. One builder for [`prepare`] (which sends it) and [`preview`] (the Context
+/// Inspector's counts), so the two cannot drift.
+struct Append {
+    parts: Vec<String>,
+    rules: Option<context::LaunchRules>,
+    task: Option<tasks::TaskView>,
+    /// Characters of the task-related parts (pointer, workflow line, learning rules) with their separators.
+    task_chars: usize,
+    learn: Option<crate::project::learn::Depth>,
+    add_dirs: Vec<std::path::PathBuf>,
+}
+
+impl Append {
+    fn chars(&self) -> usize {
+        if self.parts.is_empty() { 0 } else { self.parts.iter().map(|p| p.chars().count()).sum::<usize>() + 2 * (self.parts.len() - 1) }
+    }
+}
+
+struct AppendInput<'a> {
+    conn: &'a Connection,
+    data_dir: &'a Path,
+    ws: &'a workspace::Workspace,
+    project: Option<&'a project::Project>,
+    task_id: Option<&'a str>,
+    inspection: &'a Inspection,
+    ctx: &'a crate::context::Settings,
+    mcp_on: bool,
+    hooks_on: bool,
+    run: Option<&'a crate::workflow::run::Run>,
+    /// A new session for the task (prepare only): move a `backlog`/`ready` task to `in-progress` first.
+    start_task: bool,
+}
+
+fn build_append(i: &AppendInput<'_>) -> Result<Append> {
+    let stacks = i.project.map(|p| p.stack.stacks.clone()).unwrap_or_default();
+    let scope = i.project.map(|p| (p.id.as_str(), stacks.as_slice()));
+    let lr = context::launch_rules_with(i.conn, &i.ws.id, scope, Some(i.inspection), i.task_id, &context::RuleOptions::from(i.ctx))?;
+    let mut parts: Vec<String> = lr.text.clone().into_iter().collect();
+    // Commit messages come from the session that made the changes (ADR-0042) — NEXUS-authored, one line.
+    if i.mcp_on {
+        parts.push(COMMIT_MESSAGE_NOTE.to_string());
+    }
+    let mut out = Append { parts: Vec::new(), rules: Some(lr), task: None, task_chars: 0, learn: None, add_dirs: Vec::new() };
+    if let Some(tid) = i.task_id {
+        let v = tasks::view(i.conn, i.ws, tid, 4000)?;
+        if let (Some(tp), Some(p)) = (&v.project_id, i.project)
+            && tp != &p.id
+        {
+            return Err(CoreError::invalid(format!("task “{}” belongs to another project", v.title)));
+        }
+        let v = if i.start_task {
+            tasks::start(i.conn, i.data_dir, i.ws, tid)?;
+            tasks::view(i.conn, i.ws, tid, 4000)?
+        } else {
+            v
+        };
+        let delivery = task_delivery(i.hooks_on, i.mcp_on);
+        // Only NEXUS-authored text and the validated id go into the system prompt; the task's own text is untrusted
+        // workspace content and arrives as data (SessionStart context / tool output).
+        let mut task_parts = vec![tasks::pointer(&v.id, delivery)];
+        if let Some(run) = i.run {
+            // NEXUS-authored and validated only; the workflow's steps arrive as data through the tools.
+            task_parts.push(format!(
+                "NEXUS workflow run {} ({} rigor): follow its steps with the NEXUS tools get_workflow_run and report_step. \
+                 Reporting a step is a claim — NEXUS verifies steps with the project's quality gates itself, and review steps need the user.",
+                service::short_id(&run.id),
+                run.rigor
+            ));
+        }
+        if let Some(depth) = crate::project::learn::Depth::of_labels(&v.labels) {
+            // A learning task (ADR-0041/0045): NEXUS's rules with the depth's budget and the checked extra folders.
+            out.add_dirs = learn_folders(i.conn, v.project_id.as_deref());
+            task_parts.push(crate::project::learn::rules(depth, &out.add_dirs));
+            out.learn = Some(depth);
+        }
+        out.task_chars = task_parts.iter().map(|p| p.chars().count()).sum::<usize>() + 2 * (task_parts.len() - 1);
+        parts.extend(task_parts);
+        out.task = Some(v);
+    }
+    out.parts = parts;
+    Ok(out)
+}
+
+/// How the task's (untrusted) text reaches Claude: hook context at session start, else the MCP tools, else not at all.
+fn task_delivery(hooks_on: bool, mcp_on: bool) -> &'static str {
+    match (hooks_on, mcp_on) {
+        (true, _) => "session-start",
+        (false, true) => "tools",
+        (false, false) => "none",
+    }
 }
 
 pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
@@ -234,11 +334,21 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
     match &ws {
         Some(ws) => {
             service::refresh(r.conn, r.data_dir, ws)?;
-            let stacks = project.as_ref().map(|p| p.stack.stacks.clone()).unwrap_or_default();
-            let scope = project.as_ref().map(|p| (p.id.as_str(), stacks.as_slice()));
-            let lr = context::launch_rules_with(r.conn, &ws.id, scope, Some(&inspection), r.task_id, &context::RuleOptions::from(&ctx))?;
-            parts.extend(lr.text.clone());
-            if !lr.pending_approval.is_empty() {
+            let (mcp_on, hooks_on) = (matches!(mcp, IntegrationStatus::Enabled { .. }), matches!(hooks, IntegrationStatus::Enabled { .. }));
+            let a = build_append(&AppendInput {
+                conn: r.conn,
+                data_dir: r.data_dir,
+                ws,
+                project: project.as_ref(),
+                task_id: r.task_id,
+                inspection: &inspection,
+                ctx: &ctx,
+                mcp_on,
+                hooks_on,
+                run: run.as_ref(),
+                start_task: r.start_task,
+            })?;
+            if let Some(lr) = a.rules.as_ref().filter(|lr| !lr.pending_approval.is_empty()) {
                 // Synced rule changes are not used until reviewed (T19): make the review queue visible.
                 let mut e = crate::notify::NewEvent::new(
                     crate::notify::Category::ReviewRequired,
@@ -252,48 +362,15 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
                 e.project_id = r.project_id.map(str::to_string);
                 let _ = crate::notify::publish(r.conn, e);
             }
-            rules = Some(lr);
-            // Commit messages come from the session that made the changes (ADR-0042) — NEXUS-authored, one line.
-            if matches!(mcp, IntegrationStatus::Enabled { .. }) {
-                parts.push(COMMIT_MESSAGE_NOTE.to_string());
-            }
-            if let Some(tid) = r.task_id {
-                let v = tasks::view(r.conn, ws, tid, 4000)?;
-                if let (Some(tp), Some(p)) = (&v.project_id, &project)
-                    && tp != &p.id
-                {
-                    return Err(CoreError::invalid(format!("task “{}” belongs to another project", v.title)));
-                }
-                let v = if r.start_task {
-                    tasks::start(r.conn, r.data_dir, ws, tid)?;
-                    tasks::view(r.conn, ws, tid, 4000)?
-                } else {
-                    v
-                };
-                let (hooks_on, mcp_on) = (matches!(hooks, IntegrationStatus::Enabled { .. }), matches!(mcp, IntegrationStatus::Enabled { .. }));
-                let delivery = match (hooks_on, mcp_on) {
-                    (true, _) => "session-start",
-                    (false, true) => "tools",
-                    (false, false) => "none",
-                };
-                // Only NEXUS-authored text and the validated id go into the system prompt; the task's own text is
-                // untrusted workspace content and arrives as data (SessionStart context / tool output).
-                parts.push(tasks::pointer(&v.id, delivery));
-                if let Some(run) = &run {
-                    // NEXUS-authored and validated only; the workflow's steps arrive as data through the tools.
-                    parts.push(format!(
-                        "NEXUS workflow run {} ({} rigor): follow its steps with the NEXUS tools get_workflow_run and report_step. \
-                         Reporting a step is a claim — NEXUS verifies steps with the project's quality gates itself, and review steps need the user.",
-                        service::short_id(&run.id),
-                        run.rigor
-                    ));
-                }
-                if let Some(depth) = crate::project::learn::Depth::of_labels(&v.labels) {
-                    // A learning task (ADR-0041): NEXUS's rules with the depth's budget, and the built-in skill for this
-                    // session only — unless policy forbids --plugin-dir or an AI Kit already uses the name `nexus`.
-                    // Extra folders (ADR-0045): machine-local, checked again now, for this learning session only.
-                    add_dirs = learn_folders(r.conn, v.project_id.as_deref());
-                    parts.push(crate::project::learn::rules(depth, &add_dirs));
+            rules = a.rules;
+            parts = a.parts;
+            if let Some(v) = a.task {
+                let delivery = task_delivery(hooks_on, mcp_on);
+                if let Some(depth) = a.learn {
+                    // A learning task (ADR-0041): the built-in skill for this session only — unless policy forbids
+                    // --plugin-dir or an AI Kit already uses the name `nexus`. Extra folders (ADR-0045) were checked
+                    // again by the builder, for this learning session only.
+                    add_dirs = a.add_dirs;
                     let withheld = crate::kits::blocked_by(&pol).map(str::to_string).or_else(|| {
                         kit_launches.iter().any(|k| k.name == builtin::PLUGIN).then(|| format!("an AI Kit of this profile is named “{}”", builtin::PLUGIN))
                     });
@@ -347,6 +424,57 @@ mod tests {
     use super::*;
     use crate::claude::profile::{self, ProfileInput};
     use crate::knowledge::service::{Author, CreateInput};
+
+    /// One builder (0.5 alpha): the Context Inspector's count is exactly what a launch appends — rules, the commit-message
+    /// note, the task pointer and the workflow line, plus the work profile and the blank line `claude::launch` puts
+    /// between them.
+    #[test]
+    fn the_inspector_preview_counts_exactly_what_a_launch_appends() {
+        let t = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(t.path()).unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        let (home, data) = (root.join("home"), root.join("data"));
+        let ws = workspace::create(&conn, root.join("ws").to_str().unwrap(), "W", "").unwrap();
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let p = project::register(&conn, &ws.id, repo.to_str().unwrap(), Some("repo")).unwrap();
+        let input = ProfileInput { name: "P".into(), config_dir: Some(root.join("cfg").to_string_lossy().into_owned()), ..Default::default() };
+        let prof = profile::create_managed(&conn, &input, &home).unwrap();
+        service::create(&conn, &data, &ws, &CreateInput { kind: "rule".into(), title: "Tests".into(), body: "Every change ships with a test.".into(), applies: Some("always".into()), ..Default::default() }, Author::Human).unwrap();
+        let task = service::create(&conn, &data, &ws, &CreateInput { kind: "task".into(), title: "Add login".into(), project_id: Some(p.id.clone()), ..Default::default() }, Author::Human).unwrap();
+        let tid = task.id.clone().unwrap();
+        conn.execute(
+            "INSERT INTO workflow_runs(id, workspace_id, project_id, workflow_id, workflow_title, workflow_hash, definition, task_id, rigor, status, created_at, updated_at)
+             VALUES ('01a1c500-0000-7000-8000-0000000000aa', ?1, ?2, 'wf', 'Bug fix', 'h', '{}', ?3, 'professional', 'running', 1, 1)",
+            rusqlite::params![ws.id, p.id, tid],
+        )
+        .unwrap();
+        // A `nexus` executable next to NEXUS: MCP and hooks are enabled, as in a real launch.
+        let exe = root.join("nexus-test.exe");
+        std::fs::write(&exe, "").unwrap();
+        let machine = MachinePolicyLocations::default();
+        let prepared = prepare(&Request {
+            conn: &conn, data_dir: &data, home: &home, profile: &prof, machine: &machine, nexus_exe: Some(&exe),
+            nexus_session_id: "00000000-0000-4000-8000-000000000002", workspace_id: Some(&ws.id), project_id: Some(&p.id), task_id: Some(&tid),
+            cwd: &repo, base_env: &[], start_task: false,
+        })
+        .unwrap();
+        let prompt = prepared.prompt.clone().unwrap();
+        assert!(prompt.contains(COMMIT_MESSAGE_NOTE) && prompt.contains("NEXUS workflow run") && prompt.contains("Every change ships with a test."), "{prompt}");
+        let sent = prepared.integrations.prompt_chars.unwrap();
+        assert_eq!(sent, prompt.chars().count());
+
+        let view = preview(&PreviewRequest {
+            conn: &conn, data_dir: &data, home: &home, profile: &prof, machine: &machine, workspace_id: Some(&ws.id), project_id: Some(&p.id),
+            task_id: Some(&tid), cwd: &repo, base_env: &[], work_profile: Some("prototype"),
+        })
+        .unwrap();
+        let wp = crate::workprofile::get("prototype").unwrap().prompt.chars().count();
+        assert_eq!(view.nexus.work_profile_chars, wp);
+        assert_eq!(view.nexus.appended_chars, wp + 2 + sent, "the preview counts the launch's appended text exactly");
+        assert_eq!(view.nexus.task.as_deref(), Some("Add login"));
+        assert!(view.nexus.task_brief_chars > 0 && view.nexus.task_brief_chars < sent);
+    }
 
     #[test]
     fn task_sessions_get_a_brief_and_no_duplicate_rules() {

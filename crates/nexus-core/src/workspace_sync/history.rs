@@ -98,6 +98,15 @@ pub fn last_ok(conn: &Connection, workspace_id: &str, op: &str) -> Result<Option
         .flatten())
 }
 
+/// The error kind of the latest `op` entry (e.g. `rejected` for a push Git refused) — the sync operations return plain
+/// errors and keep the kind here.
+pub fn last_error_kind(conn: &Connection, workspace_id: &str, op: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT error_kind FROM sync_history WHERE workspace_id = ?1 AND op = ?2 ORDER BY started_at DESC, rowid DESC LIMIT 1", params![workspace_id, op], |r| r.get(0))
+        .optional()?
+        .flatten())
+}
+
 /// Operations whose host died are interrupted (called when a host starts, like session reconciliation).
 pub fn reconcile(conn: &Connection, now: i64) -> Result<usize> {
     let running: Vec<(String, Option<String>)> = conn

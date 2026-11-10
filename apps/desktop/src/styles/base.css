@@ -610,6 +610,10 @@ button.list-row:focus-visible {
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
+.notice-ok {
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  color: var(--green);
+}
 
 .spin {
   animation: spin 0.9s linear infinite;

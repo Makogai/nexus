@@ -2,6 +2,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type {
   AppInfo,
+  NeedsYouItem,
   ClaudeSetupStatus,
   ContextInitialized,
   DevHistory,
@@ -152,6 +153,8 @@ export const WORKFLOW_EVENT = 'nexus://workflows'
 export const USAGE_EVENT = 'nexus://usage'
 /** A sync operation finished (or was refused) — the Sync Center refreshes (ADR-0031). */
 export const SYNC_EVENT = 'nexus://sync'
+/** Knowledge files changed on disk and the index followed (the desktop's watcher, ADR-0049). */
+export const KNOWLEDGE_EVENT = 'nexus://knowledge'
 
 export const api = {
   appInfo: () => call<AppInfo>('app_info'),
@@ -253,7 +256,9 @@ export const api = {
   /** What NEXUS gives Claude sessions: built-in skills, the MCP server's tools (from `nexus mcp --list-tools`), hooks. */
   nexusTools: () => call<NexusTools>('nexus_tools'),
   /** Push requests of Claude sessions (ADR-0043): pending ones, the review, and the person's decision. */
-  pushRequestPending: (projectId?: string | null) => call<PushRequest[]>('push_request_pending', { projectId: projectId ?? null }),
+  needsYou: (workspaceId: string, projectId?: string | null) => call<NeedsYouItem[]>('needs_you', { workspaceId, projectId: projectId ?? null }),
+  pushRequestOpen: (projectId?: string | null) => call<PushRequest[]>('push_request_open', { projectId: projectId ?? null }),
+  pushRequestDismiss: (id: string) => call<PushRequest>('push_request_dismiss', { id }),
   pushRequestReview: (id: string) => call<PushReview>('push_request_review', { id }),
   pushRequestDecide: (id: string, approve: boolean, token: string) => call<PushRequest>('push_request_decide', { id, approve, token }),
   /** Hand a task to a running Claude session of its project (NEXUS types a fixed message with the task id). */

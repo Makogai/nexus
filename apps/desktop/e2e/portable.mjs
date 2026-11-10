@@ -227,7 +227,7 @@ try {
   const recorded = existsSync(envFile) ? readFileSync(envFile, 'utf8') : ''
   check('the environment is recorded in the workspace from the project\u2019s files', recorded.includes('">=999"') && recorded.includes('package.json engines.node') && recorded.includes('"db"'), recorded.slice(0, 120))
   check('…environment variables by name only, never values and never .env', recorded.includes('API_TOKEN') && !recorded.includes('replace-me') && !recorded.includes('LOCAL_ONLY_SECRET'))
-  await cdp.evaluate(`location.hash = '#/projects/${envProject.id}'; location.reload(); true`)
+  await cdp.evaluate(`location.hash = '#/projects/${envProject.id}?tab=settings'; location.reload(); true`)
   await cdp.waitFor(`document.querySelector('[data-env-check]')`, 20000)
   await click('[data-env-check]')
   const nodeRow = await cdp.waitFor(`document.querySelector('[data-env-row="node"]')?.innerText`, 60000).catch(() => '')

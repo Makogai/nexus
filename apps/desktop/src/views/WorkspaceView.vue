@@ -4,7 +4,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { CircleAlert, CircleCheck, Info, LayoutTemplate, RefreshCw, Stethoscope, TriangleAlert, Wrench } from '@lucide/vue'
+import ActionButton from '../components/ActionButton.vue'
 import BaseModal from '../components/BaseModal.vue'
+import { useAction } from '../composables/useAction'
 import { api, toIpcError } from '../lib/ipc'
 import type { DoctorFinding, DoctorReport, RepairPlan, TemplatePlan, TemplateSummary } from '../lib/types'
 import { relativeTime } from '../lib/format'
@@ -17,7 +19,7 @@ const router = useRouter()
 const ws = computed(() => workspaces.active)
 const report = ref<DoctorReport | null>(null)
 const templates = ref<TemplateSummary[]>([])
-const busy = ref(false)
+const checking = ref(false)
 const repairPlan = ref<RepairPlan | null>(null)
 const templatePlan = ref<TemplatePlan | null>(null)
 
@@ -30,13 +32,13 @@ const current = computed(() => ws.value?.template ?? null)
 
 async function load() {
   if (!ws.value) return
-  busy.value = true
+  checking.value = true
   try {
     ;[report.value, templates.value] = await Promise.all([api.workspaceDoctor(ws.value.id), api.templateList()])
   } catch (e) {
     app.toast('error', `Workspace Doctor failed: ${toIpcError(e).message}`)
   } finally {
-    busy.value = false
+    checking.value = false
   }
 }
 onMounted(load)
@@ -47,39 +49,33 @@ function go(f: DoctorFinding) {
   if (name && name !== 'workspace') router.push({ name })
 }
 
-async function reviewRepair(id: string) {
-  if (!ws.value) return
-  try {
-    repairPlan.value = await api.workspaceRepairPlan(ws.value.id, id)
-  } catch (e) {
-    app.toast('error', toIpcError(e).message)
-  }
-}
+const reviewingRepair = useAction(
+  async (wsId: string, id: string) => {
+    repairPlan.value = await api.workspaceRepairPlan(wsId, id)
+  },
+  { failure: 'Could not prepare the repair', key: (_ws: string, id: string) => id },
+)
+const reviewRepair = (id: string) => ws.value && reviewingRepair.run(ws.value.id, id)
 
-async function applyRepair() {
-  if (!ws.value || !repairPlan.value) return
-  busy.value = true
-  try {
-    const done = await api.workspaceRepair(ws.value.id, repairPlan.value.id)
+const applyingRepair = useAction(
+  async (wsId: string, planId: string) => {
+    const done = await api.workspaceRepair(wsId, planId)
     repairPlan.value = null
     app.toast('success', done.message, 6000)
     await workspaces.load()
     await load()
-  } catch (e) {
-    app.toast('error', `Repair failed: ${toIpcError(e).message}`)
-  } finally {
-    busy.value = false
-  }
-}
+  },
+  { failure: 'Repair failed' },
+)
+const applyRepair = () => ws.value && repairPlan.value && applyingRepair.run(ws.value.id, repairPlan.value.id)
 
-async function reviewTemplate(id: string) {
-  if (!ws.value) return
-  try {
-    templatePlan.value = await api.templatePlan(ws.value.id, id)
-  } catch (e) {
-    app.toast('error', toIpcError(e).message)
-  }
-}
+const reviewingTemplate = useAction(
+  async (wsId: string, id: string) => {
+    templatePlan.value = await api.templatePlan(wsId, id)
+  },
+  { failure: 'Could not prepare the template', key: (_ws: string, id: string) => id },
+)
+const reviewTemplate = (id: string) => ws.value && reviewingTemplate.run(ws.value.id, id)
 
 const planCounts = computed(() => {
   const c: Record<string, number> = {}
@@ -96,21 +92,20 @@ const ACTION_LABEL: Record<string, string> = {
   unchanged: 'unchanged files',
 }
 
-async function applyTemplate() {
-  if (!ws.value || !templatePlan.value) return
-  busy.value = true
-  try {
-    const done = await api.templateApply(ws.value.id, templatePlan.value.template.id)
+const applyingTemplate = useAction(
+  async (wsId: string, templateId: string) => {
+    const done = await api.templateApply(wsId, templateId)
     templatePlan.value = null
     app.toast('success', `${done.plan.template.id} ${done.plan.template.version}: ${done.written.length} file(s) written${done.savedForReview.length ? `, ${done.savedForReview.length} saved to compare` : ''}`, 6000)
     await workspaces.load()
     await load()
-  } catch (e) {
-    app.toast('error', `Template failed — nothing was changed: ${toIpcError(e).message}`)
-  } finally {
-    busy.value = false
-  }
-}
+  },
+  { failure: 'Template failed — nothing was changed' },
+)
+const applyTemplate = () => ws.value && templatePlan.value && applyingTemplate.run(ws.value.id, templatePlan.value.template.id)
+
+/** The Doctor is checking or a repair or template is being applied. */
+const busy = computed(() => checking.value || applyingRepair.pending.value || applyingTemplate.pending.value)
 </script>
 
 <template>
@@ -122,7 +117,7 @@ async function applyTemplate() {
       </div>
       <div class="page-actions">
         <button class="btn btn-ghost" data-open-restore @click="router.push({ name: 'restore' })">Restore on this computer</button>
-        <button class="btn btn-ghost" :disabled="busy" data-doctor-refresh @click="load"><RefreshCw :class="{ spin: busy }" /> Check again</button>
+        <ActionButton class="btn-ghost" :pending="checking" pending-label="Checking…" :disabled="busy" data-doctor-refresh @click="load"><template #icon><RefreshCw /></template>Check again</ActionButton>
       </div>
     </div>
 
@@ -155,7 +150,9 @@ async function applyTemplate() {
               <div v-if="f.recommendation" class="rec">{{ f.recommendation }}</div>
             </div>
             <div class="actions">
-              <button v-if="f.repair" class="btn btn-sm" :data-repair="f.repair.id" @click="reviewRepair(f.repair.id)"><Wrench /> {{ f.repair.title }}</button>
+              <ActionButton v-if="f.repair" class="btn-sm" :pending="reviewingRepair.isPending(f.repair.id)" :disabled="reviewingRepair.pending.value" :data-repair="f.repair.id" @click="reviewRepair(f.repair.id)">
+                <template #icon><Wrench /></template>{{ f.repair.title }}
+              </ActionButton>
               <button v-if="f.navigate && f.navigate !== 'workspace' && VIEWS[f.navigate]" class="btn btn-sm btn-ghost" @click="go(f)">Open</button>
             </div>
           </li>
@@ -180,7 +177,9 @@ async function applyTemplate() {
               <p class="faint">{{ t.summary }}</p>
               <p class="counts">{{ t.constitutions }} constitutions · {{ t.stackRuleSets }} stack rule sets · {{ t.skills }} skills · {{ t.workflows }} workflows · {{ t.integrations }} integrations · always on: {{ t.alwaysOnChars }} characters</p>
             </div>
-            <button class="btn btn-sm" :disabled="busy || !ws.compat?.writable" :data-template-review="t.id" @click="reviewTemplate(t.id)">{{ current?.id === t.id ? 'Check for updates' : current ? 'Switch…' : 'Install…' }}</button>
+            <ActionButton class="btn-sm" :pending="reviewingTemplate.isPending(t.id)" pending-label="Preparing…" :disabled="busy || reviewingTemplate.pending.value || !ws.compat?.writable" :data-template-review="t.id" @click="reviewTemplate(t.id)">
+              {{ current?.id === t.id ? 'Check for updates' : current ? 'Switch…' : 'Install…' }}
+            </ActionButton>
           </div>
         </div>
       </section>
@@ -193,7 +192,7 @@ async function applyTemplate() {
       </template>
       <template #footer>
         <button class="btn btn-ghost" @click="repairPlan = null">Cancel</button>
-        <button class="btn btn-primary" :disabled="busy" data-repair-apply @click="applyRepair">Apply</button>
+        <ActionButton class="btn-primary" :pending="applyingRepair.pending.value" pending-label="Applying…" :disabled="busy" data-repair-apply @click="applyRepair">Apply</ActionButton>
       </template>
     </BaseModal>
 
@@ -206,7 +205,16 @@ async function applyTemplate() {
       </template>
       <template #footer>
         <button class="btn btn-ghost" @click="templatePlan = null">Cancel</button>
-        <button class="btn btn-primary" :disabled="busy || !(planCounts.add || planCounts.update || planCounts['keep-customized'] || templatePlan?.installed?.version !== templatePlan?.template.version)" data-template-apply @click="applyTemplate">Apply</button>
+        <ActionButton
+          class="btn-primary"
+          :pending="applyingTemplate.pending.value"
+          pending-label="Applying the template…"
+          :disabled="busy || !(planCounts.add || planCounts.update || planCounts['keep-customized'] || templatePlan?.installed?.version !== templatePlan?.template.version)"
+          data-template-apply
+          @click="applyTemplate"
+        >
+          Apply
+        </ActionButton>
       </template>
     </BaseModal>
   </div>

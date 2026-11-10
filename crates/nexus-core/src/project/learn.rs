@@ -329,6 +329,11 @@ fn project_items(conn: &Connection, ws: &Workspace, project_id: &str, kind: Kind
     index::list(conn, &ws.id, &Filter { kinds: vec![kind], project_id: Some(project_id.to_string()), ..Default::default() })
 }
 
+/// Drafts waiting for the person, as index items with their topic — without reading their bodies (the inbox).
+pub fn open_drafts(conn: &Connection, ws: &Workspace, project_id: &str) -> Result<Vec<(Item, String)>> {
+    open_draft_notes(conn, ws, project_id)
+}
+
 fn open_draft_notes(conn: &Connection, ws: &Workspace, project_id: &str) -> Result<Vec<(Item, String)>> {
     Ok(project_items(conn, ws, project_id, Kind::Note)?
         .into_iter()

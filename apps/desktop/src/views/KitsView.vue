@@ -6,6 +6,8 @@ import { KIT_STATUS, listingTokens } from '../lib/kits'
 import type { KitSelection, KitValidation, KitView } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
+import { useAction } from '../composables/useAction'
+import ActionButton from '../components/ActionButton.vue'
 import KitProfileCard from '../components/KitProfileCard.vue'
 import RegisterKitDialog from '../components/RegisterKitDialog.vue'
 
@@ -16,7 +18,6 @@ const profiles = useProfileStore()
 const kits = ref<KitView[]>([])
 const selectedId = ref<string | null>(null)
 const registering = ref(false)
-const busy = ref(false)
 const validation = ref<KitValidation | null>(null)
 const error = ref<string | null>(null)
 
@@ -38,20 +39,43 @@ onMounted(() => {
 })
 onActivated(load)
 
-async function act<T>(fn: () => Promise<T>, failure: string, success?: string) {
-  busy.value = true
-  const r = await app.attempt(fn, failure)
-  busy.value = false
-  if (r !== undefined && success) app.toast('success', success)
-  await load()
-  return r
+// Every kit action reloads the list afterwards, whether it worked or not.
+async function thenLoad<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call
+  } finally {
+    await load()
+  }
 }
-const approve = () => kit.value && act(() => api.kitApprove(kit.value!.id), 'Could not approve', `Approved ${kit.value.name} — this exact content`)
-const update = () => kit.value && act(() => api.kitUpdate(kit.value!.id), 'Could not update')
-async function validate() {
-  if (!kit.value) return
-  validation.value = (await act(() => api.kitValidate(kit.value!.id), 'Could not run the validator')) ?? null
-}
+const refreshing = useAction(load)
+const approving = useAction(
+  async (k: KitView) => {
+    await thenLoad(api.kitApprove(k.id))
+    return k.name
+  },
+  { failure: 'Could not approve', success: (name) => `Approved ${name} — this exact content` },
+)
+const updating = useAction((id: string) => thenLoad(api.kitUpdate(id)), { failure: 'Could not update' })
+const validating = useAction(
+  async (id: string) => {
+    try {
+      validation.value = await thenLoad(api.kitValidate(id))
+    } catch (e) {
+      validation.value = null
+      throw e
+    }
+  },
+  { failure: 'Could not run the validator' },
+)
+const removing = useAction((id: string) => thenLoad(api.kitRemove(id)), { failure: 'Could not remove' })
+const saving = useAction((id: string, profileId: string, sel: KitSelection) => thenLoad(api.kitEnable(id, profileId, sel)), { failure: 'Could not save', success: 'Saved — applies to new sessions' })
+const disabling = useAction((id: string, profileId: string) => thenLoad(api.kitDisable(id, profileId)), { failure: 'Could not disable' })
+/** One kit action at a time: the others wait while one runs. */
+const busy = computed(() => [approving, updating, validating, removing, saving, disabling].some((a) => a.pending.value))
+
+const approve = () => kit.value && approving.run(kit.value)
+const update = () => kit.value && updating.run(kit.value.id)
+const validate = () => kit.value && validating.run(kit.value.id)
 async function remove() {
   if (!kit.value) return
   const ok = await app.confirm({
@@ -60,13 +84,13 @@ async function remove() {
     confirmLabel: 'Remove kit',
     danger: true,
   })
-  if (!ok) return
-  await act(() => api.kitRemove(kit.value!.id), 'Could not remove')
+  if (!ok || !kit.value) return
+  await removing.run(kit.value.id)
   selectedId.value = null
   await load()
 }
-const save = (profileId: string, sel: KitSelection) => kit.value && act(() => api.kitEnable(kit.value!.id, profileId, sel), 'Could not save', 'Saved — applies to new sessions')
-const disable = (profileId: string) => kit.value && act(() => api.kitDisable(kit.value!.id, profileId), 'Could not disable')
+const save = (profileId: string, sel: KitSelection) => kit.value && saving.run(kit.value.id, profileId, sel)
+const disable = (profileId: string) => kit.value && disabling.run(kit.value.id, profileId)
 function registered(k: KitView) {
   selectedId.value = k.id
   load()
@@ -81,7 +105,7 @@ function registered(k: KitView) {
         <p>Claude Code plugins and skill folders, enabled per profile for NEXUS sessions — only the skills you choose reach Claude's context.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost" @click="load"><RefreshCw /> Refresh</button>
+        <ActionButton class="btn-ghost" :pending="refreshing.pending.value" @click="refreshing.run()"><template #icon><RefreshCw /></template>Refresh</ActionButton>
         <button class="btn btn-primary" data-register-kit @click="registering = true"><Plus /> Register kit</button>
       </div>
     </div>
@@ -110,16 +134,20 @@ function registered(k: KitView) {
             <p v-if="kit.inventory.description">{{ kit.inventory.description }}</p>
           </div>
           <div class="actions">
-            <button class="btn btn-sm" :disabled="busy" @click="update"><CloudDownload /> {{ kit.sourceKind === 'git' ? 'Fetch update' : 'Re-read' }}</button>
-            <button class="btn btn-sm" :disabled="busy" data-validate @click="validate">Validate with Claude</button>
-            <button class="btn btn-sm btn-ghost" :disabled="busy" @click="remove"><Trash2 /></button>
+            <ActionButton class="btn-sm" :pending="updating.pending.value" :pending-label="kit.sourceKind === 'git' ? 'Fetching the update…' : 'Reading…'" :disabled="busy" data-kit-update @click="update">
+              <template #icon><CloudDownload /></template>{{ kit.sourceKind === 'git' ? 'Fetch update' : 'Re-read' }}
+            </ActionButton>
+            <ActionButton class="btn-sm" :pending="validating.pending.value" pending-label="Validating…" :disabled="busy" data-validate @click="validate">Validate with Claude</ActionButton>
+            <ActionButton class="btn-sm btn-ghost" :pending="removing.pending.value" :disabled="busy" title="Remove kit" data-kit-remove @click="remove"><template #icon><Trash2 /></template></ActionButton>
           </div>
         </header>
 
         <div v-if="kit.status !== 'approved'" class="notice notice-warn approve" data-review>
           <TriangleAlert />
           <span>{{ kit.status === 'changed' ? 'The kit changed since you approved it. Sessions do not get it until you review the new content.' : 'Review the contents below. No session gets this kit until you approve this exact version.' }}</span>
-          <button class="btn btn-sm btn-primary" :disabled="busy || kit.status === 'missing'" data-approve @click="approve"><ShieldCheck /> Approve this version</button>
+          <ActionButton class="btn-sm btn-primary" :pending="approving.pending.value" pending-label="Approving…" :disabled="busy || kit.status === 'missing'" data-approve @click="approve">
+            <template #icon><ShieldCheck /></template>Approve this version
+          </ActionButton>
         </div>
         <div v-for="p in kit.inventory.problems" :key="p" class="notice notice-error"><TriangleAlert /> {{ p }}</div>
         <pre v-if="validation" class="validation selectable" :class="{ ok: validation.ok }">{{ validation.ok ? '✔ claude plugin validate passed' : '✘ claude plugin validate failed' }}

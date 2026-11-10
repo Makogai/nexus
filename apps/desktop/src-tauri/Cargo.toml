@@ -25,6 +25,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 nexus-core.workspace = true
+notify = "8"
 portable-pty = "0.9"
 serde.workspace = true
 serde_json.workspace = true

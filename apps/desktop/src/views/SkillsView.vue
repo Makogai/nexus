@@ -4,12 +4,14 @@
 // person writes and edits workspace and project skills here; built-in and kit skills are shown as Claude reads them.
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FolderGit2, Package, Plus, RefreshCw, Save, ShieldCheck, Sparkles, Trash2, TriangleAlert, Undo2 } from '@lucide/vue'
+import { FolderGit2, LoaderCircle, Package, Plus, RefreshCw, Save, ShieldCheck, Sparkles, Trash2, TriangleAlert, Undo2 } from '@lucide/vue'
 import { api, toIpcError } from '../lib/ipc'
 import type { SkillEntry, SkillFile, SkillScope } from '../lib/types'
+import { useAction } from '../composables/useAction'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useWorkspaceStore } from '../stores/workspaces'
+import ActionButton from '../components/ActionButton.vue'
 import BaseModal from '../components/BaseModal.vue'
 import CodeEditor from '../components/CodeEditor.vue'
 
@@ -25,7 +27,6 @@ const query = ref('')
 const selectedKey = ref<string | null>(null)
 const file = ref<SkillFile | null>(null)
 const text = ref('')
-const busy = ref(false)
 
 const keyOf = (s: SkillEntry) => `${s.scope}:${s.projectId ?? s.kitId ?? ''}:${s.name}`
 const dirty = computed(() => !!file.value?.entry.editable && text.value !== file.value.text)
@@ -80,6 +81,7 @@ async function load() {
     error.value = toIpcError(e).message
   }
 }
+const refreshing = useAction(load)
 onMounted(load)
 onActivated(() => {
   if (!dirty.value) void load()
@@ -106,16 +108,16 @@ async function open(s: SkillEntry) {
     app.toast('error', toIpcError(e).message)
   }
 }
+const opening = useAction(open, { key: keyOf })
 
 function editableScope(s: SkillEntry): 'workspace' | 'project' {
   return s.scope === 'project' ? 'project' : 'workspace'
 }
 
-async function save() {
+const saving = useAction(async () => {
   const ws = workspaces.active
   const f = file.value
-  if (!ws || !f || !dirty.value || busy.value) return
-  busy.value = true
+  if (!ws || !f || !dirty.value) return
   try {
     const r = await api.skillsSave(ws.id, editableScope(f.entry), f.entry.projectId, f.entry.name, text.value, f.hash)
     file.value = r.file
@@ -124,17 +126,15 @@ async function save() {
     skills.value = await api.skillsList(ws.id)
   } catch (e) {
     const err = toIpcError(e)
-    app.toast('error', err.code === 'conflict' ? 'The skill changed on disk since you opened it — copy your text, open it again and apply your change.' : `Not saved: ${err.message}`, 9000)
-  } finally {
-    busy.value = false
+    app.toast('error', err.code === 'conflict' ? 'The skill changed on disk since you opened it — copy your text, open it again and apply your change.' : `Not saved: ${err.message}`)
   }
-}
+})
 
 function revert() {
   if (file.value) text.value = file.value.text
 }
 
-async function remove() {
+const deleting = useAction(async () => {
   const ws = workspaces.active
   const f = file.value
   if (!ws || !f?.entry.editable) return
@@ -149,14 +149,14 @@ async function remove() {
     text.value = ''
     await load()
   } catch (e) {
-    app.toast('error', toIpcError(e).message, 9000)
+    app.toast('error', toIpcError(e).message)
   }
-}
+})
 
 function onKey(ev: KeyboardEvent) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
     ev.preventDefault()
-    void save()
+    void saving.run()
   }
 }
 
@@ -166,7 +166,6 @@ const newScope = ref<'workspace' | 'project'>('workspace')
 const newProject = ref<string | null>(null)
 const newName = ref('')
 const newDescription = ref('')
-const createError = ref<string | null>(null)
 const availableProjects = computed(() => projects.list.filter((p) => p.available))
 const nameOk = computed(() => /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/.test(newName.value) && !/anthropic|claude/.test(newName.value))
 
@@ -175,7 +174,7 @@ function startCreate(scope: 'workspace' | 'project' = 'workspace') {
   newProject.value = availableProjects.value[0]?.id ?? null
   newName.value = ''
   newDescription.value = ''
-  createError.value = null
+  createSkill.clearError()
   creating.value = true
 }
 
@@ -183,24 +182,18 @@ function tidyName() {
   newName.value = newName.value.toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '')
 }
 
-async function create() {
+// A failed create keeps the dialog open with the reason until the next attempt.
+const createSkill = useAction(async () => {
   const ws = workspaces.active
   if (!ws || !nameOk.value || !newDescription.value.trim()) return
-  busy.value = true
-  createError.value = null
-  try {
-    const r = await api.skillsCreate(ws.id, newScope.value, newScope.value === 'project' ? newProject.value : null, newName.value, newDescription.value)
-    creating.value = false
-    app.toast(r.outcome === 'needs-review' ? 'info' : 'success', r.message, 7000)
-    skills.value = await api.skillsList(ws.id)
-    filter.value = 'all'
-    await open(r.file.entry)
-  } catch (e) {
-    createError.value = toIpcError(e).message
-  } finally {
-    busy.value = false
-  }
-}
+  const r = await api.skillsCreate(ws.id, newScope.value, newScope.value === 'project' ? newProject.value : null, newName.value, newDescription.value)
+  creating.value = false
+  app.toast(r.outcome === 'needs-review' ? 'info' : 'success', r.message, 7000)
+  skills.value = await api.skillsList(ws.id)
+  filter.value = 'all'
+  await open(r.file.entry)
+})
+const busy = computed(() => saving.pending.value || deleting.pending.value || createSkill.pending.value)
 </script>
 
 <template>
@@ -211,7 +204,7 @@ async function create() {
         <p>Every skill a NEXUS session can get. Write your own for the whole workspace (synced, every project) or for one project (in its repository) — Claude loads a skill when its description matches the work.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost" @click="load"><RefreshCw /> Refresh</button>
+        <ActionButton class="btn-ghost" :pending="refreshing.pending.value" data-skill-refresh @click="refreshing.run()"><template #icon><RefreshCw /></template> Refresh</ActionButton>
         <button class="btn btn-primary" data-skill-new @click="startCreate()"><Plus /> New skill</button>
       </div>
     </div>
@@ -235,11 +228,13 @@ async function create() {
             :key="keyOf(s)"
             class="skill-item"
             :class="{ active: keyOf(s) === selectedKey }"
+            :disabled="opening.isPending(keyOf(s))"
+            :aria-busy="opening.isPending(keyOf(s)) ? 'true' : undefined"
             :data-skill="s.invokeAs"
             :data-skill-project="s.projectName ?? undefined"
-            @click="open(s)"
+            @click="opening.run(s)"
           >
-            <span class="row1"><code class="name">{{ s.invokeAs }}</code><span class="badge" :class="STATUS[s.status]?.tone">{{ STATUS[s.status]?.label ?? s.status }}</span></span>
+            <span class="row1"><code class="name">{{ s.invokeAs }}</code><LoaderCircle v-if="opening.isPending(keyOf(s))" class="spin pending-ic" aria-hidden="true" /><span class="badge" :class="STATUS[s.status]?.tone">{{ STATUS[s.status]?.label ?? s.status }}</span></span>
             <span v-if="s.projectName || s.kitName" class="faint small">{{ s.projectName ?? s.kitName }}</span>
             <span class="desc small">{{ s.description || 'No description — Claude cannot tell when to use it.' }}</span>
           </button>
@@ -261,8 +256,8 @@ async function create() {
           <div class="actions">
             <template v-if="file.entry.editable">
               <button class="btn btn-sm" :disabled="!dirty || busy" @click="revert"><Undo2 /> Revert</button>
-              <button class="btn btn-sm btn-primary" :disabled="!dirty || busy" data-skill-save @click="save"><Save /> {{ busy ? 'Saving…' : 'Save' }}</button>
-              <button class="btn btn-sm btn-ghost" :disabled="busy" :aria-label="`Delete ${file.entry.invokeAs}`" title="Delete skill" data-skill-delete @click="remove"><Trash2 /></button>
+              <ActionButton class="btn-sm btn-primary" :pending="saving.pending.value" :disabled="!dirty || busy" pending-label="Saving…" data-skill-save @click="saving.run()"><template #icon><Save /></template> Save</ActionButton>
+              <ActionButton class="btn-sm btn-ghost" :pending="deleting.pending.value" :disabled="busy" :aria-label="`Delete ${file.entry.invokeAs}`" title="Delete skill" data-skill-delete @click="deleting.run()"><template #icon><Trash2 /></template></ActionButton>
             </template>
           </div>
         </header>
@@ -303,10 +298,19 @@ async function create() {
         <textarea id="skill-description" v-model="newDescription" class="input" rows="3" maxlength="1024" data-new-description placeholder="Draft release notes from merged changes. Use when preparing a release." />
         <span class="hint">What it does and when Claude should use it — Claude reads only this line to decide whether to load the skill.</span>
       </div>
-      <div v-if="createError" class="notice notice-error selectable"><TriangleAlert /> {{ createError }}</div>
+      <div v-if="createSkill.error.value" class="notice notice-error selectable" data-new-error><TriangleAlert /> {{ createSkill.error.value }}</div>
       <template #footer>
         <button class="btn" @click="creating = false">Cancel</button>
-        <button class="btn btn-primary" :disabled="!nameOk || !newDescription.trim() || busy || (newScope === 'project' && !newProject)" data-new-create @click="create">Create skill</button>
+        <ActionButton
+          class="btn-primary"
+          :pending="createSkill.pending.value"
+          :disabled="!nameOk || !newDescription.trim() || busy || (newScope === 'project' && !newProject)"
+          pending-label="Creating…"
+          data-new-create
+          @click="createSkill.run()"
+        >
+          Create skill
+        </ActionButton>
       </template>
     </BaseModal>
   </div>
@@ -429,6 +433,12 @@ async function create() {
   height: 14px;
   vertical-align: -2px;
   margin-right: 4px;
+}
+.pending-ic {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  margin-left: auto;
 }
 .hint.bad {
   color: var(--danger, #e5484d);

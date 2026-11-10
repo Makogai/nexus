@@ -313,6 +313,8 @@ export interface GitStatus {
   untracked: number
   conflicted: number
   lastCommit: CommitInfo | null
+  /** An unfinished `merge`, `rebase`, `cherry-pick` or `revert` (project page status only). */
+  operation?: string | null
 }
 
 export type InstallSource = 'path' | 'native-installer' | 'npm' | 'homebrew' | 'custom'
@@ -458,6 +460,10 @@ export interface SessionView {
     isolation?: { claudeMdExcludes: string[] }
     /** A learning session (ADR-0041): its depth and the built-in skill it got (or why not). */
     learn?: { depth: LearnDepth; skill: string | null; withheld: string | null; folders?: string[] }
+    /** The context strategy the session was launched with (ADR-0028). */
+    context?: { strategy: 'minimal' | 'balanced' | 'deep' | 'custom'; observeInstructions: boolean } | null
+    /** The workflow run the session works on (ADR-0029). */
+    workflow?: { runId: string; workflow: string; rigor: string; skills: string[]; refused: string[] } | null
   } | null
   turns: number
   prompts: number
@@ -1725,8 +1731,19 @@ export interface PushRequest {
   reason: string
   status: 'pending' | 'pushed' | 'declined' | 'failed'
   message: string | null
+  /** Why a push failed (ADR-0047). */
+  failureKind: PushFailureKind | null
   createdAt: number
   decidedAt: number | null
+  dismissedAt: number | null
+}
+
+export type PushFailureKind = 'rejected' | 'auth' | 'offline' | 'remote-missing' | 'timeout' | 'other'
+
+/** A remote Git call that failed, with its kind (`git::RemoteError`). */
+export interface RemoteError {
+  kind: PushFailureKind
+  message: string
 }
 
 export interface PushReview {
@@ -1741,6 +1758,14 @@ export interface PushReview {
   commits: GitLogEntry[]
   inspection: SyncInspection
   token: string
+  /** The review fetched the remote branch first; `fetchError` says why not. */
+  fetched: boolean
+  fetchError: RemoteError | null
+  ahead: number
+  /** Commits the remote has that this branch does not — the push is disabled while above 0. */
+  behind: number
+  diverged: boolean
+  incoming: GitLogEntry[]
 }
 
 export type SyncSide = 'working' | 'incoming' | 'outgoing'
@@ -1932,4 +1957,18 @@ export interface LearnDraft {
   title: string
   updated: string | null
   body: string
+}
+
+/** What waits for the person (`inbox::Item`, ADR-0048). */
+export interface NeedsYouItem {
+  kind: 'session' | 'push-failed' | 'push' | 'workflow-review' | 'task-review' | 'draft' | 'approval' | 'kit'
+  /** What to open: the session, push request, workflow run, task, draft note, document or kit id. */
+  id: string
+  title: string
+  detail: string
+  projectId: string | null
+  projectName: string | null
+  /** For approvals: `constitution`, `rule` or `workflow` (each is approved in its own view). */
+  docKind: string | null
+  since: number | null
 }

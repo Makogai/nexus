@@ -206,7 +206,15 @@ pub async fn gate_run(ctx: State<'_, Ctx>, project_id: String, name: String) -> 
             (g, dir, id)
         };
         let o = gates::execute(&g, &dir, &env::current(), &id);
-        Ok(gates::finish(&ctx.db(), &id, &o)?)
+        let db = ctx.db();
+        let r = gates::finish(&db, &id, &o)?;
+        // A manual run can outlast the page that started it: a failure also reaches the notification center (ADR-0048).
+        if r.status != "passed" {
+            let ws = project::get(&db, &project_id).ok().map(|p| p.workspace_id);
+            let why = format!("{} (exit {}) — the output is in the gate's history.", r.status, r.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "none".into()));
+            let _ = nexus_core::notify::background_failure(&db, ws.as_deref(), Some(&project_id), "gate", format!("Gate {} failed", r.gate_name), &why);
+        }
+        Ok(r)
     })
     .await
 }

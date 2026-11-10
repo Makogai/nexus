@@ -1,6 +1,7 @@
 // End-to-end: the project workbench milestone (W2–W4) against the REAL app — temporary workspace and repositories only.
 //   W2 Knowledge: a constitution opens as rule cards (no raw markers); a note opens as rendered Markdown with raw HTML
 //      escaped; Edit → Save writes the file (approved here); a stale save is a conflict; Constitutions open in Read mode.
+//      Files changed by another program reach the open document and the list without a reload (watcher, ADR-0049).
 //   W3 Explorer: project tree without .git and ignored output, read-only viewer, secrets never shown; commits with
 //      changed files, renames and diffs.
 //   W4 Learn: NEXUS's own map, Graphify optional, the learning task with the map as brief, drafts applied or set aside.
@@ -10,9 +11,10 @@
 //
 // Windows only (WebView2 DevTools protocol).
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect, waitForPort } from './cdp-lib.mjs'
 
@@ -98,6 +100,12 @@ try {
   check('a note opens as rendered Markdown', html.includes('<h2>Plan</h2>') && html.includes('<strong>on Tuesday</strong>'), html.slice(0, 80))
   check('…raw HTML in a document is shown as text, never run', !html.includes('<script') && (await cdp.evaluate(`window.__pwned === undefined`)))
 
+  // Another program saves the file (an editor, `git pull`): the watcher refreshes the index and the open document
+  // follows — no reload, no window focus (ADR-0049).
+  writeFileSync(note.path, readFileSync(note.path, 'utf8').replace('Ship **on Tuesday**.', 'Ship **on Monday**.'))
+  const live = await until(async () => ((await htmlOf('[role=dialog] [data-markdown]')).includes('on Monday') ? true : null), 15000)
+  check('a document open in NEXUS shows a change another program saved', !!live)
+
   // --- W2: editing ---------------------------------------------------------------------------------------------------
   await click('[data-doc-edit-start]')
   await cdp.waitFor(`!!document.querySelector('[data-doc-edit] .cm-content')`, 10000)
@@ -114,6 +122,8 @@ try {
   await click('[data-doc-edit-start]')
   await cdp.waitFor(`!!document.querySelector('[data-doc-edit] .cm-content')`, 10000)
   writeFileSync(note.path, readFileSync(note.path, 'utf8').replace('on Wednesday', 'on Thursday'))
+  const told = await cdp.waitFor(`document.querySelector('[role=dialog] [data-doc-changed-on-disk]')?.innerText`, 15000).catch(() => '')
+  check('…an edit in progress is told at once that the file changed on disk', told.includes('changed on disk'), told.slice(0, 80))
   await setEditor('[data-doc-edit]', '## Plan\n\nShip **on Friday**.')
   await click('[data-doc-save]')
   const conflict = await cdp.waitFor(`document.querySelector('[role=dialog] .notice-error')?.innerText`, 10000).catch(() => '')
@@ -121,6 +131,15 @@ try {
   await cdp.evaluate(`document.querySelector('[role=dialog] footer .btn-ghost')?.click(); true`) // Cancel
   await cdp.evaluate(`document.querySelector('[data-confirm-ok]')?.click(); true`) // discard
   await closeDialog()
+
+  // A document another program writes appears in the open list, and leaves it when the file is deleted.
+  const arrived = join(dirname(note.path), 'arrived-on-disk.md')
+  writeFileSync(arrived, readFileSync(note.path, 'utf8').replace(/^id: .*$/m, `id: ${randomUUID()}`).replace(/^title: .*$/m, 'title: Arrived on disk'))
+  const arrivedListed = await until(async () => (await cdp.evaluate(`[...document.querySelectorAll('.list-row.doc')].some((r) => r.innerText.includes('Arrived on disk'))`)) || null, 15000)
+  check('a document written by another program appears in the list', !!arrivedListed)
+  rmSync(arrived)
+  const unlisted = await until(async () => (await cdp.evaluate(`![...document.querySelectorAll('.list-row.doc')].some((r) => r.innerText.includes('Arrived on disk'))`)) || null, 15000)
+  check('…and leaves it when the file is deleted', !!arrivedListed && !!unlisted)
 
   // Constitutions open formatted; Edit is one click away.
   await cdp.evaluate(`location.hash = '#/constitutions'; true`)
@@ -250,6 +269,24 @@ try {
   check('…recorded with the session (depth, skill, folders)', learnSession?.integrations?.learn?.depth === 'quick' && learnSession?.integrations?.learn?.skill === 'nexus:learn-project' && learnSession?.integrations?.learn?.folders?.[0] === mono, JSON.stringify(learnSession?.integrations?.learn ?? null))
   const taskBody = (await inv('knowledge_read', { workspaceId: ws.id, id: learnTaskId })).body
   check('…and the notes are in the learning task, before NEXUS’s map', taskBody.indexOf('## Notes from the person') > 0 && taskBody.indexOf('mono/packages') > 0 && taskBody.indexOf('mono/packages') < taskBody.indexOf("## NEXUS's map"), taskBody.slice(0, 120))
+
+  // ADR-0048: the Sessions tab lists the project's sessions (count in the tab label); a row brings its terminal forward.
+  await click('[data-project-tab="sessions"]')
+  const sessRow = await cdp.waitFor(`document.querySelector('[data-project-sessions] [data-session="${learnSession?.id}"]')?.innerText`, 15000).catch(() => '')
+  const sessCount = await textOf('[data-tab-count="sessions"]')
+  check('the Sessions tab lists the launched session, its count in the tab label', sessRow.includes('Learn App') && /^\d+\/[1-9]\d*$/.test(sessCount.trim()), `${sessCount} · ${sessRow.replace(/\n/g, ' ').slice(0, 80)}`)
+  await cdp.evaluate(`[...document.querySelectorAll('button')].find((b) => (b.title || '').startsWith('Hide terminal'))?.click(); true`)
+  await cdp.evaluate(`document.querySelector('[data-project-sessions] [data-session="${learnSession?.id}"] .actions .btn')?.click(); true`)
+  const focused = await cdp.waitFor(`document.querySelector('section.panel.open') && document.querySelector('[data-tab-session="${learnSession?.id}"]')?.getAttribute('aria-selected') === 'true'`, 10000).catch(() => false)
+  const chipped = await cdp.evaluate(`!!document.querySelector('[data-tab-session="${learnSession?.id}"] [data-tab-project="${proj.id}"]') && !!document.querySelector('[data-terminal-only-project]')`)
+  check('…its row opens the terminal on that tab, which names the project (and the panel can narrow to it)', !!focused && chipped)
+  // The Tasks tab: the learning task in the list and on the board, counted in the tab label.
+  await click('[data-project-tab="tasks"]')
+  const taskRow = await cdp.waitFor(`document.querySelector('[data-project-tasks] [data-task="${learnTaskId}"]')?.innerText`, 15000).catch(() => '')
+  await click('[data-tasks-view="board"]')
+  const onBoard = await cdp.waitFor(`!!document.querySelector('[data-status] [data-task="${learnTaskId}"]')`, 15000).catch(() => false)
+  check('the Tasks tab lists the project’s open task and shows it on the board', taskRow.includes('Learn App') && !!onBoard && Number(await textOf('[data-tab-count="tasks"]')) >= 1, taskRow.replace(/\n/g, ' ').slice(0, 80))
+  await click('[data-tasks-view="list"]')
   await click('[data-project-tab="learn"]')
 
   // Back returns where you came from: project → Learn → Memory proposals (Knowledge) → Back → the project's Learn tab.
@@ -268,7 +305,9 @@ try {
   // NEXUS tools: the built-in skill (as Claude reads it), the MCP server's tools as `nexus mcp` lists them, the hooks.
   await cdp.evaluate(`location.hash = '#/tools'; true`)
   const tools = await cdp.waitFor(`document.querySelectorAll('[data-tools-mcp] [data-tool]').length || null`, 20000).catch(() => 0)
-  check('NEXUS tools lists the MCP server’s 24 tools and the hooks', tools === 24 && (await textOf('[data-tools-hooks]')).includes('SessionStart'), `${tools} tools`)
+  // The expected count is the server's own (`nexus mcp --list-tools` next to the app), not a literal that drifts.
+  const defs = JSON.parse(execFileSync(join(dirname(app), 'nexus.exe'), ['mcp', '--list-tools'], { encoding: 'utf8' }))
+  check('NEXUS tools lists every MCP tool the server defines and the hooks', defs.length >= 20 && tools === defs.length && (await textOf('[data-tools-hooks]')).includes('SessionStart'), `${tools} of ${defs.length} tools`)
   await cdp.evaluate(`document.querySelector('[data-skill="nexus:learn-project"] .btn').click(), true`)
   const skillBody = await cdp.waitFor(`document.querySelector('[data-skill-body]')?.innerText`, 10000).catch(() => '')
   check('…and the built-in nexus:learn-project skill, exactly as Claude reads it', skillBody.includes('Learn a project for NEXUS') && skillBody.includes('Stop and report'), skillBody.slice(0, 60))
@@ -324,11 +363,15 @@ try {
   await cdp.evaluate(`[...document.querySelectorAll('[data-learn-map] button')].find((b) => b.innerText.includes('Read again'))?.click(); true`)
   await cdp.waitFor(`!!document.querySelector('[data-draft="overview"]') && !!document.querySelector('[data-draft="architecture"]')`, 15000)
   await click('[data-draft="overview"] [data-draft-apply]')
-  await until(async () => ((await cdp.evaluate(`!document.querySelector('[data-draft="overview"]')`)) ? true : null))
+  // ADR-0048: the draft leaves the list at once; the result line says when the write finished and links onward.
+  const pendingShown = await cdp.waitFor(`!document.querySelector('[data-draft="overview"]') && !!document.querySelector('[data-draft-decision]')`, 10000).catch(() => false)
+  const result = await cdp.waitFor(`document.querySelector('[data-draft-decision="done"]')?.innerText`, 20000).catch(() => '')
   const ctxDir = join(root, 'ws', 'project-context', 'app')
   const overview = readFileSync(join(ctxDir, 'overview.md'), 'utf8')
-  check('Use as overview writes the draft into the project overview', overview.includes('A tiny app that answers') && overview.includes('accepted on'), overview.split('\n').slice(-3).join(' | '))
+  check('Use as overview writes the draft into the project overview', !!pendingShown && overview.includes('A tiny app that answers') && overview.includes('accepted on'), overview.split('\n').slice(-3).join(' | '))
+  check('…and the result says so, with Open overview', result.includes('The draft is now the project overview') && !!(await cdp.evaluate(`!!document.querySelector('[data-draft-open]')`)), result)
   await click('[data-draft="architecture"] [data-draft-discard]')
+  await cdp.waitFor(`document.querySelector('[data-draft-decision="done"]')?.innerText.includes('set aside')`, 20000).catch(() => false)
   const none = await until(async () => ((await textOf('[data-learn-drafts]')).includes('No drafts waiting') ? true : null))
   check('Set aside leaves the architecture untouched and the list empty', !!none && readFileSync(join(ctxDir, 'architecture.md'), 'utf8').includes('_Not written yet._'))
 } catch (e) {

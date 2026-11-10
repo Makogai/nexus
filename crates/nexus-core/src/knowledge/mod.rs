@@ -11,6 +11,7 @@ pub mod service;
 pub mod skills;
 pub mod store;
 pub mod tasks;
+pub mod watch;
 
 use std::path::{Path, PathBuf};
 

@@ -30,6 +30,9 @@ pub struct GitStatus {
     pub untracked: u32,
     pub conflicted: u32,
     pub last_commit: Option<CommitInfo>,
+    /// An unfinished `merge`, `rebase`, `cherry-pick` or `revert` — filled only where it is shown
+    /// ([`operation_in_progress`]), not by every [`status`] call.
+    pub operation: Option<String>,
 }
 
 impl GitStatus {
@@ -385,6 +388,51 @@ pub fn fetch_remote(repo: &Path, remote: &str) -> std::result::Result<(), Remote
         return Err(RemoteError { kind: RemoteFailure::Other, message: "invalid remote name".into() });
     }
     remote_cmd(Some(repo), &["fetch", "--quiet", "--prune", "--no-recurse-submodules", remote]).map(|_| ())
+}
+
+/// A review fetch gets less time than a pull: the person waits for it in a dialog.
+const REVIEW_FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Fetch one branch of `remote` into its remote-tracking ref (`refs/remotes/<remote>/<branch>`) before a push review.
+/// `Ok(false)`: the remote has no such branch yet (a first push). Never touches the local branch or the remote.
+pub fn fetch_branch(repo: &Path, remote: &str, branch: &str) -> std::result::Result<bool, RemoteError> {
+    let bad = |s: &str| s.is_empty() || s.starts_with('-') || s.contains("..") || s.contains(':') || s.chars().any(|c| c.is_whitespace() || c.is_control());
+    if bad(remote) || bad(branch) {
+        return Err(RemoteError { kind: RemoteFailure::Other, message: "invalid remote or branch name".into() });
+    }
+    // An explicit destination, so the remote-tracking ref moves even without a configured fetch refspec. The `+` applies
+    // only to that local tracking ref (a remote branch may have been rewritten); nothing is ever force-pushed.
+    let refspec = format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}");
+    match git_long_for(Some(repo), &["fetch", "--quiet", "--no-tags", "--no-recurse-submodules", remote, &refspec], REVIEW_FETCH_TIMEOUT) {
+        Ok(out) if out.success() => Ok(true),
+        Ok(out) if out.stderr_str().to_ascii_lowercase().contains("couldn't find remote ref") => Ok(false),
+        Ok(out) => Err(remote_error(&out.stderr_str())),
+        Err(e) => {
+            let m = e.to_string();
+            Err(RemoteError { kind: if m.contains("timed out") { RemoteFailure::Timeout } else { RemoteFailure::Other }, message: redact_url(&m) })
+        }
+    }
+}
+
+/// Commits only in `left` and only in `right` (`git rev-list --left-right --count left...right`).
+pub fn ahead_behind(repo: &Path, left: &str, right: &str) -> Option<(u32, u32)> {
+    if left.starts_with('-') || right.starts_with('-') {
+        return None;
+    }
+    let range = format!("{left}...{right}");
+    let out = run_git(Some(repo), &["rev-list", "--left-right", "--count", &range, "--"]).ok().filter(|o| o.success())?;
+    let s = out.stdout_str();
+    let mut n = s.split_whitespace().map(|x| x.parse::<u32>().ok());
+    Some((n.next()??, n.next()??))
+}
+
+/// A Git operation left unfinished in the repository: `merge`, `rebase`, `cherry-pick` or `revert`.
+pub fn operation_in_progress(repo: &Path) -> Option<String> {
+    let dir = git_dir(repo)?;
+    [("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"), ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert")]
+        .into_iter()
+        .find(|(f, _)| dir.join(f).exists())
+        .map(|(_, what)| what.to_string())
 }
 
 /// Push the current branch to `remote` as `branch` — never forced. `set_upstream` for the first push.

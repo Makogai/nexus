@@ -169,7 +169,7 @@ try {
   }
   mcp.stdin.end()
   await new Promise((r) => mcp.on('exit', r))
-  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}', true`)
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}?tab=knowledge', true`)
   const shown = await cdp.waitFor(`document.body.innerText.includes('Smoke checkpoint from MCP')`, 15000).catch(() => false)
   check('MCP checkpoint appears in the desktop project view', !!shown)
   await cdp.evaluate(`location.hash = '#/knowledge', true`)

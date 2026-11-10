@@ -53,6 +53,8 @@ cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Wi
   writes are knowledge records (task/note/decision) through `knowledge::service` (ADR-0017).
 * Knowledge files are authoritative; SQLite only indexes them (rebuildable). Writes go through `knowledge::store`
   (validated, atomic, optimistic). Always-on workspace rules reach Claude only when their current hash is approved.
+  The desktop watches the active workspace's knowledge roots (one recursive watch per root, `knowledge::watch` rules)
+  and refreshes the index on its own connection (ADR-0049); NEXUS's own writes re-index in the same call.
 * Hooks stay deterministic and cheap: no model calls, no prompt text or raw commands stored, always exit 0 (ADR-0016).
 * Everything a session gets from NEXUS is built by `claude::prepare` (both hosts). Appended context stays bounded:
   work profile, approved always-on rules not already in CLAUDE.md, a task brief — never histories or whole knowledge.
@@ -91,6 +93,18 @@ cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Wi
   the e2e feature cannot compile into release builds. Identifier and licence changes wait for the owner (ADR-0034/0035).
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
   older Tauri crates than the npm packages and `tauri build` fails its version check.
+
+## UI conventions (desktop)
+
+* Every control that calls the backend shows it is working: run it through `useAction()` (`src/composables/useAction.ts`)
+  or `<ActionButton>` — disabled and `aria-busy` while pending, re-entrancy guarded, optional pending label.
+* Errors stay visible until the person dismisses them: never clear an error in a reload; error toasts persist (with
+  *Copy details*); failures of background work (push, sync, gates, clone, graph build) also reach the notification
+  center through `notify::publish`. Success names the result and links onward where there is a next place to go.
+* The project page keeps its tab in `?tab=`; kept-alive views reload in `onActivated` and on `app.externalChanges`.
+  Open documents follow `app.freshness` (files changed on disk, ADR-0049) — quietly, and never over unsaved edits.
+* E2E suites select by `data-*` attributes: when an element moves, its attribute moves with it, or the suite is updated
+  in the same commit.
 
 ## Security rules (non-negotiable)
 

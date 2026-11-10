@@ -9,6 +9,8 @@ import { ArrowDown, ArrowUp, CircleAlert, CloudDownload, FolderSync, GitBranch, 
 import { api, SYNC_EVENT, toIpcError } from '../lib/ipc'
 import type { SyncCloned, SyncCommitReview, SyncFileDiff, SyncPulled, SyncPushReview, SyncRestore, SyncSide, SyncStatus } from '../lib/types'
 import { relativeTime } from '../lib/format'
+import { useAction } from '../composables/useAction'
+import ActionButton from '../components/ActionButton.vue'
 import BaseModal from '../components/BaseModal.vue'
 import CloneWorkspaceForm from '../components/CloneWorkspaceForm.vue'
 import SyncPolicyCard from '../components/SyncPolicyCard.vue'
@@ -57,7 +59,11 @@ async function load() {
   }
 }
 
+const refreshing = useAction(load)
+
+/** One Git operation at a time; `busy` names it, so its button shows it runs and the others wait. */
 async function run<T>(what: string, f: () => Promise<T>): Promise<T | null> {
+  if (busy.value) return null
   busy.value = what
   try {
     return await f()
@@ -90,10 +96,16 @@ async function pull() {
   }
 }
 
+/** The file whose diff is being read (`side:path`). */
+const diffing = ref<string | null>(null)
 async function showDiff(side: SyncSide, path: string) {
+  diffing.value = `${side}:${path}`
   const r = await run('diff', () => api.syncDiff(wsId.value!, side, path))
+  diffing.value = null
   if (r) diff.value = { ...r, side }
 }
+const diffBusy = (side: SyncSide, path: string) => (busy.value === 'diff' && diffing.value === `${side}:${path}` ? 'true' : undefined)
+const plural = (n: number, what: string) => `${n} ${what}${n === 1 ? '' : 's'}`
 
 function toggle(path: string) {
   const s = new Set(excluded.value)
@@ -210,11 +222,21 @@ watch(wsId, () => {
         <p>Your workspace travels through its own Git repository — no sync service. Commits and pushes happen only when you confirm them, after a security inspection. Sessions, usage, notifications, gate commands, approvals, profiles and credentials never leave this machine.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost" :disabled="!!busy" title="Read the repository again (local changes made outside NEXUS)" data-sync-refresh @click="load"><RefreshCw /> Refresh</button>
-        <button class="btn" :disabled="!!busy || !st?.readiness.repo || st?.state === 'no-remote'" data-sync-fetch @click="fetchNow"><CloudDownload :class="{ spin: busy === 'fetch' }" /> Fetch</button>
-        <button class="btn" :disabled="!!busy || !canPull" data-sync-pull @click="pull"><ArrowDown /> Pull</button>
-        <button class="btn" :disabled="!!busy || !st?.working.length || !selected.size" data-sync-review @click="reviewCommit"><GitCommitHorizontal /> Review &amp; commit</button>
-        <button class="btn btn-primary" :disabled="!!busy || !canPush" data-sync-push @click="reviewPush"><ArrowUp /> Push…</button>
+        <ActionButton class="btn-ghost" :pending="refreshing.pending.value" :disabled="!!busy" title="Read the repository again (local changes made outside NEXUS)" data-sync-refresh @click="refreshing.run()">
+          <template #icon><RefreshCw /></template>Refresh
+        </ActionButton>
+        <ActionButton :pending="busy === 'fetch'" :pending-label="`Fetching from ${st?.remoteName ?? 'the remote'}…`" :disabled="!!busy || !st?.readiness.repo || st?.state === 'no-remote'" data-sync-fetch @click="fetchNow">
+          <template #icon><CloudDownload /></template>Fetch
+        </ActionButton>
+        <ActionButton :pending="busy === 'pull'" :pending-label="`Pulling ${plural(st?.incoming.length ?? 0, 'commit')}…`" :disabled="!!busy || !canPull" data-sync-pull @click="pull">
+          <template #icon><ArrowDown /></template>Pull
+        </ActionButton>
+        <ActionButton :pending="busy === 'review'" pending-label="Inspecting the changes…" :disabled="!!busy || !st?.working.length || !selected.size" data-sync-review @click="reviewCommit">
+          <template #icon><GitCommitHorizontal /></template>Review &amp; commit
+        </ActionButton>
+        <ActionButton class="btn-primary" :pending="busy === 'review-push'" pending-label="Inspecting the commits…" :disabled="!!busy || !canPush" data-sync-push @click="reviewPush">
+          <template #icon><ArrowUp /></template>Push…
+        </ActionButton>
       </div>
     </div>
 
@@ -236,7 +258,7 @@ watch(wsId, () => {
           <span v-if="st.readiness.remote" class="faint mono remote" :title="st.readiness.remote">{{ st.readiness.remote }}</span>
           <span class="faint">· last fetch {{ st.lastFetchAt ? relativeTime(st.lastFetchAt) : 'never' }}</span>
           <span class="spacer" />
-          <button class="btn btn-sm btn-ghost" data-sync-restore-open @click="showRestore">What does this machine need?</button>
+          <ActionButton class="btn-sm btn-ghost" :pending="busy === 'restore'" :disabled="!!busy" data-sync-restore-open @click="showRestore">What does this machine need?</ActionButton>
           <button class="btn btn-sm btn-ghost" data-sync-clone-open @click="cloning = true">Open another from Git…</button>
         </div>
         <p v-if="st.state === 'not-repo'" class="notice"><Info /> <span>The workspace folder is not a Git repository of its own yet. Run <code>git init</code> in it and add a remote with your Git tool (for example a private repository) — then fetch, commit and push here.</span></p>
@@ -258,7 +280,7 @@ watch(wsId, () => {
             <li v-for="w in st.working" :key="w.path" :data-sync-file="w.path" :data-sync-blocked="blockers(w.findings) ? 'yes' : 'no'">
               <input type="checkbox" :checked="selected.has(w.path)" :disabled="blockedByPath(w)" :title="blockedByPath(w) ? 'Never synced' : ''" :aria-label="`Include ${w.path}`" @change="toggle(w.path)" />
               <span class="st" :class="`st-${w.status}`">{{ w.status }}</span>
-              <button class="link mono" @click="showDiff('working', w.path)">{{ w.path }}</button>
+              <button class="link mono" :disabled="!!busy" :aria-busy="diffBusy('working', w.path)" @click="showDiff('working', w.path)">{{ w.path }}</button>
               <span v-for="f in w.findings" :key="f.kind" class="badge" :class="f.severity === 'block' ? 'badge-error' : 'badge-warn'" :title="f.message">{{ f.kind }}</span>
             </li>
           </ul>
@@ -272,7 +294,7 @@ watch(wsId, () => {
             <li v-for="c in st.incoming" :key="c.oid" :data-sync-commit="c.oid"><span class="mono faint">{{ c.oid.slice(0, 8) }}</span> {{ c.summary }} <span class="faint small">· {{ c.author }} · {{ relativeTime(c.timestampMs) }}</span></li>
           </ul>
           <ul v-if="st.incomingFiles.length" class="files">
-            <li v-for="f in st.incomingFiles" :key="f.path" :data-sync-incoming-file="f.path"><span class="st">{{ f.status }}</span><button class="link mono" @click="showDiff('incoming', f.path)">{{ f.path }}</button></li>
+            <li v-for="f in st.incomingFiles" :key="f.path" :data-sync-incoming-file="f.path"><span class="st">{{ f.status }}</span><button class="link mono" :disabled="!!busy" :aria-busy="diffBusy('incoming', f.path)" @click="showDiff('incoming', f.path)">{{ f.path }}</button></li>
           </ul>
         </section>
 
@@ -284,7 +306,7 @@ watch(wsId, () => {
             <li v-for="c in st.outgoing" :key="c.oid" :data-sync-outgoing-commit="c.oid"><span class="mono faint">{{ c.oid.slice(0, 8) }}</span> {{ c.summary }} <span class="faint small">· {{ relativeTime(c.timestampMs) }}</span></li>
           </ul>
           <ul v-if="st.outgoingFiles.length" class="files">
-            <li v-for="f in st.outgoingFiles" :key="f.path"><span class="st">{{ f.status }}</span><button class="link mono" @click="showDiff('outgoing', f.path)">{{ f.path }}</button></li>
+            <li v-for="f in st.outgoingFiles" :key="f.path"><span class="st">{{ f.status }}</span><button class="link mono" :disabled="!!busy" :aria-busy="diffBusy('outgoing', f.path)" @click="showDiff('outgoing', f.path)">{{ f.path }}</button></li>
           </ul>
         </section>
       </div>
@@ -359,7 +381,16 @@ watch(wsId, () => {
       </div>
       <template #footer>
         <button class="btn" @click="commitReview = null">Cancel</button>
-        <button class="btn btn-primary" :disabled="!commitReview || commitReview.inspection.blocked || !commitReview.identity || !commitMessage.trim() || !!busy" data-sync-commit-confirm @click="commit">Commit…</button>
+        <ActionButton
+          class="btn-primary"
+          :pending="busy === 'commit'"
+          :pending-label="`Committing ${plural(commitReview?.files.length ?? 0, 'file')}…`"
+          :disabled="!commitReview || commitReview.inspection.blocked || !commitReview.identity || !commitMessage.trim() || !!busy"
+          data-sync-commit-confirm
+          @click="commit"
+        >
+          Commit…
+        </ActionButton>
       </template>
     </BaseModal>
 
@@ -385,7 +416,16 @@ watch(wsId, () => {
       </div>
       <template #footer>
         <button class="btn" @click="pushReview = null">Cancel</button>
-        <button class="btn btn-primary" :disabled="!pushReview || pushReview.inspection.blocked || pushReview.behind > 0 || !pushReview.commits.length || !!busy" data-sync-push-confirm @click="push"><RefreshCw v-if="busy === 'push'" class="spin" /> Push…</button>
+        <ActionButton
+          class="btn-primary"
+          :pending="busy === 'push'"
+          :pending-label="`Pushing ${plural(pushReview?.commits.length ?? 0, 'commit')} to ${pushReview?.remote ?? 'the remote'}…`"
+          :disabled="!pushReview || pushReview.inspection.blocked || pushReview.behind > 0 || !pushReview.commits.length || !!busy"
+          data-sync-push-confirm
+          @click="push"
+        >
+          Push…
+        </ActionButton>
       </template>
     </BaseModal>
 
@@ -492,8 +532,15 @@ watch(wsId, () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.link:hover {
+.link:hover:not(:disabled) {
   text-decoration: underline;
+}
+.link:disabled {
+  cursor: default;
+}
+.link[aria-busy='true'] {
+  cursor: progress;
+  color: var(--text-muted);
 }
 .diff {
   max-height: 420px;

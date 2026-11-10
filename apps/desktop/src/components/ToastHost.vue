@@ -1,8 +1,20 @@
 <script setup lang="ts">
-import { CircleAlert, CircleCheck, Info, X } from '@lucide/vue'
+import { ref } from 'vue'
+import { CircleAlert, CircleCheck, Copy, Info, X } from '@lucide/vue'
 import { useAppStore } from '../stores/app'
 
 const app = useAppStore()
+/** Error toasts stay until dismissed (ADR-0048); their text can be copied for a bug report or a message to Claude. */
+const copied = ref<number | null>(null)
+async function copy(id: number, message: string) {
+  try {
+    await navigator.clipboard.writeText(message)
+    copied.value = id
+    setTimeout(() => (copied.value = copied.value === id ? null : copied.value), 1500)
+  } catch {
+    // The clipboard can be unavailable (permissions); the text stays selectable.
+  }
+}
 </script>
 
 <template>
@@ -12,8 +24,9 @@ const app = useAppStore()
         <CircleAlert v-if="t.tone === 'error'" />
         <CircleCheck v-else-if="t.tone === 'success'" />
         <Info v-else />
-        <span class="selectable">{{ t.message }}</span>
-        <button class="btn btn-ghost btn-icon btn-sm" aria-label="Dismiss" @click="app.dismiss(t.id)"><X /></button>
+        <span class="selectable msg">{{ t.message }}<span v-if="t.count && t.count > 1" class="times"> ×{{ t.count }}</span></span>
+        <button v-if="t.tone === 'error'" class="btn btn-ghost btn-icon btn-sm" :aria-label="copied === t.id ? 'Copied' : 'Copy details'" :title="copied === t.id ? 'Copied' : 'Copy details'" data-toast-copy @click="copy(t.id, t.message)"><Copy /></button>
+        <button class="btn btn-ghost btn-icon btn-sm" aria-label="Dismiss" data-toast-dismiss @click="app.dismiss(t.id)"><X /></button>
       </div>
     </TransitionGroup>
   </div>
@@ -47,9 +60,14 @@ const app = useAppStore()
   margin-top: 2px;
   flex: none;
 }
-.toast span {
+.toast .msg {
   flex: 1;
   word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+.toast .times {
+  color: var(--text-faint);
 }
 .toast.error > svg {
   color: var(--red);

@@ -1,15 +1,33 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ChevronDown, ChevronUp, Maximize2, Minimize2, Plus, Sparkles, SquareTerminal, X } from '@lucide/vue'
 import { api } from '../lib/ipc'
+import { projectHue } from '../lib/format'
 import type { ShellInfo } from '../lib/types'
 import { useAppStore } from '../stores/app'
+import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
 import TerminalView from './TerminalView.vue'
 
 const props = defineProps<{ fill: boolean }>()
 const app = useAppStore()
 const sessions = useSessionStore()
+const projects = useProjectStore()
+const route = useRoute()
+
+/** Each tab names its project (a chip in the project's colour); on a project page the tabs can be narrowed to it. */
+const pageProject = computed(() => (route.name === 'project' && typeof route.params.id === 'string' ? route.params.id : null))
+const onlyThisProject = ref(false)
+const visibleTabs = computed(() => (onlyThisProject.value && pageProject.value ? sessions.tabs.filter((id) => sessions.byId[id]?.projectId === pageProject.value) : sessions.tabs))
+const projectOf = (id: string) => {
+  const pid = sessions.byId[id]?.projectId
+  return pid ? (projects.byId[pid] ?? null) : null
+}
+// Narrowed: keep a visible tab active.
+watch(visibleTabs, (tabs) => {
+  if (onlyThisProject.value && tabs.length && !tabs.includes(sessions.activeTab ?? '')) sessions.activeTab = tabs[0]!
+})
 
 const shells = ref<ShellInfo[]>([])
 const newMenu = ref(false)
@@ -68,7 +86,7 @@ function tone(id: string) {
     <div class="bar">
       <div class="tabs" role="tablist">
         <button
-          v-for="id in sessions.tabs"
+          v-for="id in visibleTabs"
           :key="id"
           class="tab"
           role="tab"
@@ -79,13 +97,25 @@ function tone(id: string) {
           @auxclick.middle="sessions.closeTab(id)"
         >
           <span class="dot" :class="tone(id)" />
+          <span v-if="projectOf(id)" class="pchip" :style="{ '--hue': projectHue(projectOf(id)!.id) }" :title="projectOf(id)!.name" :data-tab-project="projectOf(id)!.id">{{ projectOf(id)!.name }}</span>
           <Sparkles v-if="sessions.byId[id]?.kind === 'claude'" class="kind" />
           <SquareTerminal v-else class="kind" />
           <span class="truncate title">{{ sessions.byId[id]?.title ?? 'Terminal' }}</span>
           <span class="close" role="button" aria-label="Close tab" @click.stop="sessions.closeTab(id)"><X /></span>
         </button>
         <span v-if="sessions.tabs.length === 0" class="faint empty-label">Terminal</span>
+        <span v-else-if="visibleTabs.length === 0" class="faint empty-label">No terminal of this project</span>
       </div>
+
+      <button
+        v-if="pageProject && sessions.tabs.length > 0"
+        class="btn btn-ghost btn-sm only"
+        :class="{ on: onlyThisProject }"
+        :aria-pressed="onlyThisProject"
+        title="Show only this project's terminals"
+        data-terminal-only-project
+        @click="onlyThisProject = !onlyThisProject"
+      >This project only</button>
 
       <div ref="newMenuRoot" class="new">
         <button class="btn btn-ghost btn-sm btn-icon" title="New terminal" @click="newMenu = !newMenu"><Plus /></button>
@@ -258,6 +288,31 @@ function tone(id: string) {
 }
 .menu-item:hover {
   background: var(--bg-hover);
+}
+.pchip {
+  flex: none;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: hsl(var(--hue) 70% 72%);
+  background: hsl(var(--hue) 60% 50% / 0.16);
+  border: 1px solid hsl(var(--hue) 60% 50% / 0.35);
+}
+:global([data-theme='light']) .pchip {
+  color: hsl(var(--hue) 65% 34%);
+}
+.only {
+  flex: none;
+  font-size: 12px;
+}
+.only.on {
+  background: var(--bg-active);
+  color: var(--text);
 }
 .menu-item svg {
   width: 14px;

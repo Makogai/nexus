@@ -1,6 +1,6 @@
 # ADR-0043 — Push requests, finished tasks, and where a task's work starts
 
-Status: Accepted (2026-11-06, owner feedback; branch `milestone/ux-pass`).
+Status: Accepted (2026-11-06, owner feedback; branch `milestone/ux-pass`). Push outcomes amended by ADR-0047.
 
 ## Context
 

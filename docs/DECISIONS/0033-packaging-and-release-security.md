@@ -1,6 +1,7 @@
 # ADR-0033 — Packaging, installed layout, installed-app verification and release security
 
-Status: Accepted, implemented (2026-11-05, stage "Beta readiness"); signing and the updater are open decisions
+Status: Accepted, implemented (2026-11-05, stage "Beta readiness"); the updater was decided in ADR-0044, code signing in
+ADR-0050 (deferred)
 
 ## Context
 The desktop starts `nexus mcp` (MCP server) and `nexus hook` (lifecycle hooks) for every Claude session from *next to

@@ -25,6 +25,7 @@ vi.mock('vue-router', () => ({ useRoute: () => ({ name: 'constitutions', query: 
 
 import ConstitutionsView from '../src/views/ConstitutionsView.vue'
 import { useWorkspaceStore } from '../src/stores/workspaces'
+import { useAppStore } from '../src/stores/app'
 
 const STRUCTURE: ConstitutionStructure = {
   preamble: 'How we work.',
@@ -87,6 +88,27 @@ describe('ConstitutionsView', () => {
     await w.find('[data-approve]').trigger('click')
     await flushPromises()
     expect(api.knowledgeApprove).toHaveBeenCalledWith('w1', 'c1')
+  })
+
+  it('follows a file changed on disk in Read mode, never under unsaved edits (ADR-0049)', async () => {
+    api.constitutionList.mockResolvedValue([view()])
+    api.constitutionGet.mockResolvedValue(view())
+    const w = mount(ConstitutionsView, { attachTo: document.body })
+    await flushPromises()
+    const app = useAppStore()
+    const moved = JSON.parse(JSON.stringify(STRUCTURE))
+    moved.articles[0].sections[0].rules[1].title = 'Explain trade-offs, with numbers'
+    api.constitutionGet.mockResolvedValue(view({ hash: 'h2', structure: moved }))
+    app.freshness++
+    await flushPromises()
+    expect(w.find('[data-constitution-rules] [data-rule="TC-2"]').text()).toContain('with numbers')
+
+    await w.find('[data-mode="structured"]').trigger('click')
+    await w.find('[data-rule="TC-2"] input[aria-label="Rule title"]').setValue('My unsaved title')
+    api.constitutionGet.mockResolvedValue(view({ hash: 'h3' }))
+    app.freshness++
+    await flushPromises()
+    expect((w.find('[data-rule="TC-2"] input[aria-label="Rule title"]').element as HTMLInputElement).value).toBe('My unsaved title')
   })
 
   it('edits a rule in the tree and saves the structure with the expected hash', async () => {
