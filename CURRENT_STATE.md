@@ -88,6 +88,14 @@ Defaults taken without asking (stated to the owner): Codex runs *alongside* Clau
 | 10 | `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy -p nexus-desktop --all-targets --features e2e-webview-debugging -- -D warnings` | clean · clean |
 | 11 | `npx vitest run` · `npm run typecheck` · `npx vite build` | 172/172 (33 files) · clean · built |
 | 12 | E2E build (`npx tauri build --debug --no-bundle --features e2e-webview-debugging`, then `cargo build -p nexus-cli -p fake-claude`) | **killed — the system ran low on memory** (stopped by the harness while compiling `nexus-desktop`); not restarted (NX-2). `e2e/agents.mjs` and the other desktop suites **not run** on this code |
+| 13 | E2E build again (owner: "enough ram now"), after `cargo clean` (drive D: was full; recorded on `fix/macos-knowledge-watcher`) and a PC crash mid-build (one checked-out file zeroed — restored from Git; no other zeroed file, `git fsck` clean) | ok |
+| 14 | `node e2e/agents.mjs` | AGENTS & DEV ENVIRONMENT OK 16/16, first run |
+| 15 | `run-smoke` · `task-flow` · `workbench` · `portable` · `sync` · `attention` · `workflows` | 28 · 43 · 51 · 50 · 18 · 27 · 24 — all OK, first run |
+| 16 | `mcp-interop` · `context` · `usage` · `constitutions` · `profiles-kits` · `restore` · `workspace-setup` | 9 · 12 · 18 · 13 · 9 · 12 · 17 — all OK, first run |
+| 17 | T18 · `installed.mjs` | **not run** — not attempted (they need the owner's installed NEXUS closed / uninstalled, see the 0.5 rows); CI's release job runs both |
+
+**Not verified:** a real Codex turn (`notify` with a real thread id) — MANUAL_CHECKS 34; macOS/Linux CI has not run on
+this branch.
 
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
@@ -580,7 +588,9 @@ free.
 
 ## Next actions (in order)
 
-0. **Agents & Dev Environment** (`milestone/agents-dev-environment`, not merged): owner review; MANUAL_CHECKS 34 (Codex
+0. **Agents & Dev Environment** (`milestone/agents-dev-environment`, not merged; every automated check passed locally,
+   rows 8–16): first ship 0.5.1 (`fix/macos-knowledge-watcher`), then merge `main` into this branch and run CI on it
+   (`gh workflow run ci.yml --ref milestone/agents-dev-environment`) before merging. Owner review; MANUAL_CHECKS 34 (Codex
    with the owner's own login — confirms `notify` delivers the thread id on 0.166.0) and 35 (Dev Environment); then
    merge `--no-ff` on approval (NX-9). Follow-ups in ROADMAP: workspace toolchain baseline, Codex review as a workflow
    step (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first). The project page's
