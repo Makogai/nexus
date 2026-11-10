@@ -98,7 +98,8 @@ function tone(id: string) {
         >
           <span class="dot" :class="tone(id)" />
           <span v-if="projectOf(id)" class="pchip" :style="{ '--hue': projectHue(projectOf(id)!.id) }" :title="projectOf(id)!.name" :data-tab-project="projectOf(id)!.id">{{ projectOf(id)!.name }}</span>
-          <Sparkles v-if="sessions.byId[id]?.kind === 'claude'" class="kind" />
+          <Sparkles v-if="sessions.byId[id]?.kind === 'claude'" class="kind" :title="sessions.byId[id]?.agent === 'codex' ? 'Codex' : 'Claude Code'" />
+          <span v-if="sessions.byId[id]?.agent === 'codex'" class="agent-tag" data-tab-agent="codex">Codex</span>
           <SquareTerminal v-else class="kind" />
           <span class="truncate title">{{ sessions.byId[id]?.title ?? 'Terminal' }}</span>
           <span class="close" role="button" aria-label="Close tab" @click.stop="sessions.closeTab(id)"><X /></span>
@@ -288,6 +289,14 @@ function tone(id: string) {
 }
 .menu-item:hover {
   background: var(--bg-hover);
+}
+.agent-tag {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 .pchip {
   flex: none;

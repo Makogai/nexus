@@ -11,6 +11,7 @@ import { toIpcError } from '../lib/ipc'
 import { shortPath } from '../lib/format'
 import { initialLaunchSelection, profileDefaults } from '../lib/launch'
 import BaseModal from './BaseModal.vue'
+import type { AgentKind } from '../lib/types'
 
 const app = useAppStore()
 const projects = useProjectStore()
@@ -20,6 +21,9 @@ const router = useRouter()
 
 const projectId = ref<string>('')
 const customDir = ref<string | null>(null)
+/** Which agent starts (ADR-0052): Claude Code with a Claude profile, or another agent with its own profile. */
+const agent = ref<AgentKind>('claude')
+const agentProfileId = ref<string>('')
 const profileId = ref<string>('')
 const workProfile = ref<string>('')
 const effort = ref<string>('')
@@ -67,14 +71,44 @@ const startHint = computed(() => {
 const launchLabel = computed(() => (startIn.value === 'own' ? (ownSession.value?.running ? 'Open its terminal' : 'Resume') : startIn.value === 'continue' ? 'Hand over' : 'Launch'))
 const availableProjects = computed(() => projects.list.filter((p) => p.available))
 const profile = computed(() => profiles.byId[profileId.value] ?? null)
+const otherProfiles = computed(() => profiles.agentProfiles.filter((p) => p.agent === agent.value))
+const agentProfile = computed(() => (agent.value === 'claude' ? null : (profiles.agentProfilesById[agentProfileId.value] ?? null)))
+/** Agents that can start here: Claude Code when a Claude profile exists, others when one of their profiles does. */
+const agentChoices = computed(() => {
+  const out: { id: AgentKind; name: string }[] = []
+  if (profiles.list.length) out.push({ id: 'claude', name: 'Claude Code' })
+  for (const a of profiles.agents?.agents ?? []) {
+    if (a.id !== 'claude' && profiles.agentProfiles.some((p) => p.agent === a.id)) out.push({ id: a.id, name: a.id === 'codex' ? 'Codex' : a.name })
+  }
+  return out
+})
+const agentName = computed(() => agentChoices.value.find((a) => a.id === agent.value)?.name ?? 'Claude Code')
 const options = computed(() => profiles.launchOptions)
 const selectedWork = computed(() => options.value?.workProfiles.find((w) => w.id === workProfile.value) ?? null)
 const canLaunch = computed(() => {
   if (busy.value) return false
   if (task.value && startIn.value === 'own') return ownUsable.value
   if (task.value && startIn.value === 'continue') return !!continueId.value
-  return !!profile.value && (!!projectId.value || !!customDir.value)
+  const chosen = agent.value === 'claude' ? !!profile.value : !!agentProfile.value
+  return chosen && (!!projectId.value || !!customDir.value)
 })
+
+function chooseAgent(id: AgentKind) {
+  agent.value = id
+  if (id !== 'claude') {
+    const remembered = app.prefs.lastLaunch?.agent === id ? app.prefs.lastLaunch?.agentProfileId : undefined
+    const p = otherProfiles.value.find((x) => x.id === remembered) ?? otherProfiles.value[0] ?? null
+    agentProfileId.value = p?.id ?? ''
+    workProfile.value = p?.defaultWorkProfile ?? options.value?.defaultWorkProfile ?? 'balanced'
+    effort.value = ''
+  } else {
+    applyProfileDefaults()
+  }
+}
+
+function applyAgentProfileDefaults() {
+  workProfile.value = agentProfile.value?.defaultWorkProfile ?? options.value?.defaultWorkProfile ?? 'balanced'
+}
 
 watch(isOpen, (open) => {
   if (!open) return
@@ -98,6 +132,15 @@ watch(isOpen, (open) => {
   profileId.value = sel.profileId
   workProfile.value = sel.workProfile
   effort.value = sel.effort
+  agent.value = 'claude'
+  // Other agents' profiles (ADR-0052): the last agent used, else Claude Code when it has a profile.
+  const pickAgent = () => {
+    const last = app.prefs.lastLaunch?.agent
+    const wanted = agentChoices.value.find((a) => a.id === last) ?? agentChoices.value[0]
+    if (wanted && wanted.id !== 'claude') chooseAgent(wanted.id)
+  }
+  if (profiles.agents) pickAgent()
+  else profiles.loadAgents().then(pickAgent).catch(() => undefined)
 })
 
 function applyProfileDefaults() {
@@ -135,23 +178,28 @@ async function launch() {
       close()
       return
     }
-    await sessions.startClaude({
-      profileId: profileId.value,
+    const common = {
       projectId: projectId.value || null,
       cwd: projectId.value ? null : customDir.value,
       workProfile: workProfile.value || null,
-      effort: effort.value || null,
       model: model.value.trim() || null,
       title: title.value.trim() || null,
       taskId: task.value?.id ?? null,
       startTask: task.value ? startTask.value : undefined,
       kickoff: task.value ? kickoff.value : undefined,
-    })
+    }
+    if (agent.value === 'claude') {
+      await sessions.startClaude({ ...common, profileId: profileId.value, effort: effort.value || null })
+    } else {
+      await sessions.startAgent({ ...common, agentProfileId: agentProfileId.value })
+    }
     app.prefs.lastLaunch = {
-      profileId: profileId.value,
+      profileId: agent.value === 'claude' ? profileId.value : (app.prefs.lastLaunch?.profileId ?? profileId.value),
       workProfile: workProfile.value,
-      effort: effort.value || null,
+      effort: agent.value === 'claude' ? effort.value || null : (app.prefs.lastLaunch?.effort ?? null),
       taskKickoff: task.value ? kickoff.value : app.prefs.lastLaunch?.taskKickoff,
+      agent: agent.value,
+      agentProfileId: agent.value === 'claude' ? app.prefs.lastLaunch?.agentProfileId : agentProfileId.value,
     }
     close()
   } catch (e) {
@@ -168,8 +216,8 @@ function goToProfiles() {
 </script>
 
 <template>
-  <BaseModal :open="isOpen" title="Launch Claude Code" subtitle="Runs in the integrated terminal with the selected profile's own configuration." :width="640" @close="close">
-    <div v-if="profiles.list.length === 0" class="notice notice-warn">
+  <BaseModal :open="isOpen" :title="`Launch ${agentName}`" subtitle="Runs in the integrated terminal with the selected profile's own configuration." :width="640" @close="close">
+    <div v-if="profiles.list.length === 0 && !profiles.agentProfiles.length" class="notice notice-warn">
       <TriangleAlert />
       <div>
         No Claude profile is registered yet.
@@ -187,10 +235,11 @@ function goToProfiles() {
           </label>
           <label class="checkbox" data-launch-kickoff>
             <input v-model="kickoff" type="checkbox" />
-            <span>Start right away — NEXUS sends Claude the first message</span>
+            <span>Start right away — NEXUS sends {{ agent === 'claude' ? 'Claude' : agentName }} the first message</span>
           </label>
           <div v-if="kickoff && options?.taskKickoff" class="hint kickoff-text">“{{ options.taskKickoff }}”</div>
-          <div class="hint">Claude gets a short brief of the task (not its history) and records progress with the NEXUS task tools.</div>
+          <div v-if="agent === 'claude'" class="hint">Claude gets a short brief of the task (not its history) and records progress with the NEXUS task tools.</div>
+          <div v-else class="hint" data-launch-task-tools>{{ agentName }} reads the task with the NEXUS get_task tool and records progress with update_task — the task text never goes into its instructions.</div>
         </div>
       </div>
       <div v-if="task && (ownUsable || runningInProject.length)" class="field" data-launch-start-in>
@@ -210,6 +259,23 @@ function goToProfiles() {
         <span class="hint" data-start-in-hint>{{ startHint }}</span>
       </div>
       <div v-show="!task || startIn === 'new'" class="fresh">
+      <div v-if="agentChoices.length > 1" class="field" data-launch-agents>
+        <label>Agent</label>
+        <div class="segments agents" role="radiogroup" aria-label="Agent">
+          <button
+            v-for="a in agentChoices"
+            :key="a.id"
+            class="segment"
+            role="radio"
+            :data-launch-agent="a.id"
+            :aria-checked="agent === a.id"
+            :class="{ selected: agent === a.id }"
+            @click="chooseAgent(a.id)"
+          >
+            {{ a.name }}
+          </button>
+        </div>
+      </div>
       <div class="field">
         <label for="launch-project">Project</label>
         <div class="input-row">
@@ -222,7 +288,7 @@ function goToProfiles() {
         </div>
       </div>
 
-      <div class="field">
+      <div v-if="agent === 'claude'" class="field">
         <label for="launch-profile">Claude profile</label>
         <select id="launch-profile" v-model="profileId" class="select" @change="applyProfileDefaults()">
           <option v-for="p in profiles.list" :key="p.id" :value="p.id">{{ p.name }}</option>
@@ -231,6 +297,17 @@ function goToProfiles() {
           <span class="pdot" :style="{ background: profile.color }" />
           <template v-if="profile.configDir">CLAUDE_CONFIG_DIR = <code>{{ shortPath(profile.configDir, app.info?.homeDir, 60) }}</code></template>
           <template v-else>Default location (<code>~/.claude</code>) — CLAUDE_CONFIG_DIR is removed for this session</template>
+        </span>
+      </div>
+      <div v-else class="field" data-launch-agent-profile>
+        <label for="launch-agent-profile">{{ agentName }} profile</label>
+        <select id="launch-agent-profile" v-model="agentProfileId" class="select" @change="applyAgentProfileDefaults()">
+          <option v-for="p in otherProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
+        <span v-if="agentProfile" class="hint">
+          <template v-if="agentProfile.homeDir">CODEX_HOME = <code>{{ shortPath(agentProfile.homeDir, app.info?.homeDir, 60) }}</code></template>
+          <template v-else>Your own Codex home (<code>~/.codex</code>) — NEXUS adds its tools for this session only</template>
+          <template v-if="!agentProfile.turnNotifications"> · turn notifications off</template>
         </span>
       </div>
 
@@ -253,7 +330,7 @@ function goToProfiles() {
       </div>
 
       <div class="two">
-        <div class="field">
+        <div v-if="agent === 'claude'" class="field">
           <label for="launch-effort">Reasoning effort</label>
           <select id="launch-effort" v-model="effort" class="select">
             <option value="">Claude default</option>
@@ -262,7 +339,13 @@ function goToProfiles() {
         </div>
         <div class="field">
           <label for="launch-model">Model</label>
-          <input id="launch-model" v-model="model" class="input" :placeholder="profile?.defaultModel ?? 'Claude default'" spellcheck="false" />
+          <input
+            id="launch-model"
+            v-model="model"
+            class="input"
+            :placeholder="agent === 'claude' ? (profile?.defaultModel ?? 'Claude default') : (agentProfile?.defaultModel ?? `${agentName} default`)"
+            spellcheck="false"
+          />
         </div>
       </div>
 

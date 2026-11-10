@@ -1,6 +1,6 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-10 (session 12: 0.5 alpha merged into `main` and tagged `v0.5.0`)._ Read this first,
+_Last updated: 2026-11-10 (session 13: Agents & Dev Environment on `milestone/agents-dev-environment`, Codex first)._ Read this first,
 then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
@@ -32,6 +32,62 @@ then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, miles
   from the latest *published* release. The `github-pages` environment allows `main` and (since 2026-11-05) tags `v*`,
   so publishing a release redeploys the download page; for v0.1.0 the site was redeployed by hand (the tag rule came
   after).
+
+## Agents & Dev Environment — progress (session 13, branch `milestone/agents-dev-environment`, not merged)
+
+Owner request 2026-11-10: "make it work with other AIs, include useful things like devtools, dev environments … seeing
+all dev tools you can install"; then "i got Codex, so we can add it for starters but make it so later its easy to add
+others". Decisions: ADR-0051 (Dev Environment), ADR-0052 (agents beyond Claude; changes PRODUCT.md's non-goal).
+Defaults taken without asking (stated to the owner): Codex runs *alongside* Claude; install commands stay typed, never run.
+
+* **Dev Environment (ADR-0051, `f34ea3d`):**
+  * `toolchain::TOOLS`: 50 tools in 10 categories, built with `const fn` builders; WinGet ids checked with `winget show
+    --id … -e` (publisher), Homebrew names against formulae.brew.sh (casks get `brew install --cask`); no official
+    package → install page only (make on Windows, psql, MySQL); nvm for Windows only on Windows; probes set telemetry
+    opt-outs (Terraform checkpoint, Azure CLI, .NET).
+  * `toolchain::inventory`: all tools on 8 threads (~3 s on the owner's machine), every copy on PATH, program names
+    tried in order until one answers (`python3` → Store placeholder → `python`), the Store placeholder reported as such.
+  * Version hints for exact versions only (digits and dots) via fnm/Volta/nvm/mise/uv/pyenv/rustup; never `mise use`.
+  * Detection: Java (+ Maven/Gradle unless wrappers), .NET (global.json named, not compared), Ruby/Bundler, Deno, make,
+    CMake, Terraform, Helm, `mise.toml`, more `.tool-versions` plugins. `environment::fit` shared.
+  * `devenv::view` joins the inventory with the active workspace's project needs; `nexus tools [--needed|--missing]`
+    (exit 1 when a need is unmet); desktop `dev_environment` / `dev_environment_check` (inventory kept in memory), page
+    `/environment` (sidebar *Dev Environment*).
+* **Agents (ADR-0052, `b221926` + desktop commit):**
+  * `agent::Kind` (Claude, Codex) with home variable, credentials, markers and a 9-row capability table; Codex: tools
+    full; context, resume, attention, activity partial; usage, kits, inspector unavailable — each with its reason.
+  * Migration 0021: `agent_profiles`; `sessions.agent` (backfilled `'claude'`), `agent_profile_id`. `kind = 'claude'`
+    stays "agent session". Usage analytics selects Claude only; project resume knows Codex threads.
+  * Measured on codex-cli 0.166.0 with a temporary `CODEX_HOME`: `-c` TOML overrides survive argv with Windows paths
+    (`mcp list --json`); `developer_instructions` is added after Codex's own (`debug prompt-input`); hooks need trust
+    persisted in the person's config → not used. `notify` not yet observed with a real turn (MANUAL_CHECKS 34).
+  * `codex::launch` (pure builder, TOML escaping, allowlisted extra options, `resume <uuid>` only), `codex::prepare`
+    (same rules/commit note/task pointer builder as Claude, inspection optional; task text via `get_task`),
+    `codex::notify` + hidden `nexus agent-notify` (thread id + turn ended, no text stored, exit 0),
+    `agent::launch::prepare` for every host; `env::Policy` names the agent.
+  * CLI: `nexus agents list|detect|add|remove`, `nexus launch --agent codex [--resume …]`.
+  * Desktop: `agents_overview`, `agent_profile_*`, `session_start_agent`, `session_resume` for Codex; Profiles page
+    (renamed from *Claude profiles*) with *Other agents*; launch dialog *Agent* choice (no effort for Codex); Codex
+    badge on session rows and terminal tabs; attention says "Codex finished in …".
+  * Test double `fake-codex` (in `crates/fake-claude`): parses the overrides like Codex, asks the MCP server for its
+    tools, runs notify. Threats T55 (agents) and T56 (catalog).
+
+### Verification log — Agents & Dev Environment (sequential, `CARGO_BUILD_JOBS=2`)
+
+| # | Command | Result |
+| --- | --- | --- |
+| 1 | spike: `codex -c mcp_servers.nexus.* mcp list --json`, `codex debug prompt-input -c developer_instructions=…` (temporary `CODEX_HOME`, node argv spawn) | overrides parsed exactly (Windows paths, spaces, quotes); developer instructions added after Codex's own. Git Bash mangles `\\` in native argv — the spike used node `spawnSync` |
+| 2 | `cargo test -p nexus-core --lib -- toolchain devenv environment` · CLI `dev_environment_lists_tools_and_what_projects_need` | 15/15 · 1/1 |
+| 3 | `nexus tools` against this computer (empty data dir) | 50 tools in 3.2 s; first run showed Python as the Store placeholder with no version → program names tried in order + placeholder note; rerun: Python 3.14.6 with the alias listed as a second copy |
+| 4 | vitest `dev-environment` · typecheck · clippy ×1 | 5/5 · clean (one annotation fix) · first run 1 finding (`unnecessary to_string`), fixed, clean |
+| 5 | `cargo test -p nexus-core --lib` (agents slice) | 281 passed |
+| 6 | CLI `codex_sessions_get_nexus_through_overrides_and_resume_their_thread` (fake-codex) | 1/1, first run |
+| 7 | vitest `components` (+ Codex launch) · `agent-profiles` | 22/22 (one expectation updated: `lastLaunch` now records the agent) · 2/2 |
+| 8 | `cargo test --workspace` | passed — 357 passed, 1 ignored (opt-in toast self-test): core 281, CLI 43 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4 |
+| 9 | after a review fix (unknown agents never read as Codex): `cargo test -p nexus-core --lib agent` · CLI `codex` | 5/5 · 1/1 |
+| 10 | `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy -p nexus-desktop --all-targets --features e2e-webview-debugging -- -D warnings` | clean · clean |
+| 11 | `npx vitest run` · `npm run typecheck` · `npx vite build` | 172/172 (33 files) · clean · built |
+| 12 | E2E build (`npx tauri build --debug --no-bundle --features e2e-webview-debugging`, then `cargo build -p nexus-cli -p fake-claude`) | **killed — the system ran low on memory** (stopped by the harness while compiling `nexus-desktop`); not restarted (NX-2). `e2e/agents.mjs` and the other desktop suites **not run** on this code |
 
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
@@ -524,6 +580,11 @@ free.
 
 ## Next actions (in order)
 
+0. **Agents & Dev Environment** (`milestone/agents-dev-environment`, not merged): owner review; MANUAL_CHECKS 34 (Codex
+   with the owner's own login — confirms `notify` delivers the thread id on 0.166.0) and 35 (Dev Environment); then
+   merge `--no-ff` on approval (NX-9). Follow-ups in ROADMAP: workspace toolchain baseline, Codex review as a workflow
+   step (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first). The project page's
+   button still says *Launch Claude* (the dialog then offers Codex) — rename with its tests if the owner wants.
 1. Owner: approve the push request for `main` in NEXUS (the owner reviewed 0.5 alpha, approved the "NEXUS
    engineering" constitution and accepted the manual checks; merged `--no-ff`, `release:` commit, tag `v0.5.0`). A NEXUS
    push request pushes a branch, not tags: then `git push origin v0.5.0` starts the release pipeline (CI checks +

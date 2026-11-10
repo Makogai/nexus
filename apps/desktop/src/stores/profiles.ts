@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
 import { api, toIpcError } from '../lib/ipc'
 import type {
+  AgentProfile,
+  AgentProfileInput,
+  AgentsOverview,
   AuthStatus,
   ClaudeProfile,
   DetectedProfile,
@@ -103,6 +106,29 @@ export const useProfileStore = defineStore('profiles', () => {
     delete auth[id]
   }
 
+  // ---- other agents (ADR-0052): their profiles live apart from Claude profiles ----
+  const agents = ref<AgentsOverview | null>(null)
+  const agentProfiles = computed<AgentProfile[]>(() => agents.value?.profiles.filter((p) => !p.archivedAt) ?? [])
+  const agentProfilesById = computed(() => Object.fromEntries((agents.value?.profiles ?? []).map((p) => [p.id, p])))
+
+  async function loadAgents() {
+    agents.value = await api.agentsOverview()
+  }
+  async function registerAgent(input: AgentProfileInput) {
+    const p = await api.agentProfileRegister(input)
+    await loadAgents()
+    return p
+  }
+  async function updateAgent(id: string, input: AgentProfileInput) {
+    const p = await api.agentProfileUpdate(id, input)
+    await loadAgents()
+    return p
+  }
+  async function forgetAgent(id: string) {
+    await api.agentProfileForget(id)
+    await loadAgents()
+  }
+
   return {
     list,
     byId,
@@ -123,5 +149,12 @@ export const useProfileStore = defineStore('profiles', () => {
     update,
     archive,
     forget,
+    agents,
+    agentProfiles,
+    agentProfilesById,
+    loadAgents,
+    registerAgent,
+    updateAgent,
+    forgetAgent,
   }
 })

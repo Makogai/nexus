@@ -265,7 +265,7 @@ async function unregister() {
           </div>
         </div>
         <button class="btn" :disabled="!project.available" @click="openShell"><SquareTerminal /> Shell</button>
-        <button class="btn btn-primary" :disabled="!project.available" @click="app.openLaunch(project.id)"><Sparkles /> Launch Claude</button>
+        <button class="btn btn-primary" :disabled="!project.available" data-project-launch @click="app.openLaunch(project.id)"><Sparkles /> Launch Claude</button>
       </div>
     </div>
 

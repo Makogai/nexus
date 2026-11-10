@@ -43,7 +43,8 @@ account, configuration and context → come back later and know exactly where wo
 
 * A hosted NEXUS backend or account system.
 * Replacing Claude Code features: permission system, plugin installation, subagents/workflows, transcripts.
-* Multi-provider AI abstraction beyond the Codex review adapter.
+* A provider abstraction of NEXUS's own: other agents are started as their own CLIs (Codex first, ADR-0052), each with
+  stated capabilities — NEXUS does not call models or route between providers.
 * Estimating subscription spend.
 
 ## Quality bar

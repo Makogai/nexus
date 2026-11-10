@@ -36,7 +36,7 @@ const items = computed(() => [
     match: (p: string) => p.startsWith('/notifications'),
     badge: notifications.waitingCount || undefined,
   },
-  { to: '/profiles', label: 'Claude profiles', icon: UserCog, match: (p: string) => p.startsWith('/profiles') },
+  { to: '/profiles', label: 'Profiles', icon: UserCog, match: (p: string) => p.startsWith('/profiles') },
   { to: '/skills', label: 'Skills', icon: Sparkles, match: (p: string) => p.startsWith('/skills') },
   { to: '/kits', label: 'AI Kits', icon: Package, match: (p: string) => p.startsWith('/kits') },
   { to: '/tools', label: 'NEXUS tools', icon: PlugZap, match: (p: string) => p.startsWith('/tools') },

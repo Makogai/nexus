@@ -86,11 +86,13 @@ impl AgentProfileInput {
 const SELECT: &str = "SELECT id, agent, name, home_dir, executable, extra_args_json, inherit_provider_env, turn_notifications,
     default_work_profile, default_model, created_at, updated_at, last_used_at, archived_at FROM agent_profiles";
 
-fn from_row(r: &Row<'_>) -> rusqlite::Result<AgentProfile> {
+/// A row of an agent this build does not know (written by a newer NEXUS) is `None`: never launched as another agent.
+fn from_row(r: &Row<'_>) -> rusqlite::Result<Option<AgentProfile>> {
     let agent: String = r.get(1)?;
-    Ok(AgentProfile {
+    let Some(agent) = Kind::parse(&agent) else { return Ok(None) };
+    Ok(Some(AgentProfile {
         id: r.get(0)?,
-        agent: Kind::parse(&agent).unwrap_or(Kind::Codex),
+        agent,
         name: r.get(2)?,
         home_dir: r.get::<_, Option<String>>(3)?.map(PathBuf::from),
         executable: r.get::<_, Option<String>>(4)?.map(PathBuf::from),
@@ -103,7 +105,7 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<AgentProfile> {
         updated_at: r.get(11)?,
         last_used_at: r.get(12)?,
         archived_at: r.get(13)?,
-    })
+    }))
 }
 
 struct Valid {
@@ -252,12 +254,13 @@ pub fn list(conn: &Connection, include_archived: bool) -> Result<Vec<AgentProfil
     let filter = if include_archived { "" } else { " WHERE archived_at IS NULL" };
     let mut stmt = conn.prepare(&format!("{SELECT}{filter} ORDER BY COALESCE(last_used_at, 0) DESC, name COLLATE NOCASE"))?;
     let rows = stmt.query_map([], from_row)?.collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(rows)
+    Ok(rows.into_iter().flatten().collect())
 }
 
 pub fn get(conn: &Connection, id: &str) -> Result<AgentProfile> {
     conn.query_row(&format!("{SELECT} WHERE id = ?1"), [id], from_row)
         .optional()?
+        .flatten()
         .ok_or_else(|| CoreError::not_found(format!("agent profile {id} not found")))
 }
 
@@ -371,5 +374,9 @@ mod tests {
         assert_eq!(list(&conn, false).unwrap().len(), 1);
         forget(&conn, &w.id).unwrap();
         assert!(work.is_dir(), "forgetting never deletes the home");
+        // A profile of an agent a newer NEXUS knows is never read as Codex.
+        conn.execute("INSERT INTO agent_profiles(id, agent, name, created_at, updated_at) VALUES ('future', 'gemini', 'G', 0, 0)", []).unwrap();
+        assert!(list(&conn, true).unwrap().iter().all(|p| p.id != "future"));
+        assert!(matches!(get(&conn, "future"), Err(CoreError::NotFound(_))));
     }
 }

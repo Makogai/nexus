@@ -517,6 +517,10 @@ export interface SessionView {
   endReason: string | null
   transcriptPath: string | null
   taskId: string | null
+  /** Which agent an agent session runs (ADR-0052); null for shells. */
+  agent: AgentKind | null
+  /** The agent profile of a non-Claude agent session (Claude sessions use `profileId`). */
+  agentProfileId: string | null
   conversationRecorded: boolean | null
   resumable: boolean
   status: SessionStatus
@@ -678,7 +682,7 @@ export interface UiPreferences {
   sidebarCollapsed: boolean
   defaultShell: string | null
   /** Launch defaults; `taskKickoff` = the last “Start right away” choice for task launches (default: on). */
-  lastLaunch: { profileId?: string; workProfile?: string; effort?: string | null; taskKickoff?: boolean } | null
+  lastLaunch: { profileId?: string; workProfile?: string; effort?: string | null; taskKickoff?: boolean; agent?: AgentKind; agentProfileId?: string } | null
   /** Install a published update by itself when NEXUS starts (default on; ADR-0044). */
   autoUpdate?: boolean
 }
@@ -2011,4 +2015,82 @@ export interface NeedsYouItem {
   /** For approvals: `constitution`, `rule` or `workflow` (each is approved in its own view). */
   docKind: string | null
   since: number | null
+}
+
+// ---- AI agents beyond Claude Code (ADR-0052) ----
+
+export type AgentKind = 'claude' | 'codex'
+
+export interface AgentCapability {
+  id: 'launch' | 'tools' | 'context' | 'resume' | 'attention' | 'activity' | 'usage' | 'kits' | 'inspector'
+  label: string
+  support: 'full' | 'partial' | 'unavailable'
+  detail: string
+}
+
+export interface AgentInfo {
+  id: AgentKind
+  name: string
+  installUrl: string
+  installed: { path: string; version: string | null } | null
+  capabilities: AgentCapability[]
+}
+
+export interface AgentProfile {
+  id: string
+  agent: AgentKind
+  name: string
+  /** null = the agent's default home (`~/.codex`). */
+  homeDir: string | null
+  executable: string | null
+  extraArgs: string[]
+  inheritProviderEnv: boolean
+  /** The agent reports finished turns to NEXUS (Codex: its notify program, in place of your own for NEXUS sessions). */
+  turnNotifications: boolean
+  defaultWorkProfile: string | null
+  defaultModel: string | null
+  createdAt: number
+  updatedAt: number
+  lastUsedAt: number | null
+  archivedAt: number | null
+}
+
+export interface AgentProfileInput {
+  agent: AgentKind
+  name: string
+  homeDir?: string | null
+  executable?: string | null
+  extraArgs?: string[]
+  inheritProviderEnv?: boolean
+  turnNotifications?: boolean
+  defaultWorkProfile?: string | null
+  defaultModel?: string | null
+}
+
+export interface DetectedAgent {
+  agent: AgentKind
+  executable: string | null
+  defaultHome: string
+  defaultHomeExists: boolean
+  registeredProfileId: string | null
+}
+
+export interface AgentsOverview {
+  agents: AgentInfo[]
+  profiles: AgentProfile[]
+  detected: DetectedAgent[]
+}
+
+export interface StartAgent {
+  agentProfileId: string
+  projectId?: string | null
+  cwd?: string | null
+  workProfile?: string | null
+  model?: string | null
+  title?: string | null
+  taskId?: string | null
+  startTask?: boolean
+  kickoff?: boolean
+  cols?: number
+  rows?: number
 }

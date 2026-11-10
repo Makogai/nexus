@@ -105,6 +105,8 @@ function live(id: string, status: SessionView['status']['status'], title = id): 
     endReason: null,
     transcriptPath: null,
     taskId: null,
+    agent: 'claude',
+    agentProfileId: null,
     conversationRecorded: null,
     resumable: false,
     status: { status, certainty: 'reported', since: Date.now(), detail: null },

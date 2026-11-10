@@ -15,7 +15,8 @@ A short tour of each area. Everything stays on your machine unless you push it t
 | **Usage** | Token usage parsed from Claude Code's local transcripts, by project, profile, task, workflow and context strategy. Estimates and unavailable values are labelled. |
 | **Sync** | The workspace's Git repository: fetch, fast-forward pull, reviewed commit and push. |
 | **Notifications** | Permission prompts, questions, reviews, finished or failed workflows; clicking one opens the right session or view. |
-| **Claude profiles** | Your Claude configurations, their sign-in state and read-only diagnostics. |
+| **Dev Environment** | Every development tool NEXUS knows (runtimes, package and version managers, build, containers, cloud and database CLIs, AI agents): installed or not, which version, every copy on PATH, and what your projects need. Missing tools offer the official install command and pinned versions your version manager's command — typed into a terminal for you to run. |
+| **Profiles** | Your Claude configurations, their sign-in state and read-only diagnostics. Under *Other agents*: the **OpenAI Codex CLI** — what its sessions get from NEXUS, and its profiles (your own `~/.codex`, or another existing home). Choose *Codex* in the launch dialog to start it with the NEXUS tools, your approved rules and the task. |
 | **AI Kits** | Claude Code plugins and skill folders, reviewed by you and enabled per profile. |
 | **Settings** | Appearance, terminal, workspaces, data folder, **backups**, the command-line tool. |
 
@@ -25,7 +26,8 @@ Every desktop feature has a CLI equivalent — `nexus --help`. The installer put
 Desktop sessions always use it by its full path.
 
 ## Things NEXUS will never do
-* Change your Claude configuration folders, read credential files, or store credentials.
+* Change your Claude configuration folders or your Codex home, read credential files, or store credentials.
+* Install software or run an install command for you.
 * Change or run anything in your project repositories (the only write is a local `.git/info/exclude` line for
   `graphify-out/` when you choose *Build the graph*); show files that may hold secrets.
 * Run a gate command you have not approved, or a changed version of one.

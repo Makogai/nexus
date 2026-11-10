@@ -24,6 +24,9 @@ const draft = ref('')
 
 const s = computed(() => props.session)
 const profile = computed(() => (s.value.profileId ? profiles.byId[s.value.profileId] : null))
+/** A non-Claude agent session (ADR-0052): which agent, under which of its profiles. */
+const otherAgent = computed(() => (s.value.agent && s.value.agent !== 'claude' ? s.value.agent : null))
+const agentProfile = computed(() => (s.value.agentProfileId ? (profiles.agentProfilesById[s.value.agentProfileId] ?? null) : null))
 const project = computed(() => (s.value.projectId ? projects.byId[s.value.projectId] : null))
 const tone = computed(() => sessionTone(s.value))
 const live = computed(() => s.value.running || s.value.liveElsewhere)
@@ -93,6 +96,9 @@ async function archive() {
         <span v-if="profile" class="badge" :title="profile.configDir ?? 'default location'">
           <span class="pdot" :style="{ background: profile.color }" />{{ profile.name }}
         </span>
+        <span v-if="otherAgent" class="badge badge-accent" :data-session-agent="otherAgent" :title="agentProfile ? `${agentProfile.name} — ${agentProfile.homeDir ?? '~/.codex'}` : ''">
+          {{ otherAgent === 'codex' ? 'Codex' : otherAgent }}<template v-if="agentProfile && agentProfile.name.toLowerCase() !== otherAgent"> · {{ agentProfile.name }}</template>
+        </span>
         <span v-if="workName" class="badge">{{ workName }}</span>
         <span
           v-if="live && s.kind === 'claude' && s.status.status !== 'running'"
@@ -142,7 +148,7 @@ async function archive() {
         </template>
         <template v-if="s.kind === 'claude' && !s.running && s.conversationRecorded === false">
           <span>·</span>
-          <span class="faint">no conversation recorded</span>
+          <span class="faint">{{ otherAgent ? 'no finished turn reported — nothing to resume' : 'no conversation recorded' }}</span>
         </template>
       </div>
     </div>
@@ -154,7 +160,7 @@ async function archive() {
       </template>
       <span v-else-if="s.liveElsewhere" class="faint small">open in its own terminal</span>
       <template v-else>
-        <button v-if="s.resumable" class="btn btn-sm btn-primary" title="claude --resume" @click="resume"><RotateCcw /> Resume</button>
+        <button v-if="s.resumable" class="btn btn-sm btn-primary" :title="otherAgent ? `${otherAgent} resume` : 'claude --resume'" data-session-resume @click="resume"><RotateCcw /> Resume</button>
         <button v-else-if="s.attached" class="btn btn-sm" @click="focus">Output</button>
         <button v-if="!compact" class="btn btn-sm btn-ghost btn-icon" title="Rename" @click="startRename"><Pencil /></button>
         <button v-if="!compact" class="btn btn-sm btn-ghost btn-icon" title="Archive" @click="archive"><Archive /></button>

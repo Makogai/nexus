@@ -50,7 +50,8 @@ Measured with codex-cli 0.166.0 (temporary `CODEX_HOME`, nothing in `~/.codex` t
      same server and authorization scope as a Claude session;
    * `developer_instructions`: the work profile and NEXUS-authored text only (approved always-on rules, the commit-message
      note, the task pointer). A task's own text is untrusted and reaches Codex only through `get_task` (delivery
-     `tools`, T22);
+     `tools`, T22). A command-line override wins over the person's `config.toml`, so their own `developer_instructions`
+     (rarely set; AGENTS.md is the usual place) does not apply in NEXUS sessions — the profile page says so;
    * `notify = [<nexus>, "--data-dir", <data>, "agent-notify", "--session", <id>]` when the profile keeps turn
      notifications on. `nexus agent-notify` reads only `type` and `thread-id` (a UUID) from the payload — never
      `input-messages` or `last-assistant-message` — stores no text, prints nothing and always exits 0. The first

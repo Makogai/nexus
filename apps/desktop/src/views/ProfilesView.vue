@@ -22,6 +22,7 @@ import { relativeTime, shortPath } from '../lib/format'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
 import ProfileDialog from '../components/ProfileDialog.vue'
+import AgentProfilesCard from '../components/AgentProfilesCard.vue'
 
 const app = useAppStore()
 const profiles = useProfileStore()
@@ -78,8 +79,8 @@ async function archive(p: ClaudeProfile) {
   <div class="page">
     <div class="page-header">
       <div>
-        <h1>Claude profiles</h1>
-        <p>Each profile is a separate Claude Code configuration — its own account, settings, plugins and history.</p>
+        <h1>Profiles</h1>
+        <p>Each Claude profile is a separate Claude Code configuration — its own account, settings, plugins and history. Codex profiles are under <em>Other agents</em> below.</p>
       </div>
       <div class="page-actions">
         <RouterLink :to="{ name: 'claude-setup' }" class="btn btn-ghost" data-open-setup>Claude Code setup</RouterLink>
@@ -200,6 +201,8 @@ async function archive(p: ClaudeProfile) {
         <button class="btn btn-primary" @click="openDialog('create')">New profile</button>
       </div>
     </div>
+
+    <AgentProfilesCard />
 
     <h2 class="section-title">Claude Code installations</h2>
     <div class="list">

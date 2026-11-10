@@ -5,6 +5,9 @@ import type {
   NeedsYouItem,
   ClaudeSetupStatus,
   ContextInitialized,
+  AgentProfile,
+  AgentProfileInput,
+  AgentsOverview,
   DevEnvironment,
   DevHistory,
   EnvironmentReport,
@@ -94,6 +97,7 @@ import type {
   SessionFilter,
   SessionView,
   ShellInfo,
+  StartAgent,
   StartClaude,
   Workspace,
   ExplorerListing,
@@ -254,6 +258,13 @@ export const api = {
   sessionList: (filter?: SessionFilter) => call<SessionView[]>('session_list', { filter }),
   sessionGet: (id: string) => call<SessionView>('session_get', { id }),
   sessionStartClaude: (args: StartClaude) => call<SessionView>('session_start_claude', { args }),
+  /** A Codex (or later agent) session from an agent profile (ADR-0052). */
+  sessionStartAgent: (args: StartAgent) => call<SessionView>('session_start_agent', { args }),
+  agentsOverview: () => call<AgentsOverview>('agents_overview'),
+  agentProfileRegister: (input: AgentProfileInput) => call<AgentProfile>('agent_profile_register', { input }),
+  agentProfileUpdate: (id: string, input: AgentProfileInput) => call<AgentProfile>('agent_profile_update', { id, input }),
+  agentProfileSetArchived: (id: string, archived: boolean) => call<AgentProfile>('agent_profile_set_archived', { id, archived }),
+  agentProfileForget: (id: string) => call<void>('agent_profile_forget', { id }),
   /** What NEXUS gives Claude sessions: built-in skills, the MCP server's tools (from `nexus mcp --list-tools`), hooks. */
   nexusTools: () => call<NexusTools>('nexus_tools'),
   /** Push requests of Claude sessions (ADR-0043): pending ones, the review, and the person's decision. */

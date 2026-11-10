@@ -209,13 +209,13 @@ run (ADR-0051 §7).
 
 | # | Milestone | Acceptance check | Status |
 | --- | --- | --- | --- |
-| E1 | Tool catalog by category, ~50 tools (JDK, Maven, Gradle, .NET, Ruby, Bundler, Deno, version managers, make/CMake, kubectl/Helm/Terraform, cloud CLIs, database clients, AI agents); WinGet ids and Homebrew formulae/casks verified; platform-only tools | core unit tests (ids unique, package forms, platform filter) | ☐ |
-| E2 | Inventory: every tool probed in parallel, every copy on PATH, which projects need it and whether the version fits; `nexus tools [--needed\|--missing] [--json]` | core + CLI E2E | ☐ |
-| E3 | Version-manager hints (fnm, Volta, nvm for Windows, pyenv, uv, rustup, mise) for exact versions only, validated; typed, never run | core unit tests | ☐ |
-| E4 | Dev Environment page: categories, filters, needed-by with version fit, copies on PATH, install/hint typed into a terminal, check again | vitest + desktop E2E | ☐ |
-| G1 | Agent registry and capability table; `agent_profiles` + `sessions.agent`/`agent_profile_id` (migration 0021); environment policy per agent; Claude-only subsystems filter `agent = 'claude'` | core | ☐ |
-| G2 | Codex adapter: argv builder (`-c` TOML overrides: MCP server, `developer_instructions`, `notify`), refused extra arguments, `codex::prepare` (task delivery through tools), `nexus agent-notify` (thread id + turn ended, no text stored), resume only with a recorded thread id; `fake-codex` | core + PTY integration with `fake-codex` + CLI E2E | ☐ |
-| G3 | Desktop and CLI: Codex profiles (detect default, register a home), agent choice when launching from a project or task, agent badges, capability explanations; `nexus launch --agent codex`, `nexus agents` | vitest + desktop E2E with `fake-codex` | ☐ |
+| E1 | Tool catalog by category, ~50 tools (JDK, Maven, Gradle, .NET, Ruby, Bundler, Deno, version managers, make/CMake, kubectl/Helm/Terraform, cloud CLIs, database clients, AI agents); WinGet ids and Homebrew formulae/casks verified; platform-only tools | core unit tests (ids unique, package forms, platform filter) | ✅ |
+| E2 | Inventory: every tool probed in parallel, every copy on PATH, which projects need it and whether the version fits; `nexus tools [--needed\|--missing] [--json]` | core + CLI E2E | ✅ |
+| E3 | Version-manager hints (fnm, Volta, nvm for Windows, pyenv, uv, rustup, mise) for exact versions only, validated; typed, never run | core unit tests | ✅ |
+| E4 | Dev Environment page: categories, filters, needed-by with version fit, copies on PATH, install/hint typed into a terminal, check again | vitest + desktop E2E | implemented, vitest ✅; desktop E2E pending |
+| G1 | Agent registry and capability table; `agent_profiles` + `sessions.agent`/`agent_profile_id` (migration 0021); environment policy per agent; Claude-only subsystems filter `agent = 'claude'` | core | ✅ |
+| G2 | Codex adapter: argv builder (`-c` TOML overrides: MCP server, `developer_instructions`, `notify`), refused extra arguments, `codex::prepare` (task delivery through tools), `nexus agent-notify` (thread id + turn ended, no text stored), resume only with a recorded thread id; `fake-codex` | core + PTY integration with `fake-codex` + CLI E2E | ✅ (core + CLI E2E with `fake-codex`) |
+| G3 | Desktop and CLI: Codex profiles (detect default, register a home), agent choice when launching from a project or task, agent badges, capability explanations; `nexus launch --agent codex`, `nexus agents` | vitest + desktop E2E with `fake-codex` | implemented, CLI + vitest ✅; desktop E2E pending |
 | G4 | Real Codex check by the owner: NEXUS tools listed in a session, thread id recorded after a turn, resume | `docs/MANUAL_CHECKS.md` | ☐ |
 
 Later: a workspace toolchain baseline in the manifest; Codex review as a workflow step (M26); Gemini CLI, GitHub Copilot
