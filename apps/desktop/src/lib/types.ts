@@ -313,6 +313,8 @@ export interface GitStatus {
   untracked: number
   conflicted: number
   lastCommit: CommitInfo | null
+  /** An unfinished `merge`, `rebase`, `cherry-pick` or `revert` (project page status only). */
+  operation?: string | null
 }
 
 export type InstallSource = 'path' | 'native-installer' | 'npm' | 'homebrew' | 'custom'
@@ -1725,8 +1727,19 @@ export interface PushRequest {
   reason: string
   status: 'pending' | 'pushed' | 'declined' | 'failed'
   message: string | null
+  /** Why a push failed (ADR-0047). */
+  failureKind: PushFailureKind | null
   createdAt: number
   decidedAt: number | null
+  dismissedAt: number | null
+}
+
+export type PushFailureKind = 'rejected' | 'auth' | 'offline' | 'remote-missing' | 'timeout' | 'other'
+
+/** A remote Git call that failed, with its kind (`git::RemoteError`). */
+export interface RemoteError {
+  kind: PushFailureKind
+  message: string
 }
 
 export interface PushReview {
@@ -1741,6 +1754,14 @@ export interface PushReview {
   commits: GitLogEntry[]
   inspection: SyncInspection
   token: string
+  /** The review fetched the remote branch first; `fetchError` says why not. */
+  fetched: boolean
+  fetchError: RemoteError | null
+  ahead: number
+  /** Commits the remote has that this branch does not — the push is disabled while above 0. */
+  behind: number
+  diverged: boolean
+  incoming: GitLogEntry[]
 }
 
 export type SyncSide = 'working' | 'incoming' | 'outgoing'

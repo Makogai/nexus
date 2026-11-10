@@ -253,7 +253,8 @@ export const api = {
   /** What NEXUS gives Claude sessions: built-in skills, the MCP server's tools (from `nexus mcp --list-tools`), hooks. */
   nexusTools: () => call<NexusTools>('nexus_tools'),
   /** Push requests of Claude sessions (ADR-0043): pending ones, the review, and the person's decision. */
-  pushRequestPending: (projectId?: string | null) => call<PushRequest[]>('push_request_pending', { projectId: projectId ?? null }),
+  pushRequestOpen: (projectId?: string | null) => call<PushRequest[]>('push_request_open', { projectId: projectId ?? null }),
+  pushRequestDismiss: (id: string) => call<PushRequest>('push_request_dismiss', { id }),
   pushRequestReview: (id: string) => call<PushReview>('push_request_review', { id }),
   pushRequestDecide: (id: string, approve: boolean, token: string) => call<PushRequest>('push_request_decide', { id, approve, token }),
   /** Hand a task to a running Claude session of its project (NEXUS types a fixed message with the task id). */

@@ -363,6 +363,14 @@ pub fn resolve_workflow(conn: &Connection, run_id: &str) -> Result<usize> {
 }
 
 /// The situation behind one deduplicated notification ended (e.g. a review was given).
+/// Is a notification with this dedupe key still open (neither dismissed nor resolved), however old?
+pub fn is_open(conn: &Connection, key: &str) -> Result<bool> {
+    Ok(conn
+        .query_row("SELECT 1 FROM notifications WHERE dedupe_key = ?1 AND dismissed_at IS NULL AND resolved_at IS NULL LIMIT 1", [key], |_| Ok(()))
+        .optional()?
+        .is_some())
+}
+
 pub fn resolve_dedupe(conn: &Connection, key: &str) -> Result<usize> {
     Ok(conn.execute("UPDATE notifications SET resolved_at = ?2 WHERE dedupe_key = ?1 AND resolved_at IS NULL", params![key, now_ms()])?)
 }

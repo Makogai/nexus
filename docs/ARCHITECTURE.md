@@ -253,6 +253,7 @@ knowledge_approvals(path PK, content_hash, approved_at)                         
 -- v18: push_requests(id, session_id FK, project_id FK, branch, head, reason, status CHECK(pending|pushed|declined|failed),
 --      message, created_at, decided_at) (ADR-0043)
 -- v19: learn_folders(project_id FK, path, added_at) — extra folders for learning sessions (ADR-0045)
+-- v20: push_requests.failure_kind (rejected|auth|offline|remote-missing|timeout|other), dismissed_at (ADR-0047)
 ```
 
 Timestamps are Unix milliseconds (INTEGER). Foreign keys enforced (`PRAGMA foreign_keys=ON`).
@@ -274,7 +275,7 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Projects | `project_list`, `project_get`, `project_inspect_path`, `project_register`, `project_unregister`, `project_locate`, `project_refresh`, `project_git_status`, `project_checkpoints`, `project_scan`, `project_clone`, `project_clone_new`, `project_context_init`, `project_environment`, `project_history` |
 | Project explorer | `project_tree`, `project_file`, `project_log`, `project_commit`, `project_commit_diff` (read-only, ADR-0040) |
 | Learn | `project_learn_map`, `project_learn_start`, `project_learn_drafts`, `project_learn_decide`, `project_learn_exclude_graph`, `project_learn_graph`, `project_learn_add_folder`, `project_learn_remove_folder` (ADR-0041, ADR-0045) |
-| Push requests | `push_request_pending`, `push_request_review`, `push_request_decide` (ADR-0043) |
+| Push requests | `push_request_open` (pending, and failed until dismissed or superseded), `push_request_review` (fetches first), `push_request_decide`, `push_request_dismiss` (ADR-0043, ADR-0047) |
 | Skills | `skills_list`, `skills_read`, `skills_create`, `skills_save`, `skills_delete` (ADR-0046) |
 | Claude | `claude_setup_status`, `claude_installations`, `profile_list`, `profile_detect`, `profile_register`, `profile_create`, `profile_update`, `profile_set_archived`, `profile_forget`, `profile_details`, `profile_auth_status`, `launch_options`, `nexus_tools` |
 | Sessions | `session_list`, `session_get`, `session_start_claude`, `session_resume`, `session_open_shell`, `session_attach`, `session_write`, `session_resize`, `session_interrupt`, `session_terminate`, `session_release`, `session_rename`, `session_set_archived`, `session_continue_task` |

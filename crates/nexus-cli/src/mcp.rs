@@ -813,9 +813,13 @@ impl Server {
             "pending" => "The person reviews the outgoing commits in NEXUS and pushes or declines. Ask again later to learn the outcome.",
             "pushed" => "Pushed.",
             "declined" => "The person declined this push.",
-            _ => "The push failed — see message.",
+            // By failure kind (ADR-0047): rejected → integrate first; auth/offline → the person acts in NEXUS.
+            _ => nexus_core::push_request::next_step(r.failure_kind.as_deref()),
         };
-        Ok(json!({ "pushRequest": { "id": r.id, "branch": r.branch, "commit": r.head, "status": r.status, "message": r.message }, "next": next }))
+        Ok(json!({
+            "pushRequest": { "id": r.id, "branch": r.branch, "commit": r.head, "status": r.status, "message": r.message, "failureKind": r.failure_kind },
+            "next": next,
+        }))
     }
 
     /// Claude's commit message for the workspace changes of this session (ADR-0042): stored with the session; the Sync
@@ -1076,7 +1080,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "request_push", "title": "Ask the user to push",
-            "description": "When this project's commits should be pushed but you may not push yourself (for example git push is not allowed in this session), ask the user here instead: NEXUS shows them the outgoing commits of the checked-out branch and pushes after their approval — never forced. Give a one-line reason. Calling it again reports the outcome (pending, pushed, declined, failed).",
+            "description": "When this project's commits should be pushed but you may not push yourself (for example git push is not allowed in this session), ask the user here instead: NEXUS shows them the outgoing commits of the checked-out branch and pushes after their approval — never forced. Give a one-line reason. Calling it again reports the outcome (pending, pushed, declined, failed). A failed push names its failureKind (rejected: the remote has commits this branch lacks — integrate them with git pull --rebase or merge, resolve conflicts, run the tests, then call this again; auth, offline, timeout, remote-missing: the person acts in NEXUS) and the next step.",
             "inputSchema": { "type": "object", "properties": {
                 "reason": { "type": "string", "maxLength": 300 }
             }, "additionalProperties": false },

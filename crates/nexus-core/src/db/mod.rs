@@ -124,6 +124,11 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0019_learn_folders.sql"),
         disable_foreign_keys: false,
     },
+    Migration {
+        name: "0020_push_request_failure",
+        sql: include_str!("migrations/0020_push_request_failure.sql"),
+        disable_foreign_keys: false,
+    },
 ];
 
 /// Schema version this build understands.

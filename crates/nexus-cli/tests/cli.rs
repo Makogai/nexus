@@ -332,6 +332,50 @@ fn json(s: &str) -> Value {
     serde_json::from_str(s).unwrap()
 }
 
+/// ADR-0047: Claude learns why its push failed — `status: failed`, the `failureKind` and the next step — without guessing.
+#[test]
+fn request_push_reports_a_rejected_push_with_its_kind_and_the_next_step() {
+    let e = Env::new();
+    e.setup();
+    let root = e.home();
+    let git = |dir: &Path, args: &[&str]| {
+        let out = Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@example.invalid", "-c", "core.autocrlf=false"]).args(args).current_dir(dir).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    let (bare, mate) = (root.join("origin.git"), root.join("teammate"));
+    git(&root, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
+    git(&e.repo, &["add", "-A"]);
+    git(&e.repo, &["commit", "-qm", "init"]);
+    git(&e.repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git(&e.repo, &["push", "-q", "-u", "origin", "main"]);
+    git(&root, &["clone", "-q", bare.to_str().unwrap(), mate.to_str().unwrap()]);
+    std::fs::write(mate.join("theirs.txt"), "x\n").unwrap();
+    git(&mate, &["add", "-A"]);
+    git(&mate, &["commit", "-qm", "Teammate change"]);
+    git(&mate, &["push", "-q", "origin", "main"]);
+    std::fs::write(e.repo.join("ours.txt"), "y\n").unwrap();
+    git(&e.repo, &["add", "-A"]);
+    git(&e.repo, &["commit", "-qm", "Our change"]);
+
+    let (_, session) = launch_report(&e, &[], "push.json");
+    let sid = session["id"].as_str().unwrap();
+    let asked = &mcp_calls(&e, sid, &[("request_push", serde_json::json!({ "reason": "ship the fix" }))])[0];
+    assert_eq!(asked["structuredContent"]["pushRequest"]["status"], "pending", "{asked:#}");
+    let id = asked["structuredContent"]["pushRequest"]["id"].as_str().unwrap().to_string();
+
+    // The person pushes from NEXUS (the desktop's decide): the remote has a commit this branch lacks.
+    let conn = nexus_core::db::open(&e.data.join(nexus_core::db::DB_FILE)).unwrap();
+    let review = nexus_core::push_request::review(&conn, &root, &id).unwrap();
+    assert_eq!(review.behind, 1);
+    assert_eq!(nexus_core::push_request::decide(&conn, &root, &id, true, &review.token).unwrap().status, "failed");
+    drop(conn);
+
+    let told = &mcp_calls(&e, sid, &[("request_push", serde_json::json!({}))])[0];
+    let pr = &told["structuredContent"]["pushRequest"];
+    assert_eq!((pr["id"].as_str(), pr["status"].as_str(), pr["failureKind"].as_str()), (Some(id.as_str()), Some("failed"), Some("rejected")), "{told:#}");
+    assert!(told["structuredContent"]["next"].as_str().unwrap().contains("git pull --rebase"), "{told:#}");
+}
+
 #[test]
 fn organisation_policy_blocking_sideload_flags_omits_mcp_and_says_why() {
     let e = Env::new();

@@ -52,6 +52,23 @@ now, a file-system watcher later; plain task session (no workflow run).
     `mcp-interop.mjs`, `installed.mjs` and `workbench.mjs` come from `nexus mcp --list-tools`. §7 (v10–v19) and §8
     (all 181 commands) are current; TESTING.md no longer says 21/22 tools.
   * **CLAUDE.md:** a short "UI conventions" section (useAction/ActionButton, errors stay visible, `?tab=`, data-* selectors).
+* **Phase 1 — Git pushes that never fail silently (ADR-0047, the anilist report):**
+  * **Review fetches first** (`git::fetch_branch`, 60 s; own DB connection): ahead/behind/diverged and the incoming
+    commits; Push disabled while the remote is ahead, with the plain next step; an unreachable remote is said and a
+    reviewed attempt stays possible.
+  * **Failure kind kept** (migration 0020 `failure_kind`, `dismissed_at`): `decide` records rejected/auth/offline/
+    remote-missing/timeout/other with Git's redacted line, returns the request (not an IPC error), publishes an action
+    notification; `open()` keeps failed requests listed until dismissed or superseded (IPC `push_request_open`,
+    `push_request_dismiss`; `push_request_pending` removed). A remote that moved on after the review is recorded as
+    rejected without trying.
+  * **Dialog:** errors survive reloads; result panel (pushed → *Open Commits*; failed → guidance by kind); *Review
+    again*, *Dismiss*; *Tell Claude* types the fixed message into the requesting running session without Enter
+    (clipboard otherwise).
+  * **MCP `request_push`:** `failureKind` and the next step for failed requests (24 tools, unchanged).
+  * **Conflicts visible:** "N conflicted", merge/rebase in progress (`git::operation_in_progress`) and ahead/behind on
+    the Repository card and in the header.
+  * **Auto-sync:** first failed publication → one warning notification (resolved by the next success); a rejected push
+    pauses and asks, no retry loop (ADR-0042 amendment).
 
 ## Project workbench — progress (session 10)
 
@@ -344,6 +361,13 @@ Per-phase checks while building (targeted); the full run on the final code follo
 | 3 | 0 | `cargo test -p nexus-cli --test cli mcp_server_speaks_json_rpc_over_stdio` | 1/1 |
 | 4 | 0 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | 5 | 0 | `node e2e/mcp-interop.mjs` | MCP INTEROP OK (9 checks; count from `--list-tools`) |
+| 6 | 1 | `cargo test -p nexus-core` | 252 + 2 + 5 + 4 passed (new: rejected push with a teammate and a declining hook, auto-sync warning/pause) |
+| 7 | 1 | `cargo test -p nexus-cli` | 41 + 6 passed (new: `request_push` reports `failureKind`) |
+| 8 | 1 | `cargo test -p nexus-desktop --lib` | 11 passed |
+| 9 | 1 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| 10 | 1 | `npm run typecheck` · `npx vitest run` | clean · 124/124 (27 files; new `push-request.test.ts` 7) |
+| 11 | 1 | `npx tauri build --debug --no-bundle --features e2e-webview-debugging` · `cargo build -p nexus-cli -p fake-claude` | ok |
+| 12 | 1 | `node e2e/task-flow.mjs` | TASK FLOW OK (first run: the teammate fixture cloned without a branch — fixed with `clone -b`) |
 
 ## Verification log — Portable Workspace stage (sequential groups, `CARGO_BUILD_JOBS=2`, final code `7c491fb`)
 

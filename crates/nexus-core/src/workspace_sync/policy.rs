@@ -270,6 +270,7 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
     if let Err(e) = ops::fetch(s) {
         let _ = settings::set(s.conn, &due_key(&s.ws.id), &(crate::now_ms() + RETRY_MS));
         audit("failed", Some("offline"), &format!("committed locally; publishing later: {e}"), 0, pending.len())?;
+        warn_failed(s, &format!("the remote could not be reached ({e}). The changes are committed locally; NEXUS tries again every 10 minutes."))?;
         return out("committed", format!("committed locally; the remote could not be reached ({e}) — NEXUS tries again later"), pending.len());
     }
     let pr = ops::review_push(s)?;
@@ -300,14 +301,42 @@ pub fn apply(s: &Sync<'_>, m: &Managed) -> Result<Outcome> {
                 message.push_str(&format!(" — noted, not stopping: {}", inspect::describe(&noted.iter().collect::<Vec<_>>())));
             }
             audit("ok", None, &message, p.commits, pr.files.len())?;
+            crate::notify::resolve_dedupe(s.conn, &failed_key(&s.ws.id))?;
             out("pushed", format!("published {} {what}", pr.files.len()), pr.files.len())
+        }
+        // Git refused it — the remote moved on between the fetch and the push: like a remote that is ahead, pause and
+        // ask; no retry loop against a remote that will keep refusing (ADR-0042 amendment, ADR-0047).
+        Err(e) if super::history::last_error_kind(s.conn, &s.ws.id, "push")?.as_deref() == Some("rejected") => {
+            pause(format!("the remote refused the push — it has new commits; pull them in the Sync Center first (NEXUS never force-pushes): {e}"), pr.files.len())
         }
         Err(e) => {
             let _ = settings::set(s.conn, &due_key(&s.ws.id), &(crate::now_ms() + RETRY_MS));
             audit("failed", Some("push"), &format!("committed locally; push failed: {e}"), 0, pr.files.len())?;
+            warn_failed(s, &format!("pushing failed ({e}). The changes are committed locally; NEXUS tries again every 10 minutes."))?;
             out("committed", format!("committed locally; pushing failed ({e}) — NEXUS tries again later"), pr.files.len())
         }
     }
+}
+
+fn failed_key(workspace_id: &str) -> String {
+    format!("sync-failed:{workspace_id}")
+}
+
+/// A warning in the notification center on the first failed automatic publication — not on every retry (one open
+/// notification until a publication succeeds or the person dismisses it).
+fn warn_failed(s: &Sync<'_>, body: &str) -> Result<()> {
+    let key = failed_key(&s.ws.id);
+    if crate::notify::is_open(s.conn, &key)? {
+        return Ok(());
+    }
+    let mut e = crate::notify::NewEvent::new(crate::notify::Category::ProcessIssue, "sync", "Automatic sync could not publish")
+        .priority(crate::notify::Priority::Warning)
+        .body(body)
+        .target("sync", s.ws.id.clone())
+        .dedupe(key);
+    e.workspace_id = Some(s.ws.id.clone());
+    crate::notify::publish(s.conn, e)?;
+    Ok(())
 }
 
 /// Run the policy for every workspace with records due (hosts call this after writing records and on heartbeats).

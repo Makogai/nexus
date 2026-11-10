@@ -16,7 +16,8 @@ defineProps<{ status: GitStatus | null; loading?: boolean; error?: string | null
       </span>
       <span v-if="status.ahead" class="ab" title="Commits ahead of upstream"><ArrowUp />{{ status.ahead }}</span>
       <span v-if="status.behind" class="ab" title="Commits behind upstream"><ArrowDown />{{ status.behind }}</span>
-      <span v-if="status.conflicted" class="badge badge-error">{{ status.conflicted }} conflicts</span>
+      <span v-if="status.conflicted" class="badge badge-error" data-git-conflicted>{{ status.conflicted }} conflicted</span>
+      <span v-if="status.operation" class="badge badge-warn" data-git-operation>{{ status.operation }} in progress</span>
       <span v-if="status.staged + status.unstaged + status.untracked > 0" class="changes" :title="`${status.staged} staged · ${status.unstaged} modified · ${status.untracked} untracked`">
         {{ status.staged + status.unstaged + status.untracked }} changed
       </span>

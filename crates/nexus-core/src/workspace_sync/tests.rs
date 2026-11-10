@@ -712,3 +712,53 @@ fn autonomous_sync_publishes_every_change_with_claudes_message_and_still_stops_o
     assert!(!remote_has(&url, "project-context/shop/tasks/leak.md"));
     assert!(crate::notify::list(&a.conn, &Default::default()).unwrap().iter().any(|n| n.title.contains("ready to sync")));
 }
+
+/// ADR-0042 amendment (ADR-0047): a failed automatic publication is announced once (not on every retry) and cleared by
+/// the next success; a push the remote refuses pauses and asks instead of retrying against it.
+#[test]
+fn automatic_publication_warns_once_on_failure_and_pauses_when_the_remote_refuses() {
+    let (a, url, _t) = origin();
+    a.commit_all("init");
+    a.push();
+    policy::set(&a.conn, &a.ws, policy::Mode::Autonomous, true, &allowed()).unwrap();
+    let tasks = a.root().join("project-context").join("shop").join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let warnings = |conn: &Connection| crate::notify::list(conn, &Default::default()).unwrap().into_iter().filter(|n| n.dedupe_key.as_deref() == Some(&format!("sync-failed:{}", a.ws.id))).collect::<Vec<_>>();
+    let open_warning = |conn: &Connection| crate::notify::is_open(conn, &format!("sync-failed:{}", a.ws.id)).unwrap();
+
+    // Offline twice: committed locally both times, one warning in the notification center.
+    let bare = PathBuf::from(url.trim_start_matches("file://").trim_start_matches('/'));
+    let bare = if cfg!(windows) { bare } else { PathBuf::from(format!("/{}", bare.display())) };
+    let moved = bare.with_file_name("remote-offline.git");
+    std::fs::rename(&bare, &moved).unwrap();
+    for name in ["a.md", "b.md"] {
+        std::fs::write(tasks.join(name), "task\n").unwrap();
+        assert_eq!(policy::apply(&a.sync(), &allowed()).unwrap().action, "committed");
+    }
+    let w = warnings(&a.conn);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert_eq!((w[0].priority.as_str(), w[0].occurrences, w[0].target_kind.as_deref()), ("warning", 1, Some("sync")));
+    // Back online: published, the warning is resolved.
+    std::fs::rename(&moved, &bare).unwrap();
+    std::fs::write(tasks.join("c.md"), "task\n").unwrap();
+    assert_eq!(policy::apply(&a.sync(), &allowed()).unwrap().action, "pushed");
+    assert!(!open_warning(&a.conn));
+
+    // The remote refuses the push (a declining hook stands in for a push that lands between fetch and push): paused,
+    // asked, and not scheduled for a retry.
+    let hook = bare.join("hooks").join("pre-receive");
+    std::fs::write(&hook, "#!/bin/sh\necho 'rejected' >&2\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::fs::write(tasks.join("d.md"), "task\n").unwrap();
+    crate::settings::remove(&a.conn, &format!("sync_due:{}", a.ws.id)).unwrap(); // as `run_due` does before applying
+    let o = policy::apply(&a.sync(), &allowed()).unwrap();
+    assert_eq!(o.action, "paused", "{o:?}");
+    assert!(o.message.contains("refused") && o.message.contains("never force-pushes"), "{o:?}");
+    assert!(crate::settings::get::<i64>(&a.conn, &format!("sync_due:{}", a.ws.id)).unwrap().is_none(), "no retry loop");
+    assert!(crate::notify::list(&a.conn, &Default::default()).unwrap().iter().any(|n| n.title.contains("ready to sync") && n.body.contains("refused")));
+    assert!(!remote_has(&url, "project-context/shop/tasks/d.md"));
+}

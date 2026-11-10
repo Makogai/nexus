@@ -276,7 +276,9 @@ pub async fn project_git_status(ctx: State<'_, Ctx>, id: String) -> IpcResult<Gi
             .local_path
             .filter(|p| p.is_dir())
             .ok_or_else(|| IpcError::invalid("project folder is not available on this machine"))?;
-        Ok(git::status(&path)?)
+        let mut st = git::status(&path)?;
+        st.operation = git::operation_in_progress(&path);
+        Ok(st)
     })
     .await
 }
@@ -289,11 +291,18 @@ pub fn project_checkpoints(ctx: State<'_, Ctx>, id: String, limit: Option<u32>) 
 
 // ---- Push requests (ADR-0043) ---------------------------------------------------------------------------------------
 
-/// Pending push requests (of one project, or all).
+/// Push requests that still need the person (of one project, or all): pending, and failed until dismissed or superseded.
 #[tauri::command]
-pub async fn push_request_pending(ctx: State<'_, Ctx>, project_id: Option<String>) -> IpcResult<Vec<nexus_core::push_request::PushRequest>> {
+pub async fn push_request_open(ctx: State<'_, Ctx>, project_id: Option<String>) -> IpcResult<Vec<nexus_core::push_request::PushRequest>> {
     let ctx = ctx.inner().clone();
-    blocking(move || Ok(nexus_core::push_request::pending(&own_conn(&ctx)?, project_id.as_deref())?)).await
+    blocking(move || Ok(nexus_core::push_request::open(&own_conn(&ctx)?, project_id.as_deref())?)).await
+}
+
+/// Set a failed push request aside (ADR-0047).
+#[tauri::command]
+pub async fn push_request_dismiss(ctx: State<'_, Ctx>, id: String) -> IpcResult<nexus_core::push_request::PushRequest> {
+    let ctx = ctx.inner().clone();
+    blocking(move || Ok(nexus_core::push_request::dismiss(&own_conn(&ctx)?, &id)?)).await
 }
 
 /// What the push would send now: commits, files and the security inspection.

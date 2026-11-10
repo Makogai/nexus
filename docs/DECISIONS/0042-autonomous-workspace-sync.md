@@ -53,3 +53,13 @@ the message did not say which. Now:
   not stopping: …") — a reviewed commit shows them the same way and never blocked on them.
 * **The reason is precise:** the history entry and the notification name the findings — kind, file and line, never the
   text found (`secret in project-context/shop/tasks/a.md:1`, up to three, "+N more").
+
+## Amendment (2026-11-10, ADR-0047; branch `milestone/v0.5-alpha`)
+
+A failed automatic publication only wrote a history entry and retried every ten minutes — also when the remote refused
+the push. Now:
+
+* **The first failure is announced:** a warning in the notification center (offline fetch or failed push), one open
+  notification until a publication succeeds — retries do not repeat it.
+* **A rejected push pauses and asks**, like a remote that is ahead: the history says why, the Sync Center notification
+  asks the person to pull first, and no retry is scheduled (the remote would keep refusing). NEXUS never force-pushes.

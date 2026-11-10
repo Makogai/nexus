@@ -8,6 +8,7 @@ import { api, toIpcError } from '../lib/ipc'
 import { useWorkspaceStore } from '../stores/workspaces'
 import { typeIntoTerminal } from '../lib/terminal'
 import { STATUS_LABELS } from '../lib/knowledge'
+import { failureGuidance, failureTitle } from '../lib/push'
 import type { Checkpoint, ContextInitialized, EnvCheckItem, EnvironmentReport, KnowledgeItem, ProjectKnowledge, PushRequest, TaskStatus } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
@@ -81,12 +82,24 @@ const checkpoints = ref<Checkpoint[]>([])
 const knowledge = ref<ProjectKnowledge | null>(null)
 
 async function loadKnowledge() {
-  pushRequests.value = await api.pushRequestPending(props.id).catch(() => pushRequests.value)
+  pushRequests.value = await api.pushRequestOpen(props.id).catch(() => pushRequests.value)
   if (!project.value?.available) return
   knowledge.value = await api.projectKnowledge(props.id).catch(() => knowledge.value)
 }
-/** Claude sessions waiting for the person to approve a push (ADR-0043). */
+/** Push requests waiting for the person (ADR-0043), and failed ones until dismissed or superseded (ADR-0047). */
 const pushRequests = ref<PushRequest[]>([])
+const dismissing = ref<string | null>(null)
+async function dismissPush(r: PushRequest) {
+  dismissing.value = r.id
+  try {
+    await api.pushRequestDismiss(r.id)
+    pushRequests.value = pushRequests.value.filter((x) => x.id !== r.id)
+  } catch (e) {
+    app.toast('error', `Could not dismiss: ${toIpcError(e).message}`)
+  } finally {
+    dismissing.value = null
+  }
+}
 
 /** Finish a task (or reopen a finished one) from the project page — the task file records it in its log. */
 async function setTaskStatus(t: KnowledgeItem, status: 'done' | 'ready') {
@@ -127,6 +140,11 @@ watch(
     loadCheckpoints()
     loadKnowledge()
   },
+)
+// A push changes ahead/behind on the Repository card.
+watch(
+  () => app.pushRequestsChanged,
+  () => loadGit(true),
 )
 onActivated(() => {
   loadGit()
@@ -173,6 +191,10 @@ async function unregister() {
         <div>
           <h1>{{ project.name }}</h1>
           <p class="mono selectable path">{{ project.localPath ?? 'Not available on this machine' }}</p>
+          <p v-if="git?.status?.conflicted || git?.status?.operation" class="git-alert" data-project-git-alert>
+            <span v-if="git.status.conflicted" class="badge badge-error">{{ git.status.conflicted }} conflicted</span>
+            <span v-if="git.status.operation" class="badge badge-warn">{{ git.status.operation }} in progress</span>
+          </p>
         </div>
       </div>
       <div class="page-actions">
@@ -191,11 +213,20 @@ async function unregister() {
 
     <div v-if="!project.available" class="notice notice-warn"><TriangleAlert /> This project is registered in the workspace but has no folder on this machine. Use “Locate…” on the Projects page.</div>
 
-    <div v-for="r in pushRequests" :key="r.id" class="notice notice-accent push-banner" :data-push-request="r.id">
-      <ArrowUp />
-      <span>Claude asks to push <strong class="mono">{{ r.branch }}</strong><template v-if="r.reason"> — “{{ r.reason }}”</template></span>
-      <button class="btn btn-sm btn-primary" data-push-open @click="app.pushRequestId = r.id">Review &amp; push</button>
-    </div>
+    <template v-for="r in pushRequests" :key="r.id">
+      <!-- A failed push stays until dismissed or superseded (ADR-0047): why, what next, review again. -->
+      <div v-if="r.status === 'failed'" class="notice notice-error push-banner" :data-push-request="r.id" :data-push-failed="r.failureKind ?? 'other'">
+        <TriangleAlert />
+        <span><strong>Push of <span class="mono">{{ r.branch }}</span> failed: {{ failureTitle(r.failureKind).toLowerCase() }}.</strong> {{ failureGuidance(r.failureKind) }}</span>
+        <button class="btn btn-sm" data-push-open @click="app.pushRequestId = r.id">Review again</button>
+        <button class="btn btn-sm btn-ghost" :disabled="dismissing === r.id" :aria-busy="dismissing === r.id" data-push-banner-dismiss @click="dismissPush(r)">Dismiss</button>
+      </div>
+      <div v-else class="notice notice-accent push-banner" :data-push-request="r.id">
+        <ArrowUp />
+        <span>Claude asks to push <strong class="mono">{{ r.branch }}</strong><template v-if="r.reason"> — “{{ r.reason }}”</template></span>
+        <button class="btn btn-sm btn-primary" data-push-open @click="app.pushRequestId = r.id">Review &amp; push</button>
+      </div>
+    </template>
 
     <div class="tabs" role="tablist" aria-label="Project views">
       <button role="tab" class="tab" :class="{ active: tab === 'overview' }" :aria-selected="tab === 'overview'" data-project-tab="overview" @click="setTab('overview')">Overview</button>
@@ -218,7 +249,16 @@ async function unregister() {
           <dt>Upstream</dt>
           <dd class="mono">{{ git.status.upstream ?? 'none' }}</dd>
           <dt>Changes</dt>
-          <dd>{{ git.status.staged }} staged · {{ git.status.unstaged }} modified · {{ git.status.untracked }} untracked</dd>
+          <dd data-project-changes>
+            {{ git.status.staged }} staged · {{ git.status.unstaged }} modified · {{ git.status.untracked }} untracked<template v-if="git.status.conflicted"> · <strong class="conflicted">{{ git.status.conflicted }} conflicted</strong></template>
+            <span v-if="git.status.operation" class="badge badge-warn">{{ git.status.operation }} in progress</span>
+          </dd>
+          <template v-if="git.status.upstream">
+            <dt>Remote</dt>
+            <dd data-project-ahead-behind :title="`Against ${git.status.upstream}, as of the last fetch`">
+              {{ git.status.ahead }} ahead · {{ git.status.behind }} behind<span v-if="git.status.ahead && git.status.behind" class="badge badge-warn">diverged</span>
+            </dd>
+          </template>
           <template v-if="git.status.lastCommit">
             <dt>Last commit</dt>
             <dd class="row commit">
@@ -228,7 +268,7 @@ async function unregister() {
             </dd>
           </template>
           <template v-if="project.remoteUrl">
-            <dt>Remote</dt>
+            <dt>Remote URL</dt>
             <dd class="row mono selectable"><Link class="ic" /> {{ project.remoteUrl }}</dd>
           </template>
         </dl>
@@ -452,8 +492,22 @@ async function unregister() {
 .push-banner {
   align-items: center;
 }
-.push-banner .btn {
+.push-banner .btn:first-of-type {
   margin-left: auto;
+}
+.push-banner .btn {
+  flex: none;
+}
+.git-alert {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+.conflicted {
+  color: var(--red);
+}
+.facts dd .badge {
+  margin-left: 6px;
 }
 .all-link {
   margin-left: auto;
