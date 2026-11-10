@@ -5,6 +5,7 @@ import type {
   NeedsYouItem,
   ClaudeSetupStatus,
   ContextInitialized,
+  DevEnvironment,
   DevHistory,
   EnvironmentReport,
   DoctorReport,
@@ -266,6 +267,9 @@ export const api = {
   sessionResume: (id: string, cols?: number, rows?: number) =>
     call<SessionView>('session_resume', { id, cols, rows }),
   shellList: () => call<ShellInfo[]>('shell_list'),
+  /** Dev Environment (ADR-0051): tools on this computer and what the workspace's projects need; `refresh` probes again. */
+  devEnvironment: (refresh = false) => call<DevEnvironment>('dev_environment', { refresh }),
+  devEnvironmentCheck: (tool: string) => call<DevEnvironment>('dev_environment_check', { tool }),
   sessionOpenShell: (args: { shellId?: string | null; projectId?: string | null; cwd?: string | null; cols?: number; rows?: number }) =>
     call<SessionView>('session_open_shell', { args }),
   sessionAttach: (id: string, onData: (bytes: Uint8Array) => void) => {

@@ -244,6 +244,8 @@ pub fn run() {
             commands::projects::push_request_review,
             commands::projects::push_request_decide,
             commands::claude::nexus_tools,
+            commands::devenv::dev_environment,
+            commands::devenv::dev_environment_check,
             commands::knowledge::knowledge_overview,
             commands::knowledge::knowledge_read,
             commands::knowledge::knowledge_search,

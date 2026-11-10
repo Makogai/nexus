@@ -143,6 +143,46 @@ export interface EnvironmentReport {
   checks: EnvCheckItem[]
 }
 
+/** Dev Environment (ADR-0051): `toolchain::Category`, in the page's order. */
+export type ToolCategory = 'source-control' | 'runtime' | 'package-manager' | 'version-manager' | 'build' | 'infrastructure' | 'cloud' | 'database' | 'ai-agent' | 'integration'
+
+export interface ToolHint {
+  /** Tool id of the version manager. */
+  manager: string
+  command: string[]
+}
+
+export interface ToolNeed {
+  projectId: string
+  project: string
+  constraint: string
+  source: string
+  status: 'ok' | 'missing' | 'mismatch' | 'unknown'
+  hint: ToolHint | null
+}
+
+export interface DevTool {
+  id: string
+  name: string
+  category: ToolCategory
+  installUrl: string
+  path: string | null
+  version: string | null
+  /** Every copy on PATH; the first one runs. */
+  copies: string[]
+  installCommand: string[] | null
+  note: string | null
+  neededBy: ToolNeed[]
+}
+
+export interface DevEnvironment {
+  workspaceId: string | null
+  platform: 'windows' | 'macos' | 'linux'
+  probedAt: number
+  tools: DevTool[]
+  projectsWithoutEnvironment: string[]
+}
+
 export interface ClaudeSetupMethod {
   id: string
   title: string

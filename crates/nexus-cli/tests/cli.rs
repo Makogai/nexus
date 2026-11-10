@@ -1124,6 +1124,36 @@ fn environment_requirements_and_claude_code_setup() {
     assert_eq!(v["docsUrl"], "https://code.claude.com/docs/en/setup");
 }
 
+/// Dev Environment (ADR-0051): `nexus tools` lists this computer's tools with every project need and whether it is met;
+/// an unmet need (here a Node.js version no computer has) makes the exit code 1.
+#[test]
+fn dev_environment_lists_tools_and_what_projects_need() {
+    let e = Env::new();
+    std::fs::write(e.repo.join("Cargo.toml"), "[package]\nname = \"demo\"\nrust-version = \"1.70\"\n").unwrap();
+    std::fs::write(e.repo.join(".nvmrc"), "1.0.0\n").unwrap();
+    e.setup();
+    let out = e.cmd(&["--json", "tools", "--needed"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "Node.js 1.0.0 is not installed anywhere: {}", String::from_utf8_lossy(&out.stderr));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let tools = v["tools"].as_array().unwrap();
+    let ids: Vec<&str> = tools.iter().map(|t| t["id"].as_str().unwrap()).collect();
+    assert!(ids.contains(&"rustc") && ids.contains(&"cargo") && ids.contains(&"node") && !ids.contains(&"php"), "--needed only: {ids:?}");
+    let need = |id: &str| tools.iter().find(|t| t["id"] == id).unwrap()["neededBy"][0].clone();
+    assert_eq!((need("rustc")["project"].as_str(), need("rustc")["constraint"].as_str(), need("rustc")["status"].as_str()), (Some("repo"), Some(">=1.70"), Some("ok")));
+    assert!(matches!(need("node")["status"].as_str(), Some("mismatch" | "missing")), "{}", need("node"));
+    assert_eq!(tools.iter().find(|t| t["id"] == "rustc").unwrap()["category"], "runtime");
+    let raw = String::from_utf8_lossy(&out.stdout);
+    assert!(!raw.contains("\"programs\"") && !raw.contains("\"winget\""), "program names and package ids stay internal");
+
+    let all: Value = serde_json::from_slice(&e.cmd(&["--json", "tools"]).output().unwrap().stdout).unwrap();
+    let platform = all["platform"].as_str().unwrap();
+    let count = all["tools"].as_array().unwrap().len();
+    assert!(count >= 49, "the whole catalog for {platform}: {count}");
+    let text = e.cmd(&["tools", "--missing"]).output().unwrap();
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("needs 1.0.0 (.nvmrc)") && text.contains("NEXUS only ran version commands"), "{text}");
+}
+
 /// Portable Workspace P8: `nexus workspaces restore` lists every step with its state, what came with the workspace and
 /// what cannot be recovered from it.
 #[test]

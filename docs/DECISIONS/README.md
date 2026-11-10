@@ -55,3 +55,5 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0048](0048-action-feedback-and-project-page.md) | Action feedback, the project page layout and "Needs you" | Accepted, implemented (0.5 alpha); item 7 replaced by 0049 |
 | [0049](0049-knowledge-file-watcher.md) | A file-system watcher for knowledge files | Accepted, implemented (0.5 alpha) |
 | [0050](0050-code-signing.md) | Code signing: Authenticode inside the build, keys only in an HSM, macOS notarization | Accepted; **deferred** — before the first release beyond the owner's circle |
+| [0051](0051-dev-environment.md) | Dev Environment: one catalog of development tools, checked on this computer | Accepted (agents & dev environment) |
+| [0052](0052-agents-beyond-claude.md) | AI agents beyond Claude Code, starting with Codex | Accepted (agents & dev environment) |
