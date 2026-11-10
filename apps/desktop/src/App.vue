@@ -8,7 +8,7 @@ import { useProjectStore } from './stores/projects'
 import { useProfileStore } from './stores/profiles'
 import { useSessionStore } from './stores/sessions'
 import { useNotificationStore } from './stores/notifications'
-import { toIpcError } from './lib/ipc'
+import { api, toIpcError } from './lib/ipc'
 import AppSidebar from './components/AppSidebar.vue'
 import AppTopBar from './components/AppTopBar.vue'
 import WorkspaceBanner from './components/WorkspaceBanner.vue'
@@ -76,6 +76,26 @@ watch(
   },
 )
 
+/**
+ * Knowledge freshness without a file-system watcher (ADR-0048; a watcher is an open owner decision): files change outside
+ * NEXUS — an editor, `git pull`, Claude. When the window regains focus and after a session ends, refresh the knowledge
+ * index (incremental: unchanged files are not read); views follow through the data_version poll and `app.freshness`.
+ */
+let lastFresh = 0
+async function refreshFromDisk() {
+  const ws = workspaces.active
+  if (!ws || !ready.value || Date.now() - lastFresh < 5000) return
+  lastFresh = Date.now()
+  await api.knowledgeOverview(ws.id, false).catch(() => undefined)
+  app.freshness++
+}
+watch(
+  () => sessions.running.length,
+  (n, before) => {
+    if (n < before) refreshFromDisk()
+  },
+)
+
 function onKey(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
   const inTerminal = (e.target as HTMLElement | null)?.closest?.('.xterm') != null
@@ -97,6 +117,7 @@ function onKey(e: KeyboardEvent) {
 let unlistenClose: (() => void) | null = null
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
+  window.addEventListener('focus', refreshFromDisk)
   await boot()
   // Closing the window ends every running terminal: ask first when something is still running.
   unlistenClose = await getCurrentWindow().onCloseRequested(async (event) => {
@@ -113,6 +134,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('focus', refreshFromDisk)
   unlistenClose?.()
 })
 </script>

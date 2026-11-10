@@ -183,6 +183,21 @@ read-only, a guided Claude session whose drafts they approve, and Graphify used 
 | W9 | Owner reports after 0.1.3: automatic sync stops only on real risks (blocking, possible secret, not fully inspected) and names its findings (kind, file, line); machine paths are noted; one open learning draft per topic (`draft_project_document` revises); no absolute paths in learning output (LEARN-5/8); `.env.*.example` templates shown in the explorer | core `workspace_sync`/`learn`, CLI MCP test | ✅ |
 | W10 | Skills page (ADR-0046): built-in, workspace, project and AI Kit skills in one list; *New skill* and in-place editing for workspace and project skills (validated, optimistic, no links); a save approves workspace skills only when nothing else waits for review | core `skills`, vitest `skills-view.test.ts`, E2E `workbench.mjs` 43/43 | ✅ |
 
+## Stage: 0.5 alpha (owner request, 2026-11-10)
+
+Branch `milestone/v0.5-alpha`. Decisions: ADR-0047 (push outcomes), ADR-0048 (action feedback, project page, "Needs
+you"), ADR-0042 amendment. Owner decisions: Claude writes the NX constitution and the owner approves it; *Tell Claude*
+types without pressing Enter; focus-based refresh now, a watcher later; plain task session.
+
+| # | Milestone | Acceptance check | Status |
+| --- | --- | --- | --- |
+| A0 | Rules and guardrails: NX constitution (project scope, awaiting approval), drift guards (IPC §8, schema §7, tool counts from `--list-tools`), CLAUDE.md UI conventions | desktop `ipc_docs`, core `every_migration`, CLI MCP test, `mcp-interop` | ✅ (constitution approval and gates: owner) |
+| A1 | Pushes never fail silently: fetch-first review (ahead/behind/incoming, Push disabled while behind), failure kinds (migration 0020), action notification, failed banner until dismissed/superseded, dialog result panel, *Tell Claude*, MCP `failureKind`, conflicts and operation on the project page, auto-sync warning + pause on rejection | core push_request (teammate + declining hook), sync policy test, CLI `request_push`, vitest `push-request`, E2E `task-flow.mjs` | ✅ |
+| A2 | Project page tabs with counts and Ctrl+1…8; Sessions, Tasks, Knowledge, Settings tabs; Overview dashboard with "Needs you"; calmer header; terminal project chips and filter | core `inbox`, vitest `project-page`, E2E `workbench.mjs` (+Sessions/Tasks), suites follow moved elements | ✅ |
+| A3 | Feedback everywhere: `useAction`/`ActionButton` across the views, persistent error toasts with *Copy details*, background failures in the notification center, results link onward, optimistic Done/Reopen and drafts, progress text | vitest `action-feedback-a/b`, `project-learn`, `project-page` | ✅ |
+| A4 | Harness: Home "Needs you", session rows with task/workflow/context, focus-based knowledge refresh, pruning of session artifacts, one builder for prepare/preview | core `inbox`, `prune`, `prepare` agreement test, vitest `needs-you` | ✅ |
+| A5 | Release 0.5.0: versions, release notes, ADRs, docs, full verification | see CURRENT_STATE verification log | in review |
+
 ## Phase 6 — Product maturity
 
 | # | Milestone | Acceptance check |

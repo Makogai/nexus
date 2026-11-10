@@ -460,6 +460,10 @@ export interface SessionView {
     isolation?: { claudeMdExcludes: string[] }
     /** A learning session (ADR-0041): its depth and the built-in skill it got (or why not). */
     learn?: { depth: LearnDepth; skill: string | null; withheld: string | null; folders?: string[] }
+    /** The context strategy the session was launched with (ADR-0028). */
+    context?: { strategy: 'minimal' | 'balanced' | 'deep' | 'custom'; observeInstructions: boolean } | null
+    /** The workflow run the session works on (ADR-0029). */
+    workflow?: { runId: string; workflow: string; rigor: string; skills: string[]; refused: string[] } | null
   } | null
   turns: number
   prompts: number

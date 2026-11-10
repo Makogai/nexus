@@ -91,7 +91,7 @@ describe('SkillsView', () => {
     api.skillsSave.mockRejectedValue({ code: 'conflict', message: 'changed' })
     await w.find('[data-skill-save]').trigger('click')
     await flushPromises()
-    expect(toast).toHaveBeenLastCalledWith('error', expect.stringContaining('changed on disk'), 9000)
+    expect(toast).toHaveBeenLastCalledWith('error', expect.stringContaining('changed on disk'))
   })
 
   it('shows built-in and kit skills read-only, and a review notice for workspace skills not approved here', async () => {

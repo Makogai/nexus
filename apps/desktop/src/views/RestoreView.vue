@@ -5,7 +5,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { CircleAlert, CircleCheck, CircleDashed, CircleMinus, PackageCheck, RefreshCw, Wrench } from '@lucide/vue'
+import ActionButton from '../components/ActionButton.vue'
 import BaseModal from '../components/BaseModal.vue'
+import { useAction } from '../composables/useAction'
 import { api, toIpcError } from '../lib/ipc'
 import type { RepairPlan, Restoration } from '../lib/types'
 import { useAppStore } from '../stores/app'
@@ -17,7 +19,7 @@ const router = useRouter()
 const workspaces = useWorkspaceStore()
 const projects = useProjectStore()
 const r = ref<Restoration | null>(null)
-const busy = ref(false)
+const checking = ref(false)
 const plan = ref<RepairPlan | null>(null)
 
 const ICON = { done: CircleCheck, todo: CircleDashed, blocked: CircleAlert, optional: CircleMinus } as const
@@ -34,43 +36,42 @@ const restoredLine = computed(() => {
 async function load() {
   const ws = workspaces.active
   if (!ws) return
-  busy.value = true
+  checking.value = true
   try {
     r.value = await api.workspaceRestoration(ws.id)
   } catch (e) {
     app.toast('error', `Could not check the restoration: ${toIpcError(e).message}`)
   } finally {
-    busy.value = false
+    checking.value = false
   }
 }
 onMounted(load)
 
-async function review(id: string) {
-  const ws = workspaces.active
-  if (!ws) return
-  try {
-    plan.value = await api.workspaceRepairPlan(ws.id, id)
-  } catch (e) {
-    app.toast('error', toIpcError(e).message)
-  }
-}
+const reviewing = useAction(
+  async (wsId: string, id: string) => {
+    plan.value = await api.workspaceRepairPlan(wsId, id)
+  },
+  { failure: 'Could not prepare this step', key: (_ws: string, id: string) => id },
+)
+const review = (id: string) => workspaces.active && reviewing.run(workspaces.active.id, id)
 
-async function apply() {
-  const ws = workspaces.active
-  if (!ws || !plan.value) return
-  busy.value = true
-  try {
-    const done = await api.workspaceRepair(ws.id, plan.value.id)
-    plan.value = null
-    app.toast('success', done.message, 6000)
-    await Promise.all([workspaces.load(), projects.reload()])
-  } catch (e) {
-    app.toast('error', toIpcError(e).message, 9000)
-  } finally {
-    busy.value = false
-  }
-  await load()
-}
+const applying = useAction(
+  async (wsId: string, planId: string) => {
+    try {
+      const done = await api.workspaceRepair(wsId, planId)
+      plan.value = null
+      app.toast('success', done.message, 6000)
+      await Promise.all([workspaces.load(), projects.reload()])
+    } finally {
+      await load()
+    }
+  },
+  { failure: 'Repair failed' },
+)
+const apply = () => workspaces.active && plan.value && applying.run(workspaces.active.id, plan.value.id)
+const busy = computed(() => checking.value || applying.pending.value)
+/** Cloning projects takes as long as the downloads do: say so while it runs. */
+const applyingLabel = computed(() => (plan.value?.id === 'clone-missing' ? 'Cloning the projects… this can take a few minutes' : 'Applying…'))
 </script>
 
 <template>
@@ -80,7 +81,9 @@ async function apply() {
         <h1>Restore on this computer</h1>
         <p>Your workspace came from Git. These steps bring this computer to where you can continue — each is done where it belongs, and repairs show what they change first.</p>
       </div>
-      <div class="page-actions"><button class="btn btn-ghost" :disabled="busy" data-restore-refresh @click="load"><RefreshCw :class="{ spin: busy }" /> Check again</button></div>
+      <div class="page-actions">
+        <ActionButton class="btn-ghost" :pending="checking" pending-label="Checking…" :disabled="busy" data-restore-refresh @click="load"><template #icon><RefreshCw /></template>Check again</ActionButton>
+      </div>
     </div>
 
     <template v-if="r">
@@ -99,7 +102,9 @@ async function apply() {
               <ul v-if="s.detail.length" class="detail"><li v-for="d in s.detail" :key="d">{{ d }}</li></ul>
             </div>
             <div class="actions">
-              <button v-if="s.repair && s.status !== 'done'" class="btn btn-sm" :data-restore-repair="s.repair" @click="review(s.repair)"><Wrench /> Do it…</button>
+              <ActionButton v-if="s.repair && s.status !== 'done'" class="btn-sm" :pending="reviewing.isPending(s.repair)" :disabled="reviewing.pending.value" :data-restore-repair="s.repair" @click="review(s.repair)">
+                <template #icon><Wrench /></template>Do it…
+              </ActionButton>
               <button v-if="s.navigate && VIEW[s.navigate]" class="btn btn-sm btn-ghost" :data-restore-open="s.id" @click="router.push({ name: VIEW[s.navigate] })">Open</button>
             </div>
           </li>
@@ -126,7 +131,7 @@ async function apply() {
       </template>
       <template #footer>
         <button class="btn btn-ghost" @click="plan = null">Cancel</button>
-        <button class="btn btn-primary" :disabled="busy" data-restore-apply @click="apply">Apply</button>
+        <ActionButton class="btn-primary" :pending="applying.pending.value" :pending-label="applyingLabel" :disabled="busy" data-restore-apply @click="apply">Apply</ActionButton>
       </template>
     </BaseModal>
   </div>

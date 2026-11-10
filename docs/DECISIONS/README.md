@@ -45,3 +45,11 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0038](0038-development-records-and-checkpoints.md) | Development records, durable checkpoints and project history | Accepted, implemented (P6) |
 | [0039](0039-workspace-sync-policies.md) | Workspace sync policies: manual, automatic with review, trusted automatic | Accepted, implemented (P7) |
 | [0040](0040-project-workbench.md) | Project workbench: add from Git, knowledge reading/editing, project explorer, learning a project | Accepted, implemented (W1–W4) |
+| [0041](0041-built-in-learning-skill.md) | A built-in learning skill and rules: one lean session per project | Accepted, implemented |
+| [0042](0042-autonomous-workspace-sync.md) | Autonomous workspace sync and commit messages Claude proposes | Accepted, implemented; amended by 0047 |
+| [0043](0043-push-requests-and-task-sessions.md) | Push requests, finished tasks, and where a task's work starts | Accepted, implemented; push outcomes amended by 0047 |
+| [0044](0044-signed-updates.md) | Signed automatic updates | Accepted, implemented |
+| [0045](0045-learning-context.md) | Extra context for learning a project, and noticing a graph build | Accepted, implemented |
+| [0046](0046-skill-manager.md) | Skills page: every skill in one place, and an editor for workspace and project skills | Accepted, implemented |
+| [0047](0047-push-request-outcomes.md) | Push request outcomes and remote state | Accepted, implemented (0.5 alpha) |
+| [0048](0048-action-feedback-and-project-page.md) | Action feedback, the project page layout and "Needs you" | Accepted, implemented (0.5 alpha) |

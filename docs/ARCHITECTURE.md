@@ -332,3 +332,17 @@ working (session tracking falls back to PTY exit + `claude agents --json`).
   `ops` (fetch, fast-forward pull, reviewed commit and push, clone and restore, file diffs), `history` (machine-local,
   one operation at a time, interrupted operations reconciled by hosts). Git calls in `git.rs` (no shell, no prompts,
   no external diff drivers, `ext::`/`fd::` disabled).
+
+## Push outcomes, "Needs you" and housekeeping (ADR-0047, ADR-0048)
+
+* `nexus_core::push_request` — `review` fetches the request's remote branch first (`git::fetch_branch`, 60 s) and
+  reports ahead/behind/diverged and the incoming commits; `decide` records failures with their kind (migration 0020) and
+  publishes an action notification; `open` lists pending requests and failed ones until dismissed or superseded.
+* `nexus_core::inbox::needs_you` — what waits for the person in a workspace or one project, from existing records only
+  (sessions' attention, push requests, workflow steps, the knowledge index, approvals, kits); IPC `needs_you`.
+* `nexus_core::prune::artifacts` — at desktop start: `<data>/sessions/<id>/` of sessions ended more than 30 days ago
+  (never live ones) and kit overlays of profiles that no longer exist.
+* `claude::prepare` — `prepare` and `preview` share one builder for the appended text (the inspector counts what a launch
+  sends).
+* Desktop: `useAction` / `ActionButton` for every backend call (pending, re-entrancy guard, persistent errors); the
+  project page's tabs; knowledge refresh on window focus and session end (no file-system watcher).

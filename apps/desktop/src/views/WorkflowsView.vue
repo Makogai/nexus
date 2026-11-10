@@ -2,13 +2,15 @@
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { listen } from '@tauri-apps/api/event'
-import { Info, Play, Plus, Save, ShieldCheck, TriangleAlert, Workflow } from '@lucide/vue'
-import { api, toIpcError, WORKFLOW_EVENT } from '../lib/ipc'
+import { Info, LoaderCircle, Play, Plus, Save, ShieldCheck, TriangleAlert, Workflow } from '@lucide/vue'
+import { api, WORKFLOW_EVENT } from '../lib/ipc'
 import type { Rigor, RunView, WorkflowRun, WorkflowSummary, WorkflowTemplate, WorkflowView } from '../lib/types'
 import { relativeTime } from '../lib/format'
 import { KIND_LABELS, RIGOR_LEVELS, includedSteps } from '../lib/workflow'
+import { useAction } from '../composables/useAction'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
+import ActionButton from '../components/ActionButton.vue'
 import GatesPanel from '../components/GatesPanel.vue'
 import StartWorkflowDialog from '../components/StartWorkflowDialog.vue'
 import WorkflowRunDetail from '../components/WorkflowRunDetail.vue'
@@ -50,45 +52,48 @@ async function select(id: string) {
     skillsText.value = v.skills.join(', ')
   }
 }
-async function fromTemplate(t: WorkflowTemplate) {
-  picking.value = false
-  if (!wsId.value) return
-  const v = await app.attempt(() => api.workflowCreate(wsId.value!, { template: t.id }), 'Could not create the workflow')
-  if (v) {
+const opening = useAction(select, { key: (id: string) => id })
+// The picker stays open (its card busy) until the workflow exists, so a failure can be retried.
+const creating = useAction(
+  async (t: WorkflowTemplate) => {
+    if (!wsId.value) return
+    const v = await api.workflowCreate(wsId.value, { template: t.id })
+    picking.value = false
     await loadLibrary()
     await select(v.id)
     app.toast('success', `Created “${v.title}” — a Markdown file in workflows/, yours to edit`)
-  }
-}
-async function saveRaw() {
-  if (!wsId.value || !selected.value) return
-  try {
-    const v = await api.workflowSaveRaw(wsId.value, selected.value.id, raw.value, selected.value.hash)
-    selected.value = v
+  },
+  { failure: 'Could not create the workflow', key: (t: WorkflowTemplate) => t.id },
+)
+const savingRaw = useAction(
+  async () => {
+    if (!wsId.value || !selected.value) return
+    selected.value = await api.workflowSaveRaw(wsId.value, selected.value.id, raw.value, selected.value.hash)
     editing.value = false
     app.toast('success', 'Workflow saved')
     await loadLibrary()
-  } catch (e) {
-    app.toast('error', `Not saved: ${toIpcError(e).message}`)
-  }
-}
-async function saveSettings() {
-  if (!wsId.value || !selected.value) return
-  const skills = skillsText.value.split(',').map((s) => s.trim()).filter(Boolean)
-  const v = await app.attempt(() => api.workflowSave(wsId.value!, selected.value!.id, selected.value!.definition, previewRigor.value, skills, selected.value!.hash), 'Could not save')
-  if (v) {
-    selected.value = v
+  },
+  { failure: 'Not saved' },
+)
+const savingSettings = useAction(
+  async () => {
+    if (!wsId.value || !selected.value) return
+    const skills = skillsText.value.split(',').map((s) => s.trim()).filter(Boolean)
+    selected.value = await api.workflowSave(wsId.value, selected.value.id, selected.value.definition, previewRigor.value, skills, selected.value.hash)
     app.toast('success', 'Default rigor and skills saved')
-  }
-}
-async function approve() {
-  if (!wsId.value || !selected.value) return
-  const ok = await app.attempt(() => api.knowledgeApprove(wsId.value!, selected.value!.id), 'Could not approve')
-  if (ok) {
-    await select(selected.value.id)
+  },
+  { failure: 'Could not save' },
+)
+const approving = useAction(
+  async () => {
+    if (!wsId.value || !selected.value) return
+    const id = selected.value.id
+    await api.knowledgeApprove(wsId.value, id)
+    await select(id)
     await loadLibrary()
-  }
-}
+  },
+  { failure: 'Could not approve' },
+)
 
 async function loadRuns() {
   if (!wsId.value) return
@@ -99,6 +104,7 @@ async function openRun(id: string) {
   tab.value = 'runs'
   run.value = (await app.attempt(() => api.workflowRun(id), 'Could not open the run')) ?? null
 }
+const runOpening = useAction(openRun, { key: (id: string) => id })
 async function started(v: RunView) {
   starting.value = null
   await loadRuns()
@@ -150,8 +156,16 @@ loadLibrary()
     </div>
 
     <div v-if="picking" class="templates" data-templates>
-      <button v-for="t in templates" :key="t.id" class="card tpl" :data-template="t.id" @click="fromTemplate(t)">
-        <strong>{{ t.title }}</strong>
+      <button
+        v-for="t in templates"
+        :key="t.id"
+        class="card tpl"
+        :disabled="creating.pending.value"
+        :aria-busy="creating.isPending(t.id) ? 'true' : undefined"
+        :data-template="t.id"
+        @click="creating.run(t)"
+      >
+        <strong>{{ t.title }} <LoaderCircle v-if="creating.isPending(t.id)" class="spin pending-ic" aria-hidden="true" /></strong>
         <span class="badge">{{ t.category }}</span>
         <span class="small faint">{{ t.summary }}</span>
       </button>
@@ -173,8 +187,17 @@ loadLibrary()
       </div>
       <div v-else class="layout">
         <nav class="wf-list" aria-label="Workflows">
-          <button v-for="w in list" :key="w.id" class="wf" :class="{ active: selected?.id === w.id }" :data-workflow="w.title" @click="select(w.id)">
-            <span class="wf-title">{{ w.title }}</span>
+          <button
+            v-for="w in list"
+            :key="w.id"
+            class="wf"
+            :class="{ active: selected?.id === w.id }"
+            :disabled="opening.isPending(w.id)"
+            :aria-busy="opening.isPending(w.id) ? 'true' : undefined"
+            :data-workflow="w.title"
+            @click="opening.run(w.id)"
+          >
+            <span class="wf-title">{{ w.title }} <LoaderCircle v-if="opening.isPending(w.id)" class="spin pending-ic" aria-hidden="true" /></span>
             <span class="faint small">{{ w.category }} · {{ w.steps }} steps · {{ w.rigor }}</span>
             <span v-if="!w.approved" class="badge badge-warn">needs approval</span>
             <span v-else-if="w.errors" class="badge badge-error">errors</span>
@@ -193,7 +216,7 @@ loadLibrary()
           </header>
           <div v-if="!selected.approved" class="notice notice-warn approve" data-review-workflow>
             <TriangleAlert /> <span>This version changed outside NEXUS (e.g. through Git). Review it — it cannot run until you approve this exact version.</span>
-            <button class="btn btn-sm btn-primary" data-approve-workflow @click="approve"><ShieldCheck /> Approve</button>
+            <ActionButton class="btn-sm btn-primary" :pending="approving.pending.value" pending-label="Approving…" data-approve-workflow @click="approving.run()"><template #icon><ShieldCheck /></template> Approve</ActionButton>
           </div>
           <div v-for="p in selected.problems.filter((x) => x.severity === 'error')" :key="p.message" class="notice notice-error"><TriangleAlert /> {{ p.message }}</div>
 
@@ -204,7 +227,7 @@ loadLibrary()
               </select>
             </label>
             <label class="field-inline grow"><span>Skills for its sessions only</span><input v-model="skillsText" class="input mono" placeholder="kit:skill, kit:other" /></label>
-            <button class="btn btn-sm" @click="saveSettings"><Save /> Save</button>
+            <ActionButton class="btn-sm" :pending="savingSettings.pending.value" pending-label="Saving…" data-save-settings @click="savingSettings.run()"><template #icon><Save /></template> Save</ActionButton>
           </div>
 
           <ol v-if="!editing" class="steps" data-steps>
@@ -225,7 +248,10 @@ loadLibrary()
           <template v-else>
             <p class="hint">## step title · <code>&lt;!-- step: id=… kind=claude|check|review needs=a,b gates=test,lint rigor=professional --&gt;</code> · ### Acceptance with - items. Gates are names only.</p>
             <textarea v-model="raw" class="textarea mono raw" spellcheck="false" data-workflow-raw />
-            <div class="row gap"><button class="btn btn-primary" data-save-workflow @click="saveRaw"><Save /> Save</button><button class="btn" @click="(raw = selected.body), (editing = false)">Discard</button></div>
+            <div class="row gap">
+              <ActionButton class="btn-primary" :pending="savingRaw.pending.value" pending-label="Saving…" data-save-workflow @click="savingRaw.run()"><template #icon><Save /></template> Save</ActionButton>
+              <button class="btn" :disabled="savingRaw.pending.value" @click="(raw = selected.body), (editing = false)">Discard</button>
+            </div>
           </template>
           <p class="notice small"><Info /> Claude steps are <em>AI-reported</em> unless gates verify them. At critical rigor, an AI-reported step without gates also needs your sign-off.</p>
         </section>
@@ -235,8 +261,17 @@ loadLibrary()
     <!-- Runs -->
     <div v-else-if="tab === 'runs'" class="layout">
       <nav class="wf-list" aria-label="Runs">
-        <button v-for="r in runs" :key="r.id" class="wf" :class="{ active: run?.id === r.id }" :data-run-item="r.id" @click="openRun(r.id)">
-          <span class="wf-title">{{ r.workflowTitle }}</span>
+        <button
+          v-for="r in runs"
+          :key="r.id"
+          class="wf"
+          :class="{ active: run?.id === r.id }"
+          :disabled="runOpening.isPending(r.id)"
+          :aria-busy="runOpening.isPending(r.id) ? 'true' : undefined"
+          :data-run-item="r.id"
+          @click="runOpening.run(r.id)"
+        >
+          <span class="wf-title">{{ r.workflowTitle }} <LoaderCircle v-if="runOpening.isPending(r.id)" class="spin pending-ic" aria-hidden="true" /></span>
           <span class="faint small">{{ r.goal || r.rigor }} · {{ relativeTime(r.updatedAt) }}</span>
           <span class="badge" :class="{ 'badge-ok': r.status === 'completed', 'badge-error': r.status === 'failed', 'badge-live': r.status === 'running', 'badge-warn': r.status === 'waiting' }">{{ r.status }}</span>
         </button>
@@ -315,6 +350,11 @@ loadLibrary()
 }
 .wf-title {
   font-weight: 600;
+}
+.pending-ic {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
 }
 .small {
   font-size: 12.5px;

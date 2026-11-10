@@ -21,6 +21,7 @@ pub mod knowledge;
 pub mod notify;
 pub mod paths;
 pub mod proc;
+pub mod prune;
 pub mod project;
 pub mod push_request;
 pub mod restoration;

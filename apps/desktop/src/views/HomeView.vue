@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, onActivated, onMounted } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { FolderGit2, History, Plus, Sparkles, SquareTerminal, UserCog } from '@lucide/vue'
+import { FolderGit2, History, Inbox, Plus, Sparkles, SquareTerminal, UserCog } from '@lucide/vue'
+import { api } from '../lib/ipc'
+import type { NeedsYouItem } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
 import { useWorkspaceStore } from '../stores/workspaces'
+import NeedsYouList from '../components/NeedsYouList.vue'
 import ProjectCard from '../components/ProjectCard.vue'
 import SessionRow from '../components/SessionRow.vue'
 
@@ -30,11 +33,25 @@ const greeting = computed(() => {
   return h < 5 ? 'Working late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
 })
 
+/** What waits for the person across the workspace's projects (ADR-0048) — built from what NEXUS already records. */
+const needsYou = ref<NeedsYouItem[]>([])
+async function loadNeedsYou() {
+  if (wsId.value) needsYou.value = await api.needsYou(wsId.value).catch(() => needsYou.value)
+}
+watch(
+  () => [wsId.value, app.externalChanges, app.pushRequestsChanged, sessions.list.map((s) => `${s.id}:${s.status.status}`).join()],
+  () => loadNeedsYou(),
+  { immediate: true },
+)
+
 onMounted(() => {
   if (!profiles.installations) profiles.loadInstallations().catch(() => undefined)
   profiles.detect().catch(() => undefined)
 })
-onActivated(() => sessions.load().catch(() => undefined))
+onActivated(() => {
+  sessions.load().catch(() => undefined)
+  loadNeedsYou()
+})
 </script>
 
 <template>
@@ -63,6 +80,11 @@ onActivated(() => sessions.load().catch(() => undefined))
       </div>
       <button class="btn btn-primary" @click="router.push('/profiles')">Set up profiles</button>
     </div>
+
+    <template v-if="needsYou.length">
+      <h2 class="section-title" data-home-needs-you><Inbox class="st-icon" /> Needs you <span class="count">{{ needsYou.length }}</span></h2>
+      <NeedsYouList :items="needsYou" />
+    </template>
 
     <template v-if="running.length">
       <h2 class="section-title"><SquareTerminal class="st-icon live" /> Running now <span class="count">{{ running.length }}</span></h2>

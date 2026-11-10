@@ -183,7 +183,12 @@ pub async fn project_clone_new(
     blocking(move || {
         let c = own_conn(&ctx)?;
         let ws = nexus_core::workspace::get(&c, &workspace_id)?;
-        Ok(project::discovery::clone_new(&c, &ctx.data_dir, &ws, &url, name.as_deref(), folder.as_deref())?)
+        project::discovery::clone_new(&c, &ctx.data_dir, &ws, &url, name.as_deref(), folder.as_deref()).map_err(|e| {
+            // A clone can take minutes: its failure also reaches the notification center (ADR-0048).
+            let what = git::redact_url(&url);
+            let _ = nexus_core::notify::background_failure(&c, Some(&ws.id), None, "clone", format!("Cloning {what} failed"), &e.to_string());
+            e.into()
+        })
     })
     .await
 }
@@ -207,7 +212,11 @@ pub async fn project_clone(ctx: State<'_, Ctx>, workspace_id: String, id: String
     blocking(move || {
         let c = own_conn(&ctx)?;
         let ws = nexus_core::workspace::get(&c, &workspace_id)?;
-        Ok(project::discovery::clone_missing(&c, &ctx.data_dir, &ws, &id, dest.as_deref())?)
+        project::discovery::clone_missing(&c, &ctx.data_dir, &ws, &id, dest.as_deref()).map_err(|e| {
+            let name = project::get(&c, &id).map(|p| p.name).unwrap_or_else(|_| "the project".into());
+            let _ = nexus_core::notify::background_failure(&c, Some(&ws.id), Some(&id), "clone", format!("Cloning {name} failed"), &e.to_string());
+            e.into()
+        })
     })
     .await
 }

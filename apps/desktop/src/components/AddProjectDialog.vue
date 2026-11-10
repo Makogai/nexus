@@ -3,11 +3,13 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Download, FolderOpen, GitBranch, Link, TriangleAlert } from '@lucide/vue'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { api, toIpcError } from '../lib/ipc'
+import { useAction } from '../composables/useAction'
+import { api } from '../lib/ipc'
 import type { PathInspection } from '../lib/types'
 import { useProjectStore } from '../stores/projects'
 import { useWorkspaceStore } from '../stores/workspaces'
 import { useAppStore } from '../stores/app'
+import ActionButton from './ActionButton.vue'
 import BaseModal from './BaseModal.vue'
 
 const props = defineProps<{ open: boolean }>()
@@ -21,11 +23,31 @@ const router = useRouter()
 const mode = ref<'folder' | 'git'>('folder')
 const inspection = ref<PathInspection | null>(null)
 const name = ref('')
-const busy = ref(false)
-const error = ref<string | null>(null)
 const url = ref('')
 /** Empty = the workspace's clone folder (`projects/<name>`, portable); otherwise a folder of the person's choice. */
 const into = ref('')
+
+// Errors stay in the dialog until the next attempt or until it is opened again.
+const inspecting = useAction(async (wsId: string, dir: string) => {
+  inspection.value = await api.projectInspectPath(wsId, dir)
+  name.value = inspection.value.suggestedName
+})
+const cloning = useAction(async (repo: string, as: string | null, folder: string | null) => {
+  const p = await projects.cloneNew(repo, as, folder)
+  app.toast('success', `${p.name} cloned and added to ${workspaces.active?.name}`)
+  emit('close')
+  router.push({ path: `/projects/${p.id}`, query: { tab: 'learn' } })
+})
+const adding = useAction(async (path: string, as: string | undefined) => {
+  const p = await projects.register(path, as)
+  app.toast('success', `${p.name} added to ${workspaces.active?.name}`)
+  emit('close')
+  router.push({ path: `/projects/${p.id}`, query: { tab: 'learn' } })
+})
+const actions = [inspecting, cloning, adding]
+const busy = computed(() => actions.some((a) => a.pending.value))
+const error = computed(() => actions.map((a) => a.error.value).find((e) => e) ?? null)
+const clearErrors = () => actions.forEach((a) => a.clearError())
 
 watch(
   () => props.open,
@@ -34,7 +56,7 @@ watch(
       mode.value = 'folder'
       inspection.value = null
       name.value = ''
-      error.value = null
+      clearErrors()
       url.value = ''
       into.value = ''
     }
@@ -55,50 +77,24 @@ async function pickInto() {
 }
 
 async function cloneAndAdd() {
-  if (!urlValid.value) return
-  busy.value = true
-  error.value = null
-  try {
-    const p = await projects.cloneNew(url.value.trim(), name.value.trim() || null, into.value.trim() || null)
-    app.toast('success', `${p.name} cloned and added to ${workspaces.active?.name}`)
-    emit('close')
-    router.push({ path: `/projects/${p.id}`, query: { tab: 'learn' } })
-  } catch (e) {
-    error.value = toIpcError(e).message
-  } finally {
-    busy.value = false
-  }
+  if (!urlValid.value || busy.value) return
+  clearErrors()
+  await cloning.run(url.value.trim(), name.value.trim() || null, into.value.trim() || null)
 }
+/** A clone takes as long as the download does: say so while it runs. */
+const cloneLabel = computed(() => `Cloning ${name.value.trim() || repoName.value || 'the repository'}… this can take a few minutes`)
 
 async function choose() {
   const dir = await openDialog({ directory: true, title: 'Choose a project folder (usually a Git repository)' })
-  if (typeof dir !== 'string' || !workspaces.active) return
-  busy.value = true
-  error.value = null
-  try {
-    inspection.value = await api.projectInspectPath(workspaces.active.id, dir)
-    name.value = inspection.value.suggestedName
-  } catch (e) {
-    error.value = toIpcError(e).message
-  } finally {
-    busy.value = false
-  }
+  if (typeof dir !== 'string' || !workspaces.active || busy.value) return
+  clearErrors()
+  await inspecting.run(workspaces.active.id, dir)
 }
 
 async function register() {
-  if (!inspection.value) return
-  busy.value = true
-  error.value = null
-  try {
-    const p = await projects.register(inspection.value.path, name.value.trim() || undefined)
-    app.toast('success', `${p.name} added to ${workspaces.active?.name}`)
-    emit('close')
-    router.push({ path: `/projects/${p.id}`, query: { tab: 'learn' } })
-  } catch (e) {
-    error.value = toIpcError(e).message
-  } finally {
-    busy.value = false
-  }
+  if (!inspection.value || busy.value) return
+  clearErrors()
+  await adding.run(inspection.value.path, name.value.trim() || undefined)
 }
 </script>
 
@@ -134,9 +130,9 @@ async function register() {
       </div>
     </div>
 
-    <button v-if="mode === 'folder'" class="btn picker" :disabled="busy" @click="choose">
-      <FolderOpen /> {{ inspection ? 'Choose a different folder…' : 'Choose folder…' }}
-    </button>
+    <ActionButton v-if="mode === 'folder'" class="picker" :pending="inspecting.pending.value" pending-label="Reading the folder…" :disabled="busy" data-add-project-choose @click="choose">
+      <template #icon><FolderOpen /></template>{{ inspection ? 'Choose a different folder…' : 'Choose folder…' }}
+    </ActionButton>
 
     <div v-if="mode === 'folder' && inspection" class="preview">
       <div class="field">
@@ -176,10 +172,10 @@ async function register() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button v-if="mode === 'git'" class="btn btn-primary" :disabled="!urlValid || busy" data-add-project-clone @click="cloneAndAdd">
-        <Download /> {{ busy ? 'Cloning…' : 'Clone and add' }}
-      </button>
-      <button v-else class="btn btn-primary" :disabled="!inspection || !!inspection.registeredAs || busy" @click="register">Add project</button>
+      <ActionButton v-if="mode === 'git'" class="btn-primary" :pending="cloning.pending.value" :pending-label="cloneLabel" :disabled="!urlValid || busy" data-add-project-clone @click="cloneAndAdd">
+        <template #icon><Download /></template>Clone and add
+      </ActionButton>
+      <ActionButton v-else class="btn-primary" :pending="adding.pending.value" pending-label="Adding…" :disabled="!inspection || !!inspection.registeredAs || busy" data-add-project-add @click="register">Add project</ActionButton>
     </template>
   </BaseModal>
 </template>

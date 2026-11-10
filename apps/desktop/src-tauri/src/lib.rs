@@ -55,6 +55,12 @@ fn open_context() -> Result<AppCtx, Box<dyn std::error::Error>> {
     if interrupted > 0 {
         tracing::info!(interrupted, "sessions whose host is gone are no longer attached");
     }
+    // Session folders and kit overlays nothing will use again (sessions ended more than 30 days ago, gone profiles).
+    match nexus_core::prune::artifacts(&conn, &data_dir, now_ms()) {
+        Ok(p) if p.session_dirs + p.overlays > 0 => tracing::info!(session_dirs = p.session_dirs, overlays = p.overlays, "pruned old session artifacts"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "session artifacts not pruned"),
+    }
     // Sessions that ended without a development record (e.g. the previous host crashed) get one now (ADR-0038).
     if let Err(e) = nexus_core::devrecord::finalize_pending(&conn, &data_dir) {
         tracing::warn!(error = %e, "pending development records not written");

@@ -363,6 +363,19 @@ pub fn resolve_workflow(conn: &Connection, run_id: &str) -> Result<usize> {
 }
 
 /// The situation behind one deduplicated notification ended (e.g. a review was given).
+/// Work the person started and may have walked away from (a clone, a manual gate run) failed: a warning in the
+/// notification center, so the failure is not only in a dialog that may be closed by now (ADR-0048).
+pub fn background_failure(conn: &Connection, workspace_id: Option<&str>, project_id: Option<&str>, source: &'static str, title: impl Into<String>, why: &str) -> Result<()> {
+    let mut e = NewEvent::new(Category::ProcessIssue, source, title).priority(Priority::Warning).body(why);
+    e.workspace_id = workspace_id.map(str::to_string);
+    e.project_id = project_id.map(str::to_string);
+    if let Some(p) = project_id {
+        e = e.target("project", p.to_string());
+    }
+    publish(conn, e)?;
+    Ok(())
+}
+
 /// Is a notification with this dedupe key still open (neither dismissed nor resolved), however old?
 pub fn is_open(conn: &Connection, key: &str) -> Result<bool> {
     Ok(conn
@@ -716,6 +729,17 @@ mod tests {
 
     fn session_in(conn: &Connection, ids: &(String, String)) -> Session {
         session::insert_starting(conn, NewSession { title: "Feature A".into(), cwd: std::env::temp_dir(), program: "claude".into(), workspace_id: Some(ids.0.clone()), profile_id: Some(ids.1.clone()), ..Default::default() }).unwrap()
+    }
+
+    #[test]
+    fn a_background_failure_is_a_warning_that_opens_the_project() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let t = tempfile::tempdir().unwrap();
+        let (ws, _) = fixture(&conn, &t);
+        background_failure(&conn, Some(&ws), Some("p1"), "clone", "Cloning shop failed", "the remote cannot be reached").unwrap();
+        let n = list(&conn, &Default::default()).unwrap().remove(0);
+        assert_eq!((n.priority.as_str(), n.source.as_str(), n.title.as_str(), n.body.as_str()), ("warning", "clone", "Cloning shop failed", "the remote cannot be reached"));
+        assert_eq!((n.target_kind.as_deref(), n.target_id.as_deref(), n.project_id.as_deref()), (Some("project"), Some("p1"), Some("p1")));
     }
 
     #[test]

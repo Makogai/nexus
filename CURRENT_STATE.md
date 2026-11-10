@@ -89,6 +89,27 @@ now, a file-system watcher later; plain task session (no workflow run).
     project only* narrows the tabs.
   * **Suites updated in the same commit** (NX-8): task-flow, context, portable and smoke open `?tab=tasks|knowledge|
     settings`; task-flow waits for the task file (the list moves before the write finishes).
+* **Phase 3 — feedback everywhere (ADR-0048):**
+  * `useAction()` (pending, re-entrancy guard, error, toasts, per-row keys) and `<ActionButton>` (disabled + `aria-busy`,
+    spinner, pending label). ProjectLearn swept by hand (the owner's case: a draft decision leaves the list at once, a
+    line says "Writing the draft into the project overview…" → "The draft is now the project overview." with *Open
+    overview*, rolls back on error; the graph watch says when no report appeared in 30 minutes). Two delegated sweeps
+    (reviewed; no `data-*` selector lost — checked against HEAD): WorkflowsView, StartWorkflowDialog, GatesPanel
+    ("Running lint…"), SkillsView, KnowledgeDocDialog (a reload no longer wipes the conflict error), ConstitutionsView;
+    KitsView, WorkspaceView, RestoreView, SettingsView, ProjectDiscovery and AddProjectDialog ("Cloning <name>… this
+    can take a few minutes"), SyncView ("Fetching from origin…", "Pushing 2 commits to origin…").
+  * Error toasts persist until dismissed, offer *Copy details*, collapse repeats, at most four; failed clones and manual
+    gate runs publish `notify::background_failure`.
+  * Not converted (not on the task's list): KitProfileCard, RegisterKitDialog, CloneWorkspaceForm, SyncPolicyCard,
+    NewWorkspaceForm.
+* **Phase 4 — harness:** Home "Needs you" (same core query, across projects); session rows show the workflow run
+  (linked), the context strategy and last activity; knowledge index refresh on window focus and after a session ends
+  (`app.freshness`; ProjectDiscovery rescans); `prune::artifacts` at desktop start; `claude::prepare` and `preview`
+  share `build_append` (the inspector now also counts the commit-message note, the workflow line and separators);
+  module cycles looked at and left (ADR-0048).
+* **Phase 5 — release prep:** version 0.5.0 (Cargo.toml, package.json + lock, tauri.conf.json; the updater offers
+  0.1.5 → 0.5.0: `release.version > current_version`, semver); release notes rewritten for "0.5 alpha"; README badge
+  and download name; ADR-0047, ADR-0048, ADR-0042 amendment, ADR index 0041–0048; ARCHITECTURE, TESTING, ROADMAP.
 
 ## Project workbench — progress (session 10)
 
@@ -394,6 +415,18 @@ Per-phase checks while building (targeted); the full run on the final code follo
 | 16 | 2 | `node e2e/workbench.mjs` | WORKBENCH OK, 46 checks (run twice by mistake, both OK) |
 | 17 | 2 | `node e2e/task-flow.mjs` | first run 41/43: Done/Reopen checks read the task file before the (now optimistic) write finished — suite waits for the file; rerun TASK FLOW OK 43/43 |
 | 18 | 2 | `context` · `portable` · `run-smoke` · `workflows` · `usage` | CONTEXT OK 12 · PORTABLE OK 50 · E2E OK 28 · WORKFLOWS OK 24 · USAGE OK 18 |
+| 19 | 3–4 | targeted: `push_request`, `inbox`, `prune`, `claude::prepare`, `background_failure`; vitest `project-learn`, `needs-you` | all passed (agreement test fails on the old preview by construction) |
+| — | final | **Full verification on the final code (sequential, `CARGO_BUILD_JOBS=2`)** | |
+| 20 | 5 | `cargo test --workspace` | passed — 329 passed, 1 ignored (opt-in toast self-test): core 256, CLI 41 + 6, db_crash 2, git 5, isolation 4, desktop lib 11, pty 4 |
+| 21 | 5 | `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy -p nexus-desktop --all-targets --features e2e-webview-debugging -- -D warnings` | clean · clean |
+| 22 | 5 | `npx vitest run` · `npm run typecheck` · `npx vite build` | first run 160/161: a delegated test pinned the 9 s duration I had removed from the Skills save error (errors persist) — assertion fixed; rerun 161/161 (31 files) · clean · built |
+| 23 | 5 | `npx tauri build --debug --no-bundle` + `node e2e/t18-check.mjs` | **not run to completion locally**: 2/4 — no WebView2 started because the owner's installed NEXUS (same identity, single instance) was open and hosts this session; CI's release job runs it |
+| 24 | 5 | `installed.mjs` (installer build) | **not run**: the suite refuses while NEXUS is installed for this user (it is); CI's release job runs it |
+| 25 | 5 | E2E build (`--features e2e-webview-debugging`) · `cargo build -p nexus-cli -p fake-claude` | ok |
+| 26 | 5 | `run-smoke` · `workbench` | E2E OK 28 · first run 44/46: the draft decision is optimistic now, the suite read the overview before the write — waits for the result line (+1 check); rerun WORKBENCH OK 47/47 |
+| 27 | 5 | `task-flow` | two runs ended at the hard-kill step (`taskkill /T /F` returned an error after 14 passing checks — a race with a child process); the helper now reports taskkill's message; third run TASK FLOW OK 43/43 |
+| 28 | 5 | `sync` · `portable` · `attention` · `workflows` | 18/18 · 50/50 · 27/27 · 24/24 |
+| 29 | 5 | `mcp-interop` · `context` · `usage` · `constitutions` · `profiles-kits` · `restore` · `workspace-setup` | 9 · 12 · 18 · 13 · 9 · 12 · 17 — all OK |
 
 ## Verification log — Portable Workspace stage (sequential groups, `CARGO_BUILD_JOBS=2`, final code `7c491fb`)
 
@@ -466,10 +499,12 @@ free.
 
 ## Next actions (in order)
 
-1. Owner: one push — `git push --atomic origin main v0.1.5` — starts the single release pipeline (CI checks + builds,
-   ≈ 20 minutes); publish the draft when it is green. NEXUS 0.1.2 then updates itself: the first real automatic update
-   (ADR-0044) — 0.1.4 updates itself to 0.1.5 (check the version in the top bar).
-   Open: context size of running sessions in the task launcher (owner to decide).
+1. Owner: review `milestone/v0.5-alpha` (0.5 alpha), approve the "NEXUS engineering" constitution in Constitutions,
+   define and approve the `nexus` gates (suggested `lint`, `test`, `frontend`, `typecheck`), check manually: the new
+   tabs and the Home inbox in the real app, a rejected push against a real remote (and *Tell Claude* in a running
+   session), the look of the new notifications. Then merge with `--no-ff`, add the `release:` commit + tag `v0.5.0`
+   and do the one push `git push --atomic origin main v0.5.0`; NEXUS 0.1.x updates itself to 0.5.0.
+   Open: context size of running sessions in the task launcher; a file-system watcher (ADR-0048) — owner to decide.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
    project from Git and try *Learn*; MANUAL_CHECKS 33 (with `docs/TEMPLATE_REVIEW.md`).
 3. Owner decisions still open: product name and `nexus://`, code signing (Windows SmartScreen, macOS notarization),
@@ -505,7 +540,13 @@ free.
   machine-local like the gates themselves: it guards against unseen command changes, not against a person approving
   a harmful command. Gates that existed before the workflow stage need one approval after the upgrade.
 * Context strategy is machine-local; InstructionsLoaded costs one hook process per instruction file at start.
-* Knowledge files are not watched; session artifacts and kit overlays are not pruned.
+* Knowledge files are not watched: the desktop refreshes the index when its window regains focus and after a session
+  ends (ADR-0048). Session folders are pruned 30 days after their session ended; kit overlays only when their profile
+  is gone.
+* Error toasts persist until dismissed (at most four). Not yet on `useAction`: KitProfileCard, RegisterKitDialog,
+  CloneWorkspaceForm, SyncPolicyCard, NewWorkspaceForm. Graphify failures are visible only in the terminal it ran in.
+* `task-flow.mjs`'s hard kill (`taskkill /T /F`) failed twice in one session (a child exiting during the kill); the
+  helper now prints taskkill's message.
 * Usage token counts are *parsed* (ADR-0010): Claude Code's transcript format is undocumented; versions outside
   `VERIFIED_FORMATS` are flagged. Not verified with a signed-in profile yet (MANUAL_CHECKS 28). Claude's background
   helper calls are not in the per-response counts. Sessions started outside NEXUS are not attributed to projects.

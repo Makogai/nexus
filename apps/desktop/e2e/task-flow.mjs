@@ -61,7 +61,11 @@ function startApp(report) {
 }
 async function stopApp(child) {
   // Hard kill of the whole tree (app, WebView2, fake Claude): the worst case a restart must recover from.
-  execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+  try {
+    execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'pipe', encoding: 'utf8' })
+  } catch (e) {
+    throw new Error(`taskkill failed (app exited: ${child.exitCode ?? 'no'}): ${String(e.stderr || e.stdout || e.message).trim().slice(0, 300)}`)
+  }
   const deadline = Date.now() + 20000
   for (;;) {
     try {

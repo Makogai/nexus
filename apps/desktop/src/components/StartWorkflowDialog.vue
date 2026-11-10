@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { TriangleAlert } from '@lucide/vue'
-import { api, toIpcError } from '../lib/ipc'
+import { api } from '../lib/ipc'
 import type { KnowledgeItem, Rigor, RunView, WorkflowSummary } from '../lib/types'
 import { RIGOR_LEVELS } from '../lib/workflow'
+import { useAction } from '../composables/useAction'
 import { useAppStore } from '../stores/app'
 import { useProfileStore } from '../stores/profiles'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
+import ActionButton from './ActionButton.vue'
 import BaseModal from './BaseModal.vue'
 
 const props = defineProps<{
@@ -33,19 +35,34 @@ const goal = ref('')
 const rigor = ref<Rigor>('balanced')
 const profileId = ref('')
 const launch = ref(true)
-const busy = ref(false)
-const error = ref<string | null>(null)
 const loaded = ref(false)
 
 const wf = computed(() => workflows.value.find((w) => w.id === workflowId.value) ?? null)
 const ready = computed(() => !!wf.value && wf.value.approved && !wf.value.errors && !!projectId.value && (taskMode.value === 'new' || !!taskId.value) && (!launch.value || !!profileId.value))
+
+// Errors stay in the dialog until the next attempt (or until it is opened again).
+const starting = useAction(async () => {
+  if (!wf.value) return
+  const run = await api.workflowStart(props.workspaceId, {
+    workflowId: wf.value.id,
+    projectId: projectId.value || null,
+    taskId: taskMode.value === 'existing' ? taskId.value : null,
+    goal: goal.value.trim(),
+    rigor: rigor.value,
+    profileId: launch.value ? profileId.value : null,
+  })
+  if (launch.value && profileId.value) {
+    await sessions.startClaude({ profileId: profileId.value, projectId: run.projectId, taskId: run.taskId, workProfile: run.rigor, title: run.goal ? `${run.workflowTitle}: ${run.goal}`.slice(0, 80) : run.workflowTitle })
+  }
+  emit('started', run)
+})
 
 watch(
   () => props.open,
   async (open) => {
     if (!open) return
     loaded.value = false
-    error.value = null
+    starting.clearError()
     goal.value = ''
     workflows.value = await api.workflowList(props.workspaceId).catch(() => [])
     const o = await api.knowledgeOverview(props.workspaceId).catch(() => null)
@@ -64,30 +81,6 @@ watch(
 function pickWorkflow(id: string) {
   workflowId.value = id
   if (wf.value) rigor.value = wf.value.rigor
-}
-
-async function start() {
-  if (!wf.value) return
-  busy.value = true
-  error.value = null
-  try {
-    const run = await api.workflowStart(props.workspaceId, {
-      workflowId: wf.value.id,
-      projectId: projectId.value || null,
-      taskId: taskMode.value === 'existing' ? taskId.value : null,
-      goal: goal.value.trim(),
-      rigor: rigor.value,
-      profileId: launch.value ? profileId.value : null,
-    })
-    if (launch.value && profileId.value) {
-      await sessions.startClaude({ profileId: profileId.value, projectId: run.projectId, taskId: run.taskId, workProfile: run.rigor, title: run.goal ? `${run.workflowTitle}: ${run.goal}`.slice(0, 80) : run.workflowTitle })
-    }
-    emit('started', run)
-  } catch (e) {
-    error.value = toIpcError(e).message
-  } finally {
-    busy.value = false
-  }
 }
 </script>
 
@@ -138,10 +131,10 @@ async function start() {
     <p v-if="wf" class="hint">
       {{ wf.steps }} steps · gates: {{ wf.gates.join(', ') || 'none' }}<template v-if="wf.skills.length"> · skills for this session only: {{ wf.skills.join(', ') }}</template>
     </p>
-    <div v-if="error" class="notice notice-error selectable"><TriangleAlert /> {{ error }}</div>
+    <div v-if="starting.error.value" class="notice notice-error selectable" data-start-error><TriangleAlert /> {{ starting.error.value }}</div>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!ready || busy" data-start-run @click="start">{{ busy ? 'Starting…' : launch ? 'Start and launch Claude' : 'Start run' }}</button>
+      <ActionButton class="btn-primary" :pending="starting.pending.value" :disabled="!ready" pending-label="Starting…" data-start-run @click="starting.run()">{{ launch ? 'Start and launch Claude' : 'Start run' }}</ActionButton>
     </template>
   </BaseModal>
 </template>

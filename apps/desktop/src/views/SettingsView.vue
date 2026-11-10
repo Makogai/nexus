@@ -6,6 +6,8 @@ import { Archive, Check, FolderInput, FolderOpen, FolderPlus, Monitor, Moon, Rot
 import { api, toIpcError } from '../lib/ipc'
 import type { BackupInfo, ShellInfo } from '../lib/types'
 import { relativeTime } from '../lib/format'
+import { useAction } from '../composables/useAction'
+import ActionButton from '../components/ActionButton.vue'
 import NewWorkspaceForm, { type WorkspaceSource } from '../components/NewWorkspaceForm.vue'
 import { useAppStore } from '../stores/app'
 import { useUpdateStore } from '../stores/updates'
@@ -21,7 +23,6 @@ const newForm = ref<{ source: WorkspaceSource; folder?: string; key: number } | 
 const notYet = ref<string | null>(null)
 
 const backups = ref<BackupInfo[]>([])
-const backingUp = ref(false)
 const KIND: Record<BackupInfo['kind'], string> = { manual: 'Manual', automatic: 'Automatic (daily)', 'pre-restore': 'Before a restore', 'pre-migration': 'Before an upgrade', replaced: 'Replaced by a restore' }
 const visibleBackups = computed(() => backups.value.filter((b) => b.kind !== 'replaced'))
 
@@ -34,14 +35,26 @@ onMounted(async () => {
   await loadBackups()
 })
 
-async function backupNow() {
-  backingUp.value = true
-  const b = await app.attempt(() => api.backupCreate(), 'Could not create the backup')
-  backingUp.value = false
-  if (b) app.toast('success', `Backup ${b.id} created`)
-  await loadBackups()
-}
+const backingUp = useAction(
+  async () => {
+    try {
+      return await api.backupCreate()
+    } finally {
+      await loadBackups()
+    }
+  },
+  { failure: 'Could not create the backup', success: (b) => `Backup ${b.id} created` },
+)
 
+// Schedule, then restart: each step says on its own what went wrong.
+const restoring = useAction(
+  async (b: BackupInfo) => {
+    if (await app.attempt(() => api.backupScheduleRestore(b.id), 'Could not schedule the restore')) {
+      await app.attempt(() => api.appRestart(), 'Could not restart — quit and start NEXUS to finish the restore')
+    }
+  },
+  { key: (b: BackupInfo) => b.id },
+)
 async function restore(b: BackupInfo) {
   const ok = await app.confirm({
     title: `Restore the backup from ${new Date(b.createdAt).toLocaleString()}?`,
@@ -49,24 +62,34 @@ async function restore(b: BackupInfo) {
     confirmLabel: 'Restore and restart',
     danger: true,
   })
-  if (!ok) return
-  if (await app.attempt(() => api.backupScheduleRestore(b.id), 'Could not schedule the restore')) {
-    await app.attempt(() => api.appRestart(), 'Could not restart — quit and start NEXUS to finish the restore')
-  }
+  if (ok) await restoring.run(b)
 }
 
-async function cancelRestore() {
-  await api.backupCancelRestore()
-  await app.load()
-}
+const restarting = useAction(() => api.appRestart(), { failure: 'Could not restart — quit and start NEXUS to finish the restore' })
+const cancellingRestore = useAction(
+  async () => {
+    await api.backupCancelRestore()
+    await app.load()
+  },
+  { failure: 'Could not cancel the restore' },
+)
 
+const deleting = useAction(
+  async (b: BackupInfo) => {
+    try {
+      await api.backupDelete(b.id)
+    } finally {
+      await loadBackups()
+    }
+  },
+  { failure: 'Could not delete the backup', key: (b: BackupInfo) => b.id },
+)
 async function removeBackup(b: BackupInfo) {
   const ok = await app.confirm({ title: 'Delete this backup?', message: `${KIND[b.kind]} backup from ${new Date(b.createdAt).toLocaleString()}. This cannot be undone.`, confirmLabel: 'Delete', danger: true })
-  if (ok) {
-    await app.attempt(() => api.backupDelete(b.id), 'Could not delete the backup')
-    await loadBackups()
-  }
+  if (ok) await deleting.run(b)
 }
+
+const installLabel = computed(() => (updates.phase === 'installing' ? 'Installing…' : updates.progress !== null ? `Downloading… ${updates.progress}%` : 'Downloading…'))
 
 const cliFolder = computed(() => app.info?.cliPath?.replace(/[\/][^\/]+$/, '') ?? '')
 const pathCommand = computed(() => `[Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';${cliFolder.value}', 'User')`)
@@ -82,20 +105,27 @@ function openNew(source: WorkspaceSource, folder?: string) {
   notYet.value = null
 }
 
+const importing = useAction(
+  async (dir: string) => {
+    try {
+      await workspaces.importExisting(dir)
+    } catch (e) {
+      // Not a workspace yet: offer to set one up there (the core refuses folders with other content).
+      if (toIpcError(e).code === 'not_found') notYet.value = dir
+      else throw e
+    }
+  },
+  { failure: 'Could not open workspace' },
+)
 async function importWorkspace() {
   const dir = await openDialog({ directory: true, title: 'Choose a folder containing nexus-workspace.json' })
   if (typeof dir !== 'string') return
   notYet.value = null
-  try {
-    await workspaces.importExisting(dir)
-  } catch (e) {
-    const err = toIpcError(e)
-    // Not a workspace yet: offer to set one up there (the core refuses folders with other content).
-    if (err.code === 'not_found') notYet.value = dir
-    else app.toast('error', `Could not open workspace: ${err.message}`)
-  }
+  await importing.run(dir)
 }
 
+const switching = useAction((id: string) => workspaces.activate(id), { failure: 'Could not switch the workspace', key: (id: string) => id })
+const forgetting = useAction((id: string) => workspaces.forget(id), { failure: 'Could not forget workspace', key: (id: string) => id })
 async function forget(id: string, name: string) {
   const ok = await app.confirm({
     title: `Forget “${name}” on this machine?`,
@@ -103,7 +133,7 @@ async function forget(id: string, name: string) {
     confirmLabel: 'Forget',
     danger: true,
   })
-  if (ok) await app.attempt(() => workspaces.forget(id), 'Could not forget workspace')
+  if (ok) await forgetting.run(id)
 }
 
 async function reveal(path: string) {
@@ -163,8 +193,8 @@ async function reveal(path: string) {
             <span class="faint small">{{ w.projectCount }} projects · opened {{ relativeTime(w.lastOpenedAt) }}</span>
           </div>
           <button class="btn btn-sm btn-ghost btn-icon" title="Open folder" :disabled="!w.available" @click="reveal(w.rootPath)"><FolderOpen /></button>
-          <button v-if="w.id !== workspaces.active?.id" class="btn btn-sm" :disabled="!w.available" @click="app.attempt(() => workspaces.activate(w.id))">Switch</button>
-          <button class="btn btn-sm btn-ghost" @click="forget(w.id, w.name)">Forget</button>
+          <ActionButton v-if="w.id !== workspaces.active?.id" class="btn-sm" :pending="switching.isPending(w.id)" pending-label="Switching…" :disabled="!w.available || switching.pending.value" :data-settings-switch-ws="w.id" @click="switching.run(w.id)">Switch</ActionButton>
+          <ActionButton class="btn-sm btn-ghost" :pending="forgetting.isPending(w.id)" pending-label="Forgetting…" :disabled="forgetting.pending.value" :data-settings-forget-ws="w.id" @click="forget(w.id, w.name)">Forget</ActionButton>
         </div>
       </div>
       <div v-if="newForm" class="ws-new" data-settings-new-ws>
@@ -172,7 +202,7 @@ async function reveal(path: string) {
       </div>
       <div v-else class="ws-actions">
         <button class="btn" data-settings-create-ws @click="openNew('new')"><FolderPlus /> New workspace…</button>
-        <button class="btn" @click="importWorkspace"><FolderInput /> Open existing…</button>
+        <ActionButton :pending="importing.pending.value" pending-label="Opening…" data-settings-open-ws @click="importWorkspace"><template #icon><FolderInput /></template>Open existing…</ActionButton>
       </div>
       <p v-if="notYet && !newForm" class="notice selectable" data-settings-not-yet>
         {{ notYet }} is not a NEXUS workspace yet.
@@ -207,8 +237,10 @@ async function reveal(path: string) {
           <span>Install updates by themselves when NEXUS starts</span>
         </label>
         <div class="row actions">
-          <button class="btn" :disabled="updates.phase === 'checking' || updates.phase === 'downloading'" @click="updates.checkNow(false)">Check now</button>
-          <button v-if="updates.available" class="btn btn-primary" :disabled="updates.phase === 'downloading'" @click="updates.install()">Update to v{{ updates.available.version }}</button>
+          <ActionButton :pending="updates.phase === 'checking'" pending-label="Checking…" :disabled="updates.phase === 'downloading' || updates.phase === 'installing'" data-update-check @click="updates.checkNow(false)">Check now</ActionButton>
+          <ActionButton v-if="updates.available" class="btn-primary" :pending="updates.phase === 'downloading' || updates.phase === 'installing'" :pending-label="installLabel" data-update-install @click="updates.install()">
+            Update to v{{ updates.available.version }}
+          </ActionButton>
         </div>
         <p v-if="updates.error" class="hint">Last check: {{ updates.error }}</p>
         <p class="hint">NEXUS checks the latest published release on start and every few hours. Every download is verified against NEXUS's update-signing key before it is installed; an update never starts while Claude sessions run without asking you.</p>
@@ -238,11 +270,11 @@ async function reveal(path: string) {
       </p>
       <p v-if="app.info?.pendingRestore" class="notice notice-warn" data-backup-pending>
         A restore of {{ app.info.pendingRestore }} happens when NEXUS starts next.
-        <button class="btn btn-sm" @click="api.appRestart()">Restart now</button>
-        <button class="btn btn-sm btn-ghost" @click="cancelRestore">Cancel</button>
+        <ActionButton class="btn-sm" :pending="restarting.pending.value" pending-label="Restarting…" :disabled="cancellingRestore.pending.value" data-backup-restart @click="restarting.run()">Restart now</ActionButton>
+        <ActionButton class="btn-sm btn-ghost" :pending="cancellingRestore.pending.value" pending-label="Cancelling…" :disabled="restarting.pending.value" data-backup-cancel-restore @click="cancellingRestore.run()">Cancel</ActionButton>
       </p>
       <div class="row">
-        <button class="btn" :disabled="backingUp" data-backup-create @click="backupNow"><Archive /> {{ backingUp ? 'Backing up…' : 'Back up now' }}</button>
+        <ActionButton :pending="backingUp.pending.value" pending-label="Backing up…" data-backup-create @click="backingUp.run()"><template #icon><Archive /></template>Back up now</ActionButton>
         <button class="btn btn-ghost" @click="app.info && reveal(`${app.info.dataDir}${app.info.platform === 'windows' ? '\\' : '/'}backups`)"><FolderOpen /> Open the backups folder</button>
       </div>
       <table v-if="visibleBackups.length" class="table">
@@ -254,9 +286,11 @@ async function reveal(path: string) {
             <td>{{ b.schemaVersion ? `v${b.schemaVersion}` : '–' }}</td>
             <td>{{ size(b.bytes) }}</td>
             <td class="tools">
-              <button v-if="b.restorable" class="btn btn-sm" :data-backup-restore="b.id" @click="restore(b)"><RotateCcw /> Restore…</button>
+              <ActionButton v-if="b.restorable" class="btn-sm" :pending="restoring.isPending(b.id)" pending-label="Restoring…" :disabled="restoring.pending.value" :data-backup-restore="b.id" @click="restore(b)">
+                <template #icon><RotateCcw /></template>Restore…
+              </ActionButton>
               <span v-else class="faint small" :title="b.problem ?? ''">not restorable: {{ b.problem }}</span>
-              <button class="btn btn-sm btn-ghost btn-icon" title="Delete" @click="removeBackup(b)"><Trash2 /></button>
+              <ActionButton class="btn-sm btn-ghost btn-icon" title="Delete" :pending="deleting.isPending(b.id)" :disabled="deleting.pending.value" :data-backup-delete="b.id" @click="removeBackup(b)"><template #icon><Trash2 /></template></ActionButton>
             </td>
           </tr>
         </tbody>

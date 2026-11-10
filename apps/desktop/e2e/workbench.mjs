@@ -344,11 +344,15 @@ try {
   await cdp.evaluate(`[...document.querySelectorAll('[data-learn-map] button')].find((b) => b.innerText.includes('Read again'))?.click(); true`)
   await cdp.waitFor(`!!document.querySelector('[data-draft="overview"]') && !!document.querySelector('[data-draft="architecture"]')`, 15000)
   await click('[data-draft="overview"] [data-draft-apply]')
-  await until(async () => ((await cdp.evaluate(`!document.querySelector('[data-draft="overview"]')`)) ? true : null))
+  // ADR-0048: the draft leaves the list at once; the result line says when the write finished and links onward.
+  const pendingShown = await cdp.waitFor(`!document.querySelector('[data-draft="overview"]') && !!document.querySelector('[data-draft-decision]')`, 10000).catch(() => false)
+  const result = await cdp.waitFor(`document.querySelector('[data-draft-decision="done"]')?.innerText`, 20000).catch(() => '')
   const ctxDir = join(root, 'ws', 'project-context', 'app')
   const overview = readFileSync(join(ctxDir, 'overview.md'), 'utf8')
-  check('Use as overview writes the draft into the project overview', overview.includes('A tiny app that answers') && overview.includes('accepted on'), overview.split('\n').slice(-3).join(' | '))
+  check('Use as overview writes the draft into the project overview', !!pendingShown && overview.includes('A tiny app that answers') && overview.includes('accepted on'), overview.split('\n').slice(-3).join(' | '))
+  check('…and the result says so, with Open overview', result.includes('The draft is now the project overview') && !!(await cdp.evaluate(`!!document.querySelector('[data-draft-open]')`)), result)
   await click('[data-draft="architecture"] [data-draft-discard]')
+  await cdp.waitFor(`document.querySelector('[data-draft-decision="done"]')?.innerText.includes('set aside')`, 20000).catch(() => false)
   const none = await until(async () => ((await textOf('[data-learn-drafts]')).includes('No drafts waiting') ? true : null))
   check('Set aside leaves the architecture untouched and the list empty', !!none && readFileSync(join(ctxDir, 'architecture.md'), 'utf8').includes('_Not written yet._'))
 } catch (e) {

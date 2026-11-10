@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onActivated, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { History, Info, Landmark, Plus, RefreshCw, Save, Search, ShieldCheck, TriangleAlert, Undo2 } from '@lucide/vue'
+import { History, Info, Landmark, LoaderCircle, Plus, RefreshCw, Save, Search, ShieldCheck, TriangleAlert, Undo2 } from '@lucide/vue'
 import { api, toIpcError } from '../lib/ipc'
 import type { ConstitutionHistory, ConstitutionSummary, ConstitutionView, EffectiveConstitution, KnowledgeItem, RuleHit } from '../lib/types'
 import { ENFORCEMENT_LABELS, SCOPE_LABELS, SCOPE_ORDER, clone, counts } from '../lib/constitution'
 import { relativeTime } from '../lib/format'
+import { useAction } from '../composables/useAction'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useWorkspaceStore } from '../stores/workspaces'
+import ActionButton from '../components/ActionButton.vue'
 import ConstitutionRules from '../components/ConstitutionRules.vue'
 import ConstitutionTree from '../components/ConstitutionTree.vue'
 import NewConstitutionDialog from '../components/NewConstitutionDialog.vue'
@@ -29,7 +31,6 @@ const view = ref<ConstitutionView | null>(null)
 const draft = ref<ConstitutionView['structure'] | null>(null)
 const raw = ref('')
 const dirty = ref(false)
-const busy = ref(false)
 const error = ref<string | null>(null)
 const creating = ref(false)
 const filter = ref('')
@@ -44,7 +45,6 @@ const effective = ref<EffectiveConstitution | null>(null)
 const tasks = ref<KnowledgeItem[]>([])
 
 const wsId = computed(() => workspaces.active?.id ?? null)
-const verifying = ref(false)
 const complianceOf = (id: string) => effective.value?.compliance?.find((c) => c.ruleId === id) ?? null
 const linkedGates = computed(() => [...new Set((effective.value?.compliance ?? []).map((c) => c.check).filter((c): c is string => !!c))])
 function complianceLabel(id: string): string {
@@ -70,13 +70,20 @@ function complianceTone(id: string) {
   const s = complianceOf(id)?.status
   return { 'badge-ok': s === 'passed', 'badge-error': s === 'failed', 'badge-warn': s === 'gate-missing' || s === 'not-run' || s === 'not-approved' }
 }
-async function verifyRules() {
+// Gates run one after another; the button names the one running.
+const verifyingGate = ref<string | null>(null)
+const verifying = useAction(async () => {
   if (!effProject.value) return
-  verifying.value = true
-  for (const g of linkedGates.value) await app.attempt(() => api.gateRun(effProject.value, g), `Gate ${g} could not run`)
-  verifying.value = false
+  try {
+    for (const g of linkedGates.value) {
+      verifyingGate.value = g
+      await app.attempt(() => api.gateRun(effProject.value, g), `Gate ${g} could not run`)
+    }
+  } finally {
+    verifyingGate.value = null
+  }
   await loadEffective()
-}
+})
 const grouped = computed(() => SCOPE_ORDER.map((s) => ({ scope: s, docs: list.value.filter((d) => d.scope === s) })).filter((g) => g.docs.length))
 const pendingCount = computed(() => list.value.filter((d) => !d.approved).length)
 const projectName = (id: string | null) => projects.list.find((p) => p.id === id)?.name ?? null
@@ -99,6 +106,8 @@ async function select(id: string) {
   mode.value = 'read'
   await loadView()
 }
+const refreshing = useAction(loadList)
+const opening = useAction(select, { key: (id: string) => id })
 
 async function loadView() {
   if (!wsId.value || !selectedId.value) return
@@ -111,10 +120,10 @@ async function loadView() {
   history.value = null
   oldVersion.value = null
 }
+const discarding = useAction(loadView)
 
-async function save() {
+const saving = useAction(async () => {
   if (!wsId.value || !view.value || !draft.value) return
-  busy.value = true
   try {
     const v =
       mode.value === 'markdown'
@@ -129,19 +138,20 @@ async function save() {
   } catch (e) {
     const err = toIpcError(e)
     app.toast('error', err.code === 'conflict' ? 'The file changed on disk since you opened it — reload and apply your change again.' : `Not saved: ${err.message}`)
-  } finally {
-    busy.value = false
   }
-}
+})
+const busy = computed(() => saving.pending.value || discarding.pending.value)
 
-async function approve() {
-  if (!wsId.value || !view.value) return
-  const ok = await app.attempt(() => api.knowledgeApprove(wsId.value!, view.value!.id), 'Could not approve')
-  if (ok) {
-    app.toast('success', `Approved this version of “${view.value.title}” on this machine`)
+const approving = useAction(
+  async () => {
+    if (!wsId.value || !view.value) return
+    const title = view.value.title
+    await api.knowledgeApprove(wsId.value, view.value.id)
+    app.toast('success', `Approved this version of “${title}” on this machine`)
     await Promise.all([loadList(), loadView()])
-  }
-}
+  },
+  { failure: 'Could not approve' },
+)
 
 function setMode(m: Mode) {
   if (m === mode.value) return
@@ -150,18 +160,21 @@ function setMode(m: Mode) {
     return
   }
   mode.value = m
-  if (m === 'history') loadHistory()
+  if (m === 'history') historyLoading.run()
 }
 
 async function loadHistory() {
   if (!wsId.value || !view.value) return
   history.value = (await app.attempt(() => api.constitutionHistory(wsId.value!, view.value!.id), 'Could not read the history')) ?? null
 }
-async function showVersion(oid: string) {
-  if (!wsId.value || !view.value) return
-  const body = await app.attempt(() => api.constitutionVersion(wsId.value!, view.value!.id, oid), 'Could not read that version')
-  if (body !== undefined) oldVersion.value = { oid, body }
-}
+const historyLoading = useAction(loadHistory)
+const showingVersion = useAction(
+  async (oid: string) => {
+    if (!wsId.value || !view.value) return
+    oldVersion.value = { oid, body: await api.constitutionVersion(wsId.value, view.value.id, oid) }
+  },
+  { failure: 'Could not read that version', key: (oid: string) => oid },
+)
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(filter, (q) => {
@@ -231,7 +244,7 @@ loadList()
         <p>How Claude must and should work here — articles, sections and rules with stable ids, from global to task scope. Mandatory policies cannot be overridden by narrower scopes; organisation-managed Claude settings always come first.</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost" @click="loadList"><RefreshCw /> Refresh</button>
+        <ActionButton class="btn-ghost" :pending="refreshing.pending.value" data-constitution-refresh @click="refreshing.run()"><template #icon><RefreshCw /></template> Refresh</ActionButton>
         <button class="btn btn-primary" data-new-constitution @click="creating = true"><Plus /> New constitution</button>
       </div>
     </div>
@@ -260,16 +273,32 @@ loadList()
             <input v-model="filter" class="input" type="search" placeholder="Search rules (id, title, text)…" aria-label="Search rules" data-rule-search />
           </div>
           <div v-if="hits" class="hits">
-            <button v-for="h in hits" :key="h.rule.docId + h.rule.id" class="hit" @click="select(h.rule.docId)">
+            <button
+              v-for="h in hits"
+              :key="h.rule.docId + h.rule.id"
+              class="hit"
+              :disabled="opening.isPending(h.rule.docId)"
+              :aria-busy="opening.isPending(h.rule.docId) ? 'true' : undefined"
+              @click="opening.run(h.rule.docId)"
+            >
               <span class="mono rid">{{ h.rule.id }}</span> {{ h.rule.title }}
-              <span class="faint small">{{ h.rule.docTitle }} · {{ ENFORCEMENT_LABELS[h.rule.enforcement] }}</span>
+              <span class="faint small">{{ h.rule.docTitle }} · {{ ENFORCEMENT_LABELS[h.rule.enforcement] }} <LoaderCircle v-if="opening.isPending(h.rule.docId)" class="spin pending-ic" aria-hidden="true" /></span>
             </button>
             <p v-if="!hits.length" class="faint small">No rule matches.</p>
           </div>
           <div v-for="g in grouped" :key="g.scope" class="group">
             <div class="group-label">{{ SCOPE_LABELS[g.scope] }}</div>
-            <button v-for="d in g.docs" :key="d.id" class="doc" :class="{ active: d.id === selectedId }" :data-constitution="d.title" @click="select(d.id)">
-              <span class="doc-title">{{ d.title }}</span>
+            <button
+              v-for="d in g.docs"
+              :key="d.id"
+              class="doc"
+              :class="{ active: d.id === selectedId }"
+              :disabled="opening.isPending(d.id)"
+              :aria-busy="opening.isPending(d.id) ? 'true' : undefined"
+              :data-constitution="d.title"
+              @click="opening.run(d.id)"
+            >
+              <span class="doc-title">{{ d.title }} <LoaderCircle v-if="opening.isPending(d.id)" class="spin pending-ic" aria-hidden="true" /></span>
               <span class="faint small">
                 {{ d.rules }} rules · {{ d.mandatory }} mandatory<template v-if="d.projectId"> · {{ projectName(d.projectId) }}</template><template v-if="d.stacks.length"> · {{ d.stacks.join(', ') }}</template>
               </span>
@@ -298,14 +327,25 @@ loadList()
               <button class="segment" :class="{ selected: mode === 'read' }" role="radio" :aria-checked="mode === 'read'" data-mode="read" @click="setMode('read')">Read</button>
               <button class="segment" :class="{ selected: mode === 'structured' }" role="radio" :aria-checked="mode === 'structured'" data-mode="structured" @click="setMode('structured')">Edit</button>
               <button class="segment" :class="{ selected: mode === 'markdown' }" role="radio" :aria-checked="mode === 'markdown'" data-mode="markdown" @click="setMode('markdown')">Markdown</button>
-              <button class="segment" :class="{ selected: mode === 'history' }" role="radio" :aria-checked="mode === 'history'" data-mode="history" @click="setMode('history')"><History /> History</button>
+              <button
+                class="segment"
+                :class="{ selected: mode === 'history' }"
+                role="radio"
+                :aria-checked="mode === 'history'"
+                :disabled="historyLoading.pending.value"
+                :aria-busy="historyLoading.pending.value ? 'true' : undefined"
+                data-mode="history"
+                @click="setMode('history')"
+              >
+                <LoaderCircle v-if="historyLoading.pending.value" class="spin" aria-hidden="true" /><History v-else /> History
+              </button>
             </div>
           </header>
 
           <div v-if="!view.approved" class="notice notice-warn approve" data-review>
             <TriangleAlert />
             <span>This version was changed outside NEXUS. Review it below — Claude keeps using nothing from it until you approve this exact version.</span>
-            <button class="btn btn-sm btn-primary" :disabled="dirty" data-approve @click="approve"><ShieldCheck /> Approve this version</button>
+            <ActionButton class="btn-sm btn-primary" :pending="approving.pending.value" :disabled="dirty" pending-label="Approving…" data-approve @click="approving.run()"><template #icon><ShieldCheck /></template> Approve this version</ActionButton>
           </div>
           <div v-for="p in view.problems.filter((x) => x.severity === 'error')" :key="p.message" class="notice notice-error"><TriangleAlert /> {{ p.message }}</div>
 
@@ -325,8 +365,18 @@ loadList()
           <div v-else class="history">
             <p v-if="history && history.reason" class="notice"><Info /> {{ history.reason }}</p>
             <div v-if="history?.commits.length" class="commits">
-              <button v-for="c in history.commits" :key="c.oid" class="commit" :class="{ active: oldVersion?.oid === c.oid }" @click="showVersion(c.oid)">
+              <button
+                v-for="c in history.commits"
+                :key="c.oid"
+                class="commit"
+                :class="{ active: oldVersion?.oid === c.oid }"
+                :disabled="showingVersion.isPending(c.oid)"
+                :aria-busy="showingVersion.isPending(c.oid) ? 'true' : undefined"
+                :data-commit-version="c.oid"
+                @click="showingVersion.run(c.oid)"
+              >
                 <span class="mono">{{ c.oid.slice(0, 8) }}</span> {{ c.summary }} <span class="faint small">{{ relativeTime(c.timestampMs) }}</span>
+                <LoaderCircle v-if="showingVersion.isPending(c.oid)" class="spin pending-ic" aria-hidden="true" />
               </button>
             </div>
             <pre v-if="oldVersion" class="old selectable">{{ oldVersion.body }}</pre>
@@ -334,8 +384,8 @@ loadList()
 
           <footer v-if="mode === 'structured' || mode === 'markdown'" class="save-bar">
             <span class="faint small">{{ dirty ? 'Unsaved changes' : view.updated ? `Saved ${view.updated}` : '' }}</span>
-            <button class="btn" :disabled="!dirty || busy" @click="loadView"><Undo2 /> Discard</button>
-            <button class="btn btn-primary" :disabled="!dirty || busy" data-save @click="save"><Save /> {{ busy ? 'Saving…' : 'Save' }}</button>
+            <ActionButton :pending="discarding.pending.value" :disabled="!dirty || busy" data-discard @click="discarding.run()"><template #icon><Undo2 /></template> Discard</ActionButton>
+            <ActionButton class="btn-primary" :pending="saving.pending.value" :disabled="!dirty || busy" pending-label="Saving…" data-save @click="saving.run()"><template #icon><Save /></template> Save</ActionButton>
           </footer>
         </section>
       </div>
@@ -352,7 +402,16 @@ loadList()
           <option v-for="t in tasks" :key="t.id ?? t.path" :value="t.id">{{ t.title }}</option>
         </select>
         <label class="checkbox"><input v-model="effPending" type="checkbox" /><span>Preview unapproved changes</span></label>
-        <button v-if="effProject && linkedGates.length" class="btn btn-sm" :disabled="verifying" data-verify-rules @click="verifyRules">{{ verifying ? 'Verifying…' : `Verify ${linkedGates.length} linked gate(s) now` }}</button>
+        <ActionButton
+          v-if="effProject && linkedGates.length"
+          class="btn-sm"
+          :pending="verifying.pending.value"
+          :pending-label="verifyingGate ? `Running ${verifyingGate}…` : 'Verifying…'"
+          data-verify-rules
+          @click="verifying.run()"
+        >
+          Verify {{ linkedGates.length }} linked gate(s) now
+        </ActionButton>
       </div>
       <p class="notice small" data-compliance-note>
         <Info /> Applying is not guaranteeing: NEXUS gives Claude these rules as instructions; <strong>mandatory</strong> means no narrower scope can override them — not that Claude cannot break them. Only rules with a <em>Verified by gate</em> are checked, by NEXUS running that gate for the project. For hard limits, use Claude's own permission rules (organisation-managed) or the same gate in CI.
@@ -457,6 +516,11 @@ loadList()
 }
 .doc-title {
   font-weight: 600;
+}
+.pending-ic {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
 }
 .small {
   font-size: 12px;
