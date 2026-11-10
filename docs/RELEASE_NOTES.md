@@ -1,7 +1,8 @@
 # NEXUS 0.5 alpha — the app you work in all day
 
-NEXUS 0.5.0 is the first alpha: every project's sessions and tasks one click away, every action that says it is working
-and how it ended, and Git pushes that never fail silently. NEXUS 0.1.x installs this update on its own.
+NEXUS 0.5.1 is the first alpha: every project's sessions and tasks one click away, every action that says it is working
+and how it ended, and Git pushes that never fail silently. NEXUS 0.1.x installs this update on its own. (0.5.0 was never
+released: its macOS test run found the watcher problem fixed below.)
 
 ## What's new
 
@@ -28,7 +29,8 @@ and how it ended, and Git pushes that never fail silently. NEXUS 0.1.x installs 
 - **Terminals name their project**, in a colour per project, and a project page can show only its own terminals.
 - **Live knowledge.** NEXUS watches your workspace's knowledge files. A task you edit in another program, a `git pull`
   or a sync shows up within a moment — in the lists and in a document you have open. If you are editing that document,
-  your text stays and NEXUS tells you the file changed on disk.
+  your text stays and NEXUS tells you the file changed on disk. On macOS, and for a workspace reached through a
+  symbolic link, changes are matched by the folder's real path (fixed in 0.5.1).
 
 ## What "alpha" means
 
@@ -40,10 +42,10 @@ sync does that for you). Your data stays compatible: 0.5 adds one database migra
 
 | Platform | File | Notes |
 | --- | --- | --- |
-| Windows 10/11 (x64) | `NEXUS_0.5.0_x64-setup.exe` | Per-user install, no administrator rights |
-| macOS 11+ (Apple silicon) | `NEXUS_0.5.0_aarch64.dmg` | Drag NEXUS to Applications |
-| macOS 11+ (Intel) | `NEXUS_0.5.0_x64.dmg` | Drag NEXUS to Applications |
-| Linux (x64) | `NEXUS_0.5.0_amd64.AppImage` / `NEXUS_0.5.0_amd64.deb` | AppImage: make it executable and run it; deb: `sudo apt install ./NEXUS_0.5.0_amd64.deb` |
+| Windows 10/11 (x64) | `NEXUS_0.5.1_x64-setup.exe` | Per-user install, no administrator rights |
+| macOS 11+ (Apple silicon) | `NEXUS_0.5.1_aarch64.dmg` | Drag NEXUS to Applications |
+| macOS 11+ (Intel) | `NEXUS_0.5.1_x64.dmg` | Drag NEXUS to Applications |
+| Linux (x64) | `NEXUS_0.5.1_amd64.AppImage` / `NEXUS_0.5.1_amd64.deb` | AppImage: make it executable and run it; deb: `sudo apt install ./NEXUS_0.5.1_amd64.deb` |
 
 Already on 0.1.2 or later? NEXUS updates itself when it starts (or from the top bar). The `.app.tar.gz` files and `latest.json`
 are for NEXUS's own updates — you don't need to download them.
@@ -55,7 +57,7 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 - **Windows:** SmartScreen says "Windows protected your PC". Choose **More info → Run anyway**.
 - **macOS:** the app is ad-hoc signed but not notarized. Open it once with **right-click → Open**, or allow it under
   **System Settings → Privacy & Security → Open Anyway**.
-- **Linux:** no prompt. For the AppImage, run `chmod +x NEXUS_0.5.0_amd64.AppImage` first.
+- **Linux:** no prompt. For the AppImage, run `chmod +x NEXUS_0.5.1_amd64.AppImage` first.
 
 ## Verify what you downloaded
 

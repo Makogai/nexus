@@ -1,6 +1,7 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-10 (session 13: Agents & Dev Environment on `milestone/agents-dev-environment`, Codex first)._ Read this first,
+_Last updated: 2026-11-10 (session 13: NEXUS 0.5.1 on `milestone/agents-dev-environment` — Agents & Dev Environment,
+Codex first, plus the fix for the failed `v0.5.0` release run)._ Read this first,
 then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
@@ -96,6 +97,40 @@ Defaults taken without asking (stated to the owner): Codex runs *alongside* Clau
 
 **Not verified:** a real Codex turn (`notify` with a real thread id) — MANUAL_CHECKS 34; macOS/Linux CI has not run on
 this branch.
+
+## 0.5.1 — the 0.5.0 release run failed on macOS (session 13, branch `fix/macos-knowledge-watcher`, merged into the milestone)
+
+* **What failed:** release run 42828270171 (`v0.5.0`): every installer built (Windows, macOS ×2, Linux) and every other
+  check passed, but *CI checks / Rust (macos-latest)* failed one test —
+  `watcher::tests::documents_saved_created_moved_or_removed_are_seen_and_nothing_else_is` ("a saved document", no change
+  seen in 10 s) — so the draft release was never created. Nothing was released; the tag `v0.5.0` stays where it is
+  (moving a pushed tag needs a force push).
+* **Cause:** macOS FSEvents names a changed file by its *real* path (`/private/var/folders/…`), while the watcher compared
+  it with the path it watched (`/var/folders/…`, a symbolic link — the temporary folder). No event matched a knowledge
+  root. The same would have hit any workspace reached through a symbolic link. Windows and Linux report the watched path.
+* **Why CI did not catch it earlier:** the watcher (ADR-0049) landed on `main` together with the `release:` commit and the
+  tag in one atomic push, and the standalone CI run skips a `release:` commit — the macOS tests first ran inside the
+  release run. Lesson: run CI on the branch before it is merged and tagged (`gh workflow run ci.yml --ref <branch>`
+  after the owner pushed it).
+* **Fix (`692da59`):** `knowledge::watch::real_names` records each watched folder's real name where it differs;
+  `watch::as_watched` maps a reported path back before `affects_index` decides; the desktop `Folders` uses both. Tests:
+  a pure mapping test (all platforms) and a symbolic-link workspace test (`#[cfg(unix)]`, runs on Linux/macOS CI only).
+* **Release prep (`55f9e65`):** version 0.5.1 (Cargo.toml + lock, package.json + lock, tauri.conf.json, README); release
+  notes say 0.5.0 was never released. The updater offers 0.1.x → 0.5.1.
+
+| # | Command (sequential, `CARGO_BUILD_JOBS=2`) | Result |
+| --- | --- | --- |
+| 1 | `cargo test -p nexus-core --lib knowledge::watch` · `cargo test -p nexus-desktop --lib watcher` | 3 passed · 1 passed (Windows; the `#[cfg(unix)]` test is not compiled here) |
+| 2 | `cargo test --workspace` | passed — 333 passed, 1 ignored (opt-in toast self-test): core 259, CLI 41 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4 |
+| 3 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| 4 | E2E build (`--features e2e-webview-debugging`) | **failed**: drive D: full (361 MB free; `target/` 92 GB) — owner chose `cargo clean` (105 GB freed) |
+| 5 | `npx vitest run` · `npm run typecheck` | 164/164 (31 files) · clean |
+| 6 | E2E build (from clean) · `cargo build -p nexus-cli -p fake-claude` | ok (8 min) |
+| 7 | `node e2e/workbench.mjs` (live knowledge, ADR-0049) | first run (first start after the clean build) WORKBENCH FAILED (1) — the failing check was not captured; the next two runs WORKBENCH OK 51/51 |
+| 8 | `node e2e/run-smoke.mjs` | E2E OK 28 |
+
+**Not verified locally:** the macOS behaviour itself (no Mac here) and the Unix symbolic-link test (no Linux toolchain) —
+CI on macOS and Ubuntu decides.
 
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
@@ -588,17 +623,19 @@ free.
 
 ## Next actions (in order)
 
-0. **Agents & Dev Environment** (`milestone/agents-dev-environment`, not merged; every automated check passed locally,
-   rows 8–16): first ship 0.5.1 (`fix/macos-knowledge-watcher`), then merge `main` into this branch and run CI on it
-   (`gh workflow run ci.yml --ref milestone/agents-dev-environment`) before merging. Owner review; MANUAL_CHECKS 34 (Codex
-   with the owner's own login — confirms `notify` delivers the thread id on 0.166.0) and 35 (Dev Environment); then
-   merge `--no-ff` on approval (NX-9). Follow-ups in ROADMAP: workspace toolchain baseline, Codex review as a workflow
-   step (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first). The project page's
-   button still says *Launch Claude* (the dialog then offers Codex) — rename with its tests if the owner wants.
-1. Owner: approve the push request for `main` in NEXUS (the owner reviewed 0.5 alpha, approved the "NEXUS
-   engineering" constitution and accepted the manual checks; merged `--no-ff`, `release:` commit, tag `v0.5.0`). A NEXUS
-   push request pushes a branch, not tags: then `git push origin v0.5.0` starts the release pipeline (CI checks +
-   builds, ≈ 20 minutes); publish the draft when it is green. NEXUS 0.1.x updates itself to 0.5.0.
+1. **Ship 0.5.1 = this branch** (owner 2026-11-10: "id like all this to go together as 0.5.1"): Agents & Dev
+   Environment, the macOS watcher fix (`v0.5.0` failed on macOS and was never released) and the push-review fixes.
+   1. Owner: push `milestone/agents-dev-environment` **from a terminal** (`git push -u origin
+      milestone/agents-dev-environment`) — the installed NEXUS still inspects a new branch's whole history and blocks
+      on the scanner's own source — then run CI on it: `gh workflow run ci.yml --ref milestone/agents-dev-environment`
+      (Rust on Windows, Ubuntu and macOS, frontend, Windows E2E). The macOS fix is verified only there.
+   2. When it is green: merge `--no-ff` into `main`, `release:` commit, tag `v0.5.1`, then
+      `git push --atomic origin main v0.5.1` (owner) starts the release pipeline (≈ 20 minutes); publish the draft.
+      NEXUS 0.1.x updates itself to 0.5.1.
+   3. Owner: MANUAL_CHECKS 34 (Codex with the owner's own login — confirms `notify` delivers the thread id on 0.166.0)
+      and 35 (Dev Environment). Follow-ups in ROADMAP: workspace toolchain baseline, Codex review as a workflow step
+      (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first). The project page's button
+      still says *Launch Claude* (the dialog then offers Codex) — rename with its tests if the owner wants.
    Then define and approve the `nexus` gates under Workflows → Gates (`lint`, `test`, `frontend`, `typecheck`); rule
    NX-1 is verified by the `test` gate. Open: context size of running sessions in the task launcher — owner to decide.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
