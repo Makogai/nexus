@@ -142,6 +142,32 @@ describe('PushRequestDialog', () => {
     expect(api.pushRequestDismiss).toHaveBeenCalledWith('r1')
     expect(app.pushRequestId).toBeNull()
   })
+
+  it('lets the person select and copy the findings that block a push', async () => {
+    const findings = [
+      { path: 'src/inspect.rs', line: 227, kind: 'secret', severity: 'block' as const, message: 'looks like a private key — credentials never belong in a workspace' },
+      { path: '', line: null, kind: 'not-fully-inspected', severity: 'warn' as const, message: 'the history is larger than NEXUS inspects' },
+    ]
+    api.pushRequestReview.mockResolvedValue(review({ inspection: { findings, blocked: true, files: 2, scannedBytes: 10, truncated: true } }))
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    useAppStore().pushRequestId = 'r1'
+    const w = mountDialog()
+    await flushPromises()
+    expect(w.find('[data-push-findings]').classes()).toContain('selectable')
+    await w.find('[data-copy-findings]').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('blocks   src/inspect.rs:227 — looks like a private key — credentials never belong in a workspace\nwarning  (the change) — the history is larger than NEXUS inspects')
+    expect(w.find('[data-copy-findings]').text()).toBe('Copied')
+  })
+
+  it('offers no copy button when nothing was found', async () => {
+    api.pushRequestReview.mockResolvedValue(review())
+    useAppStore().pushRequestId = 'r1'
+    const w = mountDialog()
+    await flushPromises()
+    expect(w.find('[data-copy-findings]').exists()).toBe(false)
+  })
 })
 
 describe('push wording', () => {

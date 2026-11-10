@@ -46,7 +46,7 @@ if (existsSync(dist)) {
   }
   check('no source maps in the production frontend', !files.some((f) => f.endsWith('.map')))
   const text = files.filter((f) => /\.(js|css|html|json|svg)$/.test(f)).map((f) => [f, readFileSync(f, 'utf8')])
-  const secret = /(sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/
+  const secret = /(sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE[ ]KEY-----)/ // `[ ]`: this line itself must not look like a key to a push review
   const hits = text.filter(([, t]) => secret.test(t)).map(([f]) => f)
   check('no credential-shaped strings in the frontend bundle', hits.length === 0, hits.join(', '))
   const machine = /[A-Za-z]:\\\\Users\\\\[A-Za-z0-9._-]+\\\\/

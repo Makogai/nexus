@@ -1,10 +1,25 @@
 # NEXUS 0.5 alpha — the app you work in all day
 
 NEXUS 0.5.1 is the first alpha: every project's sessions and tasks one click away, every action that says it is working
-and how it ended, and Git pushes that never fail silently. NEXUS 0.1.x installs this update on its own. (0.5.0 was never
+and how it ended, Git pushes that never fail silently — and the first AI agent besides Claude Code (OpenAI Codex) and a
+Dev Environment page for the tools on your computer. NEXUS 0.1.x installs this update on its own. (0.5.0 was never
 released: its macOS test run found the watcher problem fixed below.)
 
 ## What's new
+
+- **Codex next to Claude.** Choose *Codex* in the launch dialog: the OpenAI Codex CLI starts in a NEXUS terminal with
+  the NEXUS tools, your approved rules, the work profile and the task — passed to that session only; NEXUS never writes
+  into your Codex home. Codex profiles (your own `~/.codex` or another existing home) are under *Profiles → Other
+  agents*, which also shows what an agent's sessions get from NEXUS. A Codex session can be resumed after its first
+  finished turn; session rows and terminal tabs say which agent runs. On the command line: `nexus launch --agent codex`,
+  `nexus agents`.
+- **Dev Environment.** A new page lists 50 development tools — runtimes, package and version managers, build tools,
+  containers, cloud and database CLIs, AI agents: installed or not, which version, every copy on your PATH, and which of
+  your projects need it and whether the version fits (`.nvmrc`, `engines`, `rust-toolchain`, `go.mod`, `mise.toml`, …).
+  A missing tool offers its official install command and a pinned version your version manager's command — typed into
+  a terminal for you to run, never run by NEXUS. On the command line: `nexus tools`.
+- **Push reviews look at what is new.** A branch the remote does not have yet is inspected by the commits the remote
+  lacks, not its whole history. The findings can be selected and copied (*Copy findings*).
 
 - **Pushes never fail silently.** When Claude asks you to push, NEXUS first fetches the remote branch. If a teammate
   pushed first, you see their commits and Push waits until the branch is integrated — with the next step spelled out.
@@ -36,7 +51,7 @@ released: its macOS test run found the watcher problem fixed below.)
 
 The features are complete enough to use all day, and the automated tests pass on Windows, macOS and Linux. They have not
 yet had much use outside the author's machine. Expect rough edges, report them, and keep your workspace in Git (NEXUS's
-sync does that for you). Your data stays compatible: 0.5 adds one database migration and takes a backup before it.
+sync does that for you). Your data stays compatible: 0.5.1 adds two database migrations and takes a backup before them.
 
 ## Download
 
@@ -73,6 +88,10 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 - **Notifications:** on macOS and Linux they are display-only. Clicking one does not open the session.
 - **Watching:** on some network drives and WSL paths Windows does not report changes; there, knowledge files refresh
   when the window regains focus or a session ends. While NEXUS is open, the workspace folder itself cannot be renamed.
+- **Codex sessions** do not report permission prompts or questions (Codex runs only the hooks you trusted in its own
+  settings, and NEXUS does not change those), have no usage statistics yet, and NEXUS's turn notification replaces a
+  `notify` program from your Codex config in NEXUS sessions (it can be switched off per profile). Resume needs one
+  finished turn.
 - **Graphify builds** run in your terminal: NEXUS sees when the report appears, not why a build failed — look at the
   terminal.
 - **Error messages stay** until you dismiss them; several at once can stack up (at most four).

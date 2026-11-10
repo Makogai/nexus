@@ -23,6 +23,13 @@ minutes, also when the remote refused it.
    +refs/heads/<b>:refs/remotes/<remote>/<b>`, 60 s, no tags, no submodules; the `+` only moves the local tracking ref)
    and reports `ahead`, `behind`, `diverged` and the incoming commits. The IPC runs on its own database connection
    (network work). A remote branch that does not exist yet is a first push, not an error.
+   * **A first push sends and inspects only what the remote lacks** (0.5.1): the commits none of the remote's branches
+     has (`git log HEAD --not --remotes=<remote>`), not the whole history. A feature branch of `main` is reviewed by its
+     own commits; into an empty remote that is still every commit. Before, a new branch of the NEXUS repository was
+     blocked by key-shaped lines in the secret scanner's own source in `main`'s history — history the remote already
+     has, so pushing it again exposes nothing new. The scanner's sources no longer contain such a line either.
+   * **Findings can be copied:** the list is selectable and *Copy findings* puts them on the clipboard as text (push
+     dialog and the Sync page's commit and push reviews).
    * **Push is disabled while `behind > 0`**, with a plain explanation: "origin/main has 3 commits you don't have.
      Integrate them first (pull --rebase or merge), resolve any conflicts, run the tests, then push. NEXUS never
      force-pushes."

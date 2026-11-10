@@ -1,5 +1,5 @@
 // Push request outcomes (ADR-0047): the words the dialog, the project banner and "Tell Claude" share, by failure kind.
-import type { PushFailureKind, PushRequest, PushReview } from './types'
+import type { PushFailureKind, PushRequest, PushReview, SyncFinding } from './types'
 
 /** One line: what happened. */
 export function failureTitle(kind: PushFailureKind | null | undefined): string {
@@ -53,4 +53,9 @@ export function tellClaudeText(request: Pick<PushRequest, 'branch'>, review: Pic
   const target = review ? `${plain(review.remote)}/${plain(review.remoteBranch)}` : 'the remote branch'
   const what = review && review.behind > 0 ? `${review.behind} new commit${review.behind === 1 ? '' : 's'}` : 'new commits'
   return `NEXUS: the push of ${plain(request.branch)} was rejected — ${target} has ${what}. Integrate them (git pull --rebase or merge), resolve conflicts, run the tests, then call request_push again.`
+}
+
+/** Inspection findings as plain text for the clipboard, one per line: "blocks  path:line — message". */
+export function findingsText(findings: Pick<SyncFinding, 'path' | 'line' | 'severity' | 'message'>[]): string {
+  return findings.map((f) => `${f.severity === 'block' ? 'blocks ' : 'warning'}  ${f.path || '(the change)'}${f.line ? `:${f.line}` : ''} — ${f.message}`).join('\n')
 }

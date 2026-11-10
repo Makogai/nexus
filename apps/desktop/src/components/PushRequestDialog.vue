@@ -7,6 +7,7 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowUp, CircleCheck, Clipboard, GitBranch, MessageSquareText, RefreshCw, ShieldAlert, TriangleAlert, WifiOff } from '@lucide/vue'
 import BaseModal from './BaseModal.vue'
+import CopyFindings from './CopyFindings.vue'
 import { api, toIpcError } from '../lib/ipc'
 import { relativeTime } from '../lib/format'
 import { behindExplanation, failureGuidance, failureTitle, tellClaudeText } from '../lib/push'
@@ -190,8 +191,11 @@ async function tellClaude() {
       <ul class="commits" data-push-commits>
         <li v-for="c in review.commits" :key="c.oid"><span class="mono faint">{{ c.oid.slice(0, 7) }}</span> {{ c.summary }} <span class="faint">· {{ c.author }} · {{ relativeTime(c.timestampMs) }}</span></li>
       </ul>
-      <p class="faint small">{{ review.inspection.files }} file(s) inspected.</p>
-      <ul v-if="review.inspection.findings.length" class="findings" data-push-findings>
+      <div class="inspected">
+        <p class="faint small">{{ review.inspection.files }} file(s) inspected.</p>
+        <CopyFindings :findings="review.inspection.findings" />
+      </div>
+      <ul v-if="review.inspection.findings.length" class="findings selectable" data-push-findings>
         <li v-for="(f, i) in review.inspection.findings" :key="i" :class="f.severity === 'block' ? 'blocked' : 'warn'"><ShieldAlert /> <span><span class="mono">{{ f.path }}{{ f.line ? `:${f.line}` : '' }}</span> — {{ f.message }}</span></li>
       </ul>
       <p v-if="review.inspection.blocked" class="notice notice-error" data-push-blocked><ShieldAlert /> <span>The security inspection blocks this push. Fix the findings first, or push it yourself after checking.</span></p>
@@ -264,6 +268,15 @@ async function tellClaude() {
 .incoming {
   margin-top: 6px;
   max-height: 120px;
+}
+.inspected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.inspected p {
+  margin: 0;
 }
 .findings li {
   display: flex;

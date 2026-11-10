@@ -225,11 +225,14 @@ pub fn review(conn: &Connection, home: &Path, id: &str) -> Result<PushReview> {
     };
     let base = format!("refs/remotes/{remote}/{remote_branch}");
     let has_base = git::rev_parse(&repo, &base).is_some();
-    let range = if has_base { format!("{base}..HEAD") } else { "HEAD".to_string() };
-    let commits = git::log_range(&repo, &range, MAX_COMMITS)?;
+    // A branch the remote does not have yet sends only the commits none of the remote's branches has (a feature branch
+    // of `main` sends its own commits, not the whole history); into an empty remote that is every commit.
+    let (range, not_on_remote) = (format!("{base}..HEAD"), format!("--remotes={remote}"));
+    let revs: Vec<&str> = if has_base { vec![&range] } else { vec!["HEAD", "--not", &not_on_remote] };
+    let commits = git::log_revs(&repo, &revs, MAX_COMMITS)?;
     let (ahead, behind) = if has_base { git::ahead_behind(&repo, "HEAD", &base).unwrap_or((commits.len() as u32, 0)) } else { (commits.len() as u32, 0) };
     let incoming = if behind > 0 { git::log_range(&repo, &format!("HEAD..{base}"), MAX_COMMITS)? } else { Vec::new() };
-    let inspection = inspect::inspect_history(&repo, &inspect::Context { home }, &range)?;
+    let inspection = inspect::inspect_history(&repo, &inspect::Context { home }, &revs)?;
     let project_name = project::get(conn, &request.project_id)?.name;
     Ok(PushReview {
         fetched,
@@ -398,6 +401,46 @@ mod tests {
         assert_ne!(r2.id, r.id);
         assert_eq!(decide(&conn, &home, &r2.id, false, "").unwrap().status, "declined");
         assert!(pending(&conn, Some(&p.id)).unwrap().is_empty());
+    }
+
+    /// The owner's 0.5.1 case: a new branch of `main` was blocked by findings in `main`'s history, which the remote has.
+    #[test]
+    fn a_new_branch_sends_and_inspects_only_the_commits_the_remote_does_not_have() {
+        let t = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(t.path()).unwrap();
+        let conn = crate::db::open_in_memory().unwrap();
+        let ws = crate::workspace::create(&conn, root.join("ws").to_str().unwrap(), "W", "").unwrap();
+        let home = root.join("home");
+        let pem_head = "-----BEGIN OPENSSH";
+        let setup = |name: &str, push_main: bool| {
+            let (bare, repo) = (root.join(format!("{name}.git")), root.join(name));
+            std::fs::create_dir_all(&repo).unwrap();
+            git_in(&root, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+            git_in(&repo, &["init", "-q"]);
+            std::fs::write(repo.join("scanner.md"), format!("{pem_head} PRIVATE KEY-----\n")).unwrap();
+            git_in(&repo, &["add", "-A"]);
+            git_in(&repo, &["commit", "-qm", "Key-shaped text in main"]);
+            git_in(&repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+            if push_main {
+                git_in(&repo, &["push", "-q", "-u", "origin", "main"]);
+            }
+            git_in(&repo, &["switch", "-q", "-c", "feature"]);
+            commit(&repo, "feature.js", "Feature");
+            let p = project::register(&conn, &ws.id, repo.to_str().unwrap(), Some(name)).unwrap();
+            let s = session::insert_starting(&conn, NewSession { workspace_id: Some(ws.id.clone()), project_id: Some(p.id), title: "t".into(), cwd: repo, program: "claude".into(), ..Default::default() }).unwrap();
+            review(&conn, &home, &request(&conn, &s.id, "").unwrap().id).unwrap()
+        };
+
+        let rv = setup("app", true);
+        assert!(rv.first_push && rv.remote_branch == "feature");
+        assert_eq!(rv.commits.iter().map(|c| c.summary.as_str()).collect::<Vec<_>>(), ["Feature"], "main's commits are on the remote");
+        assert_eq!((rv.ahead, rv.inspection.files), (1, 1));
+        assert!(!rv.inspection.blocked && rv.inspection.findings.is_empty(), "{:?}", rv.inspection.findings);
+
+        // Into an empty remote the whole history travels, and is inspected.
+        let rv = setup("fresh", false);
+        assert_eq!(rv.commits.len(), 2);
+        assert!(rv.inspection.blocked && rv.inspection.findings.iter().any(|f| f.path == "scanner.md" && f.kind == "secret"));
     }
 
     fn commit(repo: &Path, file: &str, msg: &str) {
