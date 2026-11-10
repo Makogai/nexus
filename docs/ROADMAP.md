@@ -198,8 +198,8 @@ and shipped later; plain task session.
 | A2 | Project page tabs with counts and Ctrl+1…8; Sessions, Tasks, Knowledge, Settings tabs; Overview dashboard with "Needs you"; calmer header; terminal project chips and filter | core `inbox`, vitest `project-page`, E2E `workbench.mjs` (+Sessions/Tasks), suites follow moved elements | ✅ |
 | A3 | Feedback everywhere: `useAction`/`ActionButton` across the views, persistent error toasts with *Copy details*, background failures in the notification center, results link onward, optimistic Done/Reopen and drafts, progress text | vitest `action-feedback-a/b`, `project-learn`, `project-page` | ✅ |
 | A4 | Harness: Home "Needs you", session rows with task/workflow/context, focus-based knowledge refresh, pruning of session artifacts, one builder for prepare/preview | core `inbox`, `prune`, `prepare` agreement test, vitest `needs-you` | ✅ |
-| A5 | Release 0.5.0: versions, release notes, ADRs, docs, full verification | see CURRENT_STATE verification log | in review |
-| A6 | Knowledge watcher: the active workspace's knowledge roots watched by the desktop, index refreshed on its own connection, `nexus://knowledge`; open documents, Constitutions and Learn drafts follow without clobbering edits; code signing decided (ADR-0050, deferred) | core `knowledge::watch`, desktop `watcher` (real folders), vitest `knowledge`/`constitutions`/`project-learn`, E2E `workbench.mjs` (+4) | in review |
+| A5 | Release 0.5.0: versions, release notes, ADRs, docs, full verification | see CURRENT_STATE verification log | ✅ merged, tagged `v0.5.0` |
+| A6 | Knowledge watcher: the active workspace's knowledge roots watched by the desktop, index refreshed on its own connection, `nexus://knowledge`; open documents, Constitutions and Learn drafts follow without clobbering edits; code signing decided (ADR-0050, deferred) | core `knowledge::watch`, desktop `watcher` (real folders), vitest `knowledge`/`constitutions`/`project-learn`, E2E `workbench.mjs` (+4) | ✅ merged, tagged `v0.5.0` |
 
 ## Phase 6 — Product maturity
 
