@@ -12,7 +12,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connect, waitForPort } from './cdp-lib.mjs'
 
@@ -268,7 +268,9 @@ try {
   // NEXUS tools: the built-in skill (as Claude reads it), the MCP server's tools as `nexus mcp` lists them, the hooks.
   await cdp.evaluate(`location.hash = '#/tools'; true`)
   const tools = await cdp.waitFor(`document.querySelectorAll('[data-tools-mcp] [data-tool]').length || null`, 20000).catch(() => 0)
-  check('NEXUS tools lists the MCP server’s 24 tools and the hooks', tools === 24 && (await textOf('[data-tools-hooks]')).includes('SessionStart'), `${tools} tools`)
+  // The expected count is the server's own (`nexus mcp --list-tools` next to the app), not a literal that drifts.
+  const defs = JSON.parse(execFileSync(join(dirname(app), 'nexus.exe'), ['mcp', '--list-tools'], { encoding: 'utf8' }))
+  check('NEXUS tools lists every MCP tool the server defines and the hooks', defs.length >= 20 && tools === defs.length && (await textOf('[data-tools-hooks]')).includes('SessionStart'), `${tools} of ${defs.length} tools`)
   await cdp.evaluate(`document.querySelector('[data-skill="nexus:learn-project"] .btn').click(), true`)
   const skillBody = await cdp.waitFor(`document.querySelector('[data-skill-body]')?.innerText`, 10000).catch(() => '')
   check('…and the built-in nexus:learn-project skill, exactly as Claude reads it', skillBody.includes('Learn a project for NEXUS') && skillBody.includes('Stop and report'), skillBody.slice(0, 60))

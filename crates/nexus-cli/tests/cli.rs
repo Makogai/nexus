@@ -315,7 +315,12 @@ fn mcp_server_speaks_json_rpc_over_stdio() {
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     assert_eq!(replies.len(), 4, "the notification gets no reply: {replies:#?}");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "nexus");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 24);
+    // The count comes from the server's own definitions (`--list-tools`), not a literal that drifts per new tool.
+    let listed = Command::new(NEXUS).args(["mcp", "--list-tools"]).output().unwrap();
+    let defs: Vec<Value> = serde_json::from_slice(&listed.stdout).unwrap();
+    let names = |tools: &[Value]| tools.iter().map(|t| t["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert!(defs.len() >= 20, "--list-tools printed {} tools", defs.len());
+    assert_eq!(names(replies[1]["result"]["tools"].as_array().unwrap()), names(&defs), "tools/list and --list-tools agree");
     assert_eq!(replies[2]["result"]["isError"], false);
     let ctx = &replies[3]["result"]["structuredContent"];
     assert_eq!(ctx["session"]["title"], "Boss fight");

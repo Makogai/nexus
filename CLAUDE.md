@@ -92,6 +92,17 @@ cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Wi
 * Keep the crate MSRV (`rust-version`) at the newest MSRV of the Tauri crates; the MSRV-aware resolver otherwise picks
   older Tauri crates than the npm packages and `tauri build` fails its version check.
 
+## UI conventions (desktop)
+
+* Every control that calls the backend shows it is working: run it through `useAction()` (`src/composables/useAction.ts`)
+  or `<ActionButton>` — disabled and `aria-busy` while pending, re-entrancy guarded, optional pending label.
+* Errors stay visible until the person dismisses them: never clear an error in a reload; error toasts persist (with
+  *Copy details*); failures of background work (push, sync, gates, clone, graph build) also reach the notification
+  center through `notify::publish`. Success names the result and links onward where there is a next place to go.
+* The project page keeps its tab in `?tab=`; kept-alive views reload in `onActivated` and on `app.externalChanges`.
+* E2E suites select by `data-*` attributes: when an element moves, its attribute moves with it, or the suite is updated
+  in the same commit.
+
 ## Security rules (non-negotiable)
 
 * No shell strings: spawn programs with argument vectors (`proc::command`, PTY `CommandBuilder`).

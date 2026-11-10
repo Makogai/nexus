@@ -1,7 +1,7 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning context on `milestone/learn-context`)._ Read this first, then `docs/ROADMAP.md`,
-`docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
+_Last updated: 2026-11-10 (session 12: `main` released as v0.1.5; the 0.5 alpha milestone on `milestone/v0.5-alpha`)._ Read this first,
+then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
 
@@ -32,6 +32,26 @@ _Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning contex
   from the latest *published* release. The `github-pages` environment allows `main` and (since 2026-11-05) tags `v*`,
   so publishing a release redeploys the download page; for v0.1.0 the site was redeployed by hand (the tag rule came
   after).
+
+## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`)
+
+Task `01a1c4f1` (owner request 2026-11-10): sessions per project on top, feedback for every action, Git pushes that never
+fail silently, project rules. Owner decisions: Claude writes the project constitution file and the owner approves it in
+the app; *Tell Claude* may type into a running session's terminal without pressing Enter; focus-based knowledge refresh
+now, a file-system watcher later; plain task session (no workflow run).
+
+* **Phase 0 — rules and guardrails:**
+  * **Project constitution** "NEXUS engineering" (NX-1…NX-11, project scope `nexus`, `applies: always`) written to the
+    workspace at `project-context/nexus/rules/nexus-engineering.md`; `nexus constitution show` parses it without
+    problems; it **needs the owner's approval** in Constitutions before it reaches sessions.
+  * **Gates** for `nexus` stay the owner's to define and approve (suggested: `lint` = clippy, `test` = cargo test,
+    `frontend` = `npm test`, `typecheck` = `npm run typecheck` in `apps/desktop`).
+  * **Drift guards:** `ipc_docs_tests` (desktop) — the commands in `generate_handler!` are exactly those named in
+    docs/ARCHITECTURE.md §8 (both directions; shown to fail on a renamed entry); `every_migration_is_described_in_the_
+    architecture_schema` (core) — each schema version has a `-- vN` line in §7. MCP tool counts in `cli.rs`,
+    `mcp-interop.mjs`, `installed.mjs` and `workbench.mjs` come from `nexus mcp --list-tools`. §7 (v10–v19) and §8
+    (all 181 commands) are current; TESTING.md no longer says 21/22 tools.
+  * **CLAUDE.md:** a short "UI conventions" section (useAction/ActionButton, errors stay visible, `?tab=`, data-* selectors).
 
 ## Project workbench — progress (session 10)
 
@@ -312,6 +332,18 @@ _Last updated: 2026-11-06 (session 11: releases v0.1.1–v0.1.2, learning contex
 * **Proposals for the owner**: ADR-0034 application identity (recommends `io.github.<user-or-org>.nexus`, explicit
   `bundle.publisher`; no data migration needed), ADR-0035 licence (recommends Apache-2.0, or dual MIT/Apache-2.0;
   dependency inventory: 293 Rust packages, 288 permissive + 5 MPL-2.0; frontend bundle MIT/ISC/Apache; no GPL).
+
+## Verification log — 0.5 alpha (sequential groups, `CARGO_BUILD_JOBS=2`)
+
+Per-phase checks while building (targeted); the full run on the final code follows in Phase 5.
+
+| # | Phase | Command | Result |
+| --- | --- | --- | --- |
+| 1 | 0 | `cargo test -p nexus-core --lib every_migration` | 1/1 |
+| 2 | 0 | `cargo test -p nexus-desktop --lib ipc_docs` | 1/1 (first run caught a parse slip in the guard itself; a renamed §8 entry makes it fail) |
+| 3 | 0 | `cargo test -p nexus-cli --test cli mcp_server_speaks_json_rpc_over_stdio` | 1/1 |
+| 4 | 0 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| 5 | 0 | `node e2e/mcp-interop.mjs` | MCP INTEROP OK (9 checks; count from `--list-tools`) |
 
 ## Verification log — Portable Workspace stage (sequential groups, `CARGO_BUILD_JOBS=2`, final code `7c491fb`)
 

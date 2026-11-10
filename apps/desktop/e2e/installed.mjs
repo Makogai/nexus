@@ -142,7 +142,8 @@ try {
     timeout: 30_000,
   })
   const tools = mcp.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((m) => m.id === 2)?.result?.tools ?? []
-  check('the installed MCP server answers a client (initialize, tools/list)', tools.length === 24, `${tools.length} tools`)
+  const defs = JSON.parse(spawnSync(cliExe, ['mcp', '--list-tools'], { encoding: 'utf8', env, timeout: 30_000 }).stdout || '[]')
+  check('the installed MCP server answers a client (initialize, tools/list)', defs.length >= 20 && tools.length === defs.length, `${tools.length} tools, --list-tools ${defs.length}`)
 
   // ---- the installed desktop running ----
   const port = ui ? '9352' : '9351'

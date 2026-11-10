@@ -385,3 +385,48 @@ mod app_id_tests {
         assert_ne!(super::APP_ID, super::LEGACY_APP_ID);
     }
 }
+
+#[cfg(test)]
+mod ipc_docs_tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    fn read(rel: &str) -> String {
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).unwrap().replace("\r\n", "\n")
+    }
+
+    /// Command names registered in `generate_handler!` (this file).
+    fn registered() -> BTreeSet<String> {
+        let src = read("src/lib.rs");
+        let start = src.find("generate_handler![").expect("generate_handler! block") + "generate_handler![".len();
+        let block = &src[start..start + src[start..].find("])").unwrap()];
+        block.split(',').filter_map(|e| e.trim().strip_prefix("commands::")).map(|p| p.rsplit("::").next().unwrap().to_string()).collect()
+    }
+
+    /// Backticked snake_case names in the table rows of docs/ARCHITECTURE.md §8.
+    fn documented() -> BTreeSet<String> {
+        let doc = read("../../../docs/ARCHITECTURE.md");
+        let start = doc.find("## 8. IPC surface").expect("§8 heading");
+        let section = &doc[start..start + doc[start..].find("\n## 9.").unwrap()];
+        let mut out = BTreeSet::new();
+        for line in section.lines().filter(|l| l.starts_with("| ")) {
+            for (i, part) in line.split('`').enumerate() {
+                if i % 2 == 1 && part.contains('_') && part.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+                    out.insert(part.to_string());
+                }
+            }
+        }
+        out
+    }
+
+    /// Drift guard (NX-3): the IPC table in docs/ARCHITECTURE.md lists exactly the commands the desktop registers.
+    #[test]
+    fn every_ipc_command_is_documented_and_every_documented_command_exists() {
+        let (reg, doc) = (registered(), documented());
+        assert!(reg.len() > 100, "parsed only {} commands from generate_handler!", reg.len());
+        let missing: Vec<_> = reg.difference(&doc).collect();
+        let stale: Vec<_> = doc.difference(&reg).collect();
+        assert!(missing.is_empty(), "add these commands to docs/ARCHITECTURE.md §8: {missing:?}");
+        assert!(stale.is_empty(), "docs/ARCHITECTURE.md §8 names commands that are not registered: {stale:?}");
+    }
+}
