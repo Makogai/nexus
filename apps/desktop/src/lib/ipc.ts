@@ -153,6 +153,8 @@ export const WORKFLOW_EVENT = 'nexus://workflows'
 export const USAGE_EVENT = 'nexus://usage'
 /** A sync operation finished (or was refused) — the Sync Center refreshes (ADR-0031). */
 export const SYNC_EVENT = 'nexus://sync'
+/** Knowledge files changed on disk and the index followed (the desktop's watcher, ADR-0049). */
+export const KNOWLEDGE_EVENT = 'nexus://knowledge'
 
 export const api = {
   appInfo: () => call<AppInfo>('app_info'),

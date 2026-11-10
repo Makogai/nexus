@@ -26,7 +26,9 @@ and how it ended, and Git pushes that never fail silently. NEXUS 0.1.x installs 
   learning draft says what happens and offers *Open overview* when it is done. Errors stay on screen until you dismiss
   them, with *Copy details*; failed clones, gate runs and automatic syncs also reach the notification center.
 - **Terminals name their project**, in a colour per project, and a project page can show only its own terminals.
-- **Fresher knowledge.** Files you edit outside NEXUS show up when you come back to the window or a session ends.
+- **Live knowledge.** NEXUS watches your workspace's knowledge files. A task you edit in another program, a `git pull`
+  or a sync shows up within a moment — in the lists and in a document you have open. If you are editing that document,
+  your text stays and NEXUS tells you the file changed on disk.
 
 ## What "alpha" means
 
@@ -67,8 +69,8 @@ You need **Claude Code** (`claude`) installed and signed in, and **Git** for rep
 - **Platforms:** NEXUS is developed and tested end to end on Windows. The macOS and Linux builds pass the automated
   tests, but have had less hands-on use.
 - **Notifications:** on macOS and Linux they are display-only. Clicking one does not open the session.
-- **Knowledge files are not watched:** changes made outside NEXUS appear when the window regains focus or a session
-  ends, not instantly.
+- **Watching:** on some network drives and WSL paths Windows does not report changes; there, knowledge files refresh
+  when the window regains focus or a session ends. While NEXUS is open, the workspace folder itself cannot be renamed.
 - **Graphify builds** run in your terminal: NEXUS sees when the report appears, not why a build failed — look at the
   terminal.
 - **Error messages stay** until you dismiss them; several at once can stack up (at most four).

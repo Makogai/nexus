@@ -172,6 +172,34 @@ describe('ProjectLearn', () => {
     expect(w.find('[data-doc-open]').text()).toBe('drivebay overview')
   })
 
+  it('a draft Claude writes appears without a click; a decision in flight is not undone by it (ADR-0049)', async () => {
+    const overview = { id: 'd1', topic: 'overview' as const, title: 'drivebay — overview draft', updated: '2026-11-10T10:00:00Z', body: 'Drivebay rents cars.' }
+    const architecture = { id: 'd2', topic: 'architecture' as const, title: 'drivebay — architecture draft', updated: '2026-11-10T10:05:00Z', body: 'One module.' }
+    const w = mount(ProjectLearn, { props: { projectId: 'p1' } })
+    await flushPromises()
+    expect(w.find('[data-draft]').exists()).toBe(false)
+    const app = useAppStore()
+    api.projectLearnDrafts.mockResolvedValue([overview])
+    app.externalChanges++
+    await flushPromises()
+    expect(w.find('[data-draft="overview"]').exists()).toBe(true)
+    expect(api.projectLearnMap).toHaveBeenCalledTimes(1) // the map (a walk of the repository) is not read again
+
+    let finish: () => void = () => undefined
+    api.projectLearnDecide.mockImplementation(() => new Promise<void>((r) => (finish = r)))
+    await w.find('[data-draft="overview"] [data-draft-apply]').trigger('click')
+    await flushPromises()
+    api.projectLearnDrafts.mockResolvedValue([overview, architecture]) // the index has not caught up with the decision
+    app.freshness++
+    await flushPromises()
+    expect(w.find('[data-draft="overview"]').exists()).toBe(false)
+    api.projectLearnDrafts.mockResolvedValue([architecture])
+    finish()
+    await flushPromises()
+    expect(w.find('[data-draft-decision="done"]').exists()).toBe(true)
+    expect(w.find('[data-draft="architecture"]').exists()).toBe(true)
+  })
+
   it('a failed draft decision puts the draft back and keeps the error until dismissed', async () => {
     const draft = { id: 'd1', topic: 'architecture' as const, title: 'drivebay — architecture draft', updated: null, body: 'One module.' }
     api.projectLearnDrafts.mockResolvedValue([draft])

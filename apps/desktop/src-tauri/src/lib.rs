@@ -17,6 +17,7 @@ pub mod notifier;
 pub mod pty;
 pub mod shells;
 pub mod state;
+pub mod watcher;
 pub mod webview_guard;
 
 use std::sync::Arc;
@@ -152,6 +153,7 @@ pub fn run() {
             notifier::spawn_poller(app.handle().clone(), ctx.clone());
             commands::workflows::spawn_runner(app.handle().clone(), ctx.clone());
             commands::usage::spawn_scanner(app.handle().clone(), ctx.clone());
+            watcher::spawn(app.handle().clone(), ctx.clone());
             app.manage(ctx);
             Ok(())
         })

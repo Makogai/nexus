@@ -37,7 +37,7 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0030](0030-usage-analytics.md) | Usage analytics: per-response counts parsed from local transcripts, provenance on every figure | Accepted, implemented; implements 0010's transcript source |
 | [0031](0031-git-workspace-sync.md) | Git-based workspace sync: the person's repository, explicit outgoing review, no sync service | Accepted, implemented (M29) |
 | [0032](0032-upgrade-safety-and-backups.md) | Upgrade safety, backups and restore | Accepted, implemented |
-| [0033](0033-packaging-and-release-security.md) | Packaging, installed layout, installed-app verification and release security | Accepted, implemented; signing and updater open |
+| [0033](0033-packaging-and-release-security.md) | Packaging, installed layout, installed-app verification and release security | Accepted, implemented; updater by 0044, signing by 0050 |
 | [0034](0034-application-identity.md) | Application identity | Accepted — `io.github.makogai.nexus` (2026-11-05) |
 | [0035](0035-licensing.md) | Licence | **Proposed** — owner decision |
 | [0036](0036-workspace-schema-2.md) | Workspace schema 2: portable layout, versioning, compatibility, migration | Accepted, implemented (P1) |
@@ -52,4 +52,6 @@ Add a new ADR rather than rewriting an accepted one; mark the old one Superseded
 | [0045](0045-learning-context.md) | Extra context for learning a project, and noticing a graph build | Accepted, implemented |
 | [0046](0046-skill-manager.md) | Skills page: every skill in one place, and an editor for workspace and project skills | Accepted, implemented |
 | [0047](0047-push-request-outcomes.md) | Push request outcomes and remote state | Accepted, implemented (0.5 alpha) |
-| [0048](0048-action-feedback-and-project-page.md) | Action feedback, the project page layout and "Needs you" | Accepted, implemented (0.5 alpha) |
+| [0048](0048-action-feedback-and-project-page.md) | Action feedback, the project page layout and "Needs you" | Accepted, implemented (0.5 alpha); item 7 replaced by 0049 |
+| [0049](0049-knowledge-file-watcher.md) | A file-system watcher for knowledge files | Accepted, implemented (0.5 alpha) |
+| [0050](0050-code-signing.md) | Code signing: Authenticode inside the build, keys only in an HSM, macOS notarization | Accepted; **deferred** — before the first release beyond the owner's circle |

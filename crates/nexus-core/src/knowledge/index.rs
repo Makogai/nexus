@@ -51,7 +51,7 @@ pub struct RefreshReport {
     pub conflicts: usize,
 }
 
-fn files_under(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn files_under(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for folder in SCANNED_FOLDERS {
         let mut stack = vec![(root.join(folder), 0usize)];

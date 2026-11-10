@@ -109,6 +109,11 @@ machine it is a row in SQLite; if another tool owns it NEXUS only reads it** (AD
 * **`nexus mcp`** — started by Claude from the per-session `--mcp-config`; bound to one NEXUS session; opens the same
   SQLite file (WAL, busy timeout). The desktop notices commits from these processes by polling `PRAGMA data_version`
   (a few-byte read) instead of running a network endpoint (ADR-0009).
+* **Knowledge watcher** (ADR-0049) — a desktop thread watches the active workspace's knowledge roots (one recursive
+  watch per root; `knowledge::watch` decides which changes count, by the index walk's rules), waits for a burst to
+  settle (400 ms, at most 2 s), refreshes the index on its own connection and emits `nexus://knowledge` when the index
+  changed. Files written by NEXUS are indexed in the same call, so they cause no event. Window focus and session end
+  still refresh, as the fallback.
 * **Notifications** (ADR-0025) — every process writes typed events into the `notifications` table through
   `notify::publish` (hooks, MCP, CLI, desktop). Only the desktop shows them: a poller thread (750 ms) decides each
   pending row once against preferences and focus, shows it through the platform notifier (WinRT toast with click
@@ -280,7 +285,7 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Claude | `claude_setup_status`, `claude_installations`, `profile_list`, `profile_detect`, `profile_register`, `profile_create`, `profile_update`, `profile_set_archived`, `profile_forget`, `profile_details`, `profile_auth_status`, `launch_options`, `nexus_tools` |
 | Sessions | `session_list`, `session_get`, `session_start_claude`, `session_resume`, `session_open_shell`, `session_attach`, `session_write`, `session_resize`, `session_interrupt`, `session_terminate`, `session_release`, `session_rename`, `session_set_archived`, `session_continue_task` |
 | Shell | `shell_list` |
-| Knowledge | `knowledge_overview` (refresh or rebuild + health), `knowledge_read`, `knowledge_search`, `knowledge_create`, `knowledge_update_task` (status, log, checklist, expected hash), `knowledge_approve`, `knowledge_update` (edit a document, expected hash), `knowledge_task`, `project_knowledge` (open tasks + branch-relevant notes), `needs_you` (what waits for the person, workspace or project — ADR-0048) |
+| Knowledge | `knowledge_overview` (refresh or rebuild + health), `knowledge_read`, `knowledge_search`, `knowledge_create`, `knowledge_update_task` (status, log, checklist, expected hash), `knowledge_approve`, `knowledge_update` (edit a document, expected hash), `knowledge_task`, `project_knowledge` (open tasks + branch-relevant notes), `needs_you` (what waits for the person, workspace or project — ADR-0048); event `nexus://knowledge` (`{ workspaceId, changed, removed }`) from the desktop's knowledge watcher (ADR-0049) |
 | Instructions | `instructions_inspect` (Claude's own instruction layers + NEXUS append, read-only) |
 | Resume | `project_resume` (verified Git state, saved history, next action — ADR-0021) |
 | Proposals | `knowledge_proposals` (extract + list pending), `knowledge_proposal_approve` (with edits/scope), `knowledge_proposal_reject` (ADR-0022) |
@@ -345,4 +350,5 @@ working (session tracking falls back to PTY exit + `claude agents --json`).
 * `claude::prepare` — `prepare` and `preview` share one builder for the appended text (the inspector counts what a launch
   sends).
 * Desktop: `useAction` / `ActionButton` for every backend call (pending, re-entrancy guard, persistent errors); the
-  project page's tabs; knowledge refresh on window focus and session end (no file-system watcher).
+  project page's tabs; knowledge refresh on window focus and session end — since ADR-0049 the fallback behind the
+  knowledge watcher.

@@ -1,6 +1,7 @@
 # ADR-0048 — Action feedback, the project page layout and "Needs you"
 
-Status: Accepted (2026-11-10, owner request; branch `milestone/v0.5-alpha`).
+Status: Accepted (2026-11-10, owner request; branch `milestone/v0.5-alpha`). Item 7 replaced by ADR-0049 (a
+file-system watcher; the focus and session-end refreshes stay as its fallback).
 
 ## Context
 

@@ -186,8 +186,10 @@ read-only, a guided Claude session whose drafts they approve, and Graphify used 
 ## Stage: 0.5 alpha (owner request, 2026-11-10)
 
 Branch `milestone/v0.5-alpha`. Decisions: ADR-0047 (push outcomes), ADR-0048 (action feedback, project page, "Needs
-you"), ADR-0042 amendment. Owner decisions: Claude writes the NX constitution and the owner approves it; *Tell Claude*
-types without pressing Enter; focus-based refresh now, a watcher later; plain task session.
+you"), ADR-0042 amendment, ADR-0049 (knowledge watcher), ADR-0050 (code signing, deferred). Owner decisions: Claude
+writes the NX constitution and the owner approves it; *Tell Claude* types without pressing Enter; focus-based refresh
+first, then the watcher (owner, same day: "ship file system watcher"); signing decided by Claude on the owner's behalf
+and shipped later; plain task session.
 
 | # | Milestone | Acceptance check | Status |
 | --- | --- | --- | --- |
@@ -197,6 +199,7 @@ types without pressing Enter; focus-based refresh now, a watcher later; plain ta
 | A3 | Feedback everywhere: `useAction`/`ActionButton` across the views, persistent error toasts with *Copy details*, background failures in the notification center, results link onward, optimistic Done/Reopen and drafts, progress text | vitest `action-feedback-a/b`, `project-learn`, `project-page` | ✅ |
 | A4 | Harness: Home "Needs you", session rows with task/workflow/context, focus-based knowledge refresh, pruning of session artifacts, one builder for prepare/preview | core `inbox`, `prune`, `prepare` agreement test, vitest `needs-you` | ✅ |
 | A5 | Release 0.5.0: versions, release notes, ADRs, docs, full verification | see CURRENT_STATE verification log | in review |
+| A6 | Knowledge watcher: the active workspace's knowledge roots watched by the desktop, index refreshed on its own connection, `nexus://knowledge`; open documents, Constitutions and Learn drafts follow without clobbering edits; code signing decided (ADR-0050, deferred) | core `knowledge::watch`, desktop `watcher` (real folders), vitest `knowledge`/`constitutions`/`project-learn`, E2E `workbench.mjs` (+4) | in review |
 
 ## Phase 6 — Product maturity
 

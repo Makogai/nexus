@@ -107,6 +107,19 @@ now, a file-system watcher later; plain task session (no workflow run).
   (`app.freshness`; ProjectDiscovery rescans); `prune::artifacts` at desktop start; `claude::prepare` and `preview`
   share `build_append` (the inspector now also counts the commit-message note, the workflow line and separators);
   module cycles looked at and left (ADR-0048).
+* **Owner follow-up (same day): "lets ship file system watcher please, and u decide code signing, ship it later".**
+  * **Knowledge watcher (ADR-0049):** `knowledge::watch` (core: which folders, which changes — the index walk's rules,
+    a test compares them) and the desktop's `knowledge-watcher` thread (`notify` 8, one recursive watch per root, 400 ms
+    settle / 2 s cap, refresh on its own connection, every 5 s the active workspace and its roots again) emitting
+    `nexus://knowledge` → `app.externalChanges` + `app.freshness`. The document dialog and Constitutions follow in Read
+    mode and keep an edit's draft (the dialog says the file changed on disk); the Learn tab reads drafts again (not the
+    map) and never while a decision is in flight. Focus/session-end refresh stays as the fallback. No feedback loop:
+    NEXUS's own writes re-index in the same call (checked: `project::context::refresh_state` writes only on a change).
+  * **Code signing (ADR-0050):** decided and deferred — unsigned for the alphas; before the first release beyond the
+    owner's circle: Authenticode inside `tauri build` (`signCommand`; a later step would break the updater signature),
+    keys only in an HSM (managed signing service preferred, else an OV certificate with cloud signing; no EV, no
+    `.pfx` secret), macOS Developer ID + notarization in the same release, release-check verifies signatures.
+    `release.yml`'s placeholder comment corrected.
 * **Phase 5 — release prep:** version 0.5.0 (Cargo.toml, package.json + lock, tauri.conf.json; the updater offers
   0.1.5 → 0.5.0: `release.version > current_version`, semver); release notes rewritten for "0.5 alpha"; README badge
   and download name; ADR-0047, ADR-0048, ADR-0042 amendment, ADR index 0041–0048; ARCHITECTURE, TESTING, ROADMAP.
@@ -427,6 +440,18 @@ Per-phase checks while building (targeted); the full run on the final code follo
 | 27 | 5 | `task-flow` | two runs ended at the hard-kill step (`taskkill /T /F` returned an error after 14 passing checks — a race with a child process); the helper now reports taskkill's message; third run TASK FLOW OK 43/43 |
 | 28 | 5 | `sync` · `portable` · `attention` · `workflows` | 18/18 · 50/50 · 27/27 · 24/24 |
 | 29 | 5 | `mcp-interop` · `context` · `usage` · `constitutions` · `profiles-kits` · `restore` · `workspace-setup` | 9 · 12 · 18 · 13 · 9 · 12 · 17 — all OK |
+| — | follow-up | **Knowledge watcher (ADR-0049), sequential, `CARGO_BUILD_JOBS=2`** | |
+| 30 | 6 | `cargo test -p nexus-core --lib knowledge::watch` · `cargo test -p nexus-desktop --lib watcher` | 2 passed · 1 passed (real folders, 4.4 s); each seen **failing** with its rule removed (README/inner-root rules; folder renames ignored → "a folder of documents renamed") |
+| 31 | 6 | vitest `knowledge` · `constitutions` · `project-learn` (+1 test each) | all passed; each seen **failing** with its fix removed (dialog not following `freshness`; Constitutions reload without the edit guard; Learn reload without the in-flight guard) |
+| 32 | 6 | red run: `workbench.mjs` (with the 4 new checks) against the E2E build from row 25, without the watcher | WORKBENCH FAILED (6) as expected: the open note and the list stayed stale (+ cascades on the stale hash) — the checks need the watcher |
+| 33 | 6 | `cargo test --workspace` | passed — 332 passed, 1 ignored (opt-in toast self-test): core 258, CLI 41 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4 |
+| 34 | 6 | `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy -p nexus-desktop --all-targets --features e2e-webview-debugging -- -D warnings` | clean · clean |
+| 35 | 6 | `npx vitest run` · `npm run typecheck` · `npx vite build` | 164/164 (31 files) · first run: TS2367 on the in-flight re-check after `await` (narrowing) — moved into `deciding()`; rerun clean · built; vitest rerun 164/164 |
+| 36 | 6 | E2E build (`--features e2e-webview-debugging`) · `cargo build -p nexus-cli -p fake-claude` | ok |
+| 37 | 6 | `workbench` · `run-smoke` · `task-flow` | WORKBENCH OK 51/51 · E2E OK 28 · TASK FLOW OK 43 |
+| 38 | 6 | `sync` · `portable` · `attention` · `workflows` · `mcp-interop` · `context` · `usage` · `constitutions` · `profiles-kits` · `restore` · `workspace-setup` | 18 · 50 · 27 · 24 · 9 · 12 · 18 · 13 · 9 · 12 · 17 — all OK, first run each, with the watcher running |
+| 39 | 6 | T18 · `installed.mjs` | **not run locally** (installed NEXUS open, see rows 23–24); CI's release job runs both |
+| 40 | 6 | `node scripts/third-party-notices.mjs` | 667 components (was 612): `notify`, `notify-types`, `inotify`, `kqueue`, … and the updater/process plugins the file had missed since 0.1.x — the release job copies this file as is |
 
 ## Verification log — Portable Workspace stage (sequential groups, `CARGO_BUILD_JOBS=2`, final code `7c491fb`)
 
@@ -504,14 +529,16 @@ free.
    tabs and the Home inbox in the real app, a rejected push against a real remote (and *Tell Claude* in a running
    session), the look of the new notifications. Then merge with `--no-ff`, add the `release:` commit + tag `v0.5.0`
    and do the one push `git push --atomic origin main v0.5.0`; NEXUS 0.1.x updates itself to 0.5.0.
-   Open: context size of running sessions in the task launcher; a file-system watcher (ADR-0048) — owner to decide.
+   Open: context size of running sessions in the task launcher — owner to decide. Also check by hand: edit a task
+   in another editor while its project page is open (it follows within a moment, ADR-0049).
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a
    project from Git and try *Learn*; MANUAL_CHECKS 33 (with `docs/TEMPLATE_REVIEW.md`).
-3. Owner decisions still open: product name and `nexus://`, code signing (Windows SmartScreen, macOS notarization),
-   updater (needs an update-signing key).
+3. Owner decisions still open: product name and `nexus://`. Code signing is decided and deferred (ADR-0050): switch it
+   on before the first release for people outside the owner's circle (provider account, `signCommand`, notarization).
 4. Owner manual checks: MANUAL_CHECKS 27 (notification look, lock screen, click after quitting), 28–32.
 5. Later: bundle `THIRD_PARTY_NOTICES.md` inside the installers too (now only a release file); project file-system
-   watching, an AI-drafted architecture summary flow with review, U5 OpenTelemetry.
+   watching (knowledge files are watched since ADR-0049; project folders are not), an AI-drafted architecture summary
+   flow with review, U5 OpenTelemetry.
 
 ## Known issues / decisions to revisit
 
@@ -527,8 +554,8 @@ free.
   owner's own read is MANUAL 33. A failed gate fails the whole workflow run, so workflows record findings as they go.
   The workspace skills `code-review`/`security-review` share names with Claude Code built-ins (namespaced
   `workspace:`).
-* Release gates: installers unsigned (SmartScreen warns; macOS `.dmg` ad-hoc signed, not notarized — Gatekeeper
-  asks); no updater. macOS and Linux builds are verified only by CI (no local toolchain for them). The installer downloads the WebView2 runtime only
+* Release gates: installers unsigned until ADR-0050 is switched on (SmartScreen warns; macOS `.dmg` ad-hoc signed, not
+  notarized — Gatekeeper asks); updates are signed (ADR-0044). macOS and Linux builds are verified only by CI (no local toolchain for them). The installer downloads the WebView2 runtime only
   if it is missing (preinstalled on Windows 11).
 * Tauri's NSIS installer reads its options from its own path too — scripts must start it by an absolute Windows path;
   the remembered install location (`HKCU\Software\nexus\NEXUS`) survives uninstalling (ADR-0033).
@@ -540,9 +567,10 @@ free.
   machine-local like the gates themselves: it guards against unseen command changes, not against a person approving
   a harmful command. Gates that existed before the workflow stage need one approval after the upgrade.
 * Context strategy is machine-local; InstructionsLoaded costs one hook process per instruction file at start.
-* Knowledge files are not watched: the desktop refreshes the index when its window regains focus and after a session
-  ends (ADR-0048). Session folders are pruned 30 days after their session ended; kit overlays only when their profile
-  is gone.
+* Knowledge files are watched by the desktop (ADR-0049), only the active workspace's; folders whose changes Windows
+  does not report (some network drives, WSL paths) still refresh on window focus and session end. The workspace folder
+  cannot be renamed while NEXUS watches it. Session folders are pruned 30 days after their session ended; kit overlays
+  only when their profile is gone.
 * Error toasts persist until dismissed (at most four). Not yet on `useAction`: KitProfileCard, RegisterKitDialog,
   CloneWorkspaceForm, SyncPolicyCard, NewWorkspaceForm. Graphify failures are visible only in the terminal it ran in.
 * `task-flow.mjs`'s hard kill (`taskkill /T /F`) failed twice in one session (a child exiting during the kill); the

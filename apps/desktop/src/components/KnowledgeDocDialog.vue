@@ -38,6 +38,8 @@ const error = ref<string | null>(null)
 const editing = ref(false)
 const draftTitle = ref('')
 const draftBody = ref('')
+/** The document changed on disk while it was being edited (ADR-0049): saving it would be refused as a conflict. */
+const changedOnDisk = ref(false)
 
 const isConstitution = computed(() => doc.value?.fields?.format === 'constitution')
 const dirty = computed(() => editing.value && !!doc.value && (draftBody.value !== doc.value.body || (!isConstitution.value && draftTitle.value.trim() !== doc.value.title)))
@@ -48,6 +50,7 @@ async function load(item: KnowledgeItem | null) {
   task.value = null
   structure.value = null
   editing.value = false
+  changedOnDisk.value = false
   if (!item?.id) return
   try {
     if (item.kind === 'task') task.value = await api.knowledgeTask(props.workspaceId, item.id)
@@ -64,6 +67,33 @@ watch(
     return load(item)
   },
   { immediate: true },
+)
+
+// Files change outside NEXUS (an editor, `git pull`, Claude); the watcher refreshes the index and `app.freshness` moves.
+// Read mode shows the new version in place; an edit keeps its draft and says that saving would be refused.
+watch(
+  () => app.freshness,
+  async () => {
+    const item = props.item
+    if (!item?.id || busy.value) return
+    try {
+      if (item.kind === 'task') {
+        const t = await api.knowledgeTask(props.workspaceId, item.id)
+        if (props.item === item && t.hash !== task.value?.hash) task.value = t
+        return
+      }
+      const d = await api.knowledgeRead(props.workspaceId, item.id)
+      if (props.item !== item || !doc.value || d.hash === doc.value.hash) return
+      if (editing.value) {
+        changedOnDisk.value = true
+        return
+      }
+      if (d.fields?.format === 'constitution') structure.value = (await api.constitutionGet(props.workspaceId, item.id)).structure
+      doc.value = d
+    } catch {
+      /* gone or unreadable: the list shows it, and the next action says why */
+    }
+  },
 )
 
 const hidden = new Set(['nexus', 'id', 'title', 'kind'])
@@ -105,6 +135,7 @@ function startEdit() {
 async function cancelEdit() {
   if (dirty.value && !(await app.confirm({ title: 'Discard changes?', message: 'Your edits to this document are not saved.', confirmLabel: 'Discard', danger: true }))) return
   editing.value = false
+  if (changedOnDisk.value) await load(props.item)
 }
 
 const saving = useAction(async () => {
@@ -177,6 +208,10 @@ const busy = computed(() => saving.pending.value || toggling.pending.value || ap
     <div v-if="item?.needsApproval && !editing" class="notice notice-warn">
       <TriangleAlert />
       <span>This always-on rule is not given to Claude until you approve this exact version on this machine. Read it first — workspace files can change through sync.</span>
+    </div>
+    <div v-if="editing && changedOnDisk" class="notice notice-warn" data-doc-changed-on-disk>
+      <TriangleAlert />
+      <span>This document changed on disk while you were editing it. Saving would be refused — copy your text, then Cancel to see the new version.</span>
     </div>
 
     <template v-if="task">

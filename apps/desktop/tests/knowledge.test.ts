@@ -230,6 +230,42 @@ describe('task workflow UI', () => {
     expect(w.emitted('launch')?.[0]?.[0]).toMatchObject({ title: 'Ship login' })
   })
 
+  it('an open document follows changes on disk; an edit keeps its draft and is told (ADR-0049)', async () => {
+    const EditorStub = { props: ['modelValue'], template: `<textarea data-editor-stub :value="modelValue" />` }
+    const v1 = { ...item('Plan', { kind: 'note', hash: 'h1' }), fields: {}, body: 'Ship on Tuesday.', truncated: false, approved: true, relativePath: 'knowledge/plan.md' }
+    api.knowledgeRead.mockResolvedValue(v1)
+    const w = mount(KnowledgeDocDialog, {
+      props: { item: item('Plan', { kind: 'note' }), workspaceId: 'ws' },
+      global: { stubs: { teleport: true, transition: false, RouterLink: true, CodeEditor: EditorStub, UsageSummary: true } },
+    })
+    await flushPromises()
+    expect(w.text()).toContain('Ship on Tuesday.')
+    const app = useAppStore()
+
+    app.freshness++ // nothing changed: the same version stays
+    await flushPromises()
+    expect(api.knowledgeRead).toHaveBeenCalledTimes(2)
+    api.knowledgeRead.mockResolvedValue({ ...v1, hash: 'h2', body: 'Ship on Wednesday.' })
+    app.freshness++
+    await flushPromises()
+    expect(w.text()).toContain('Ship on Wednesday.')
+    expect(w.find('[data-doc-changed-on-disk]').exists()).toBe(false)
+
+    await w.find('[data-doc-edit-start]').trigger('click')
+    await flushPromises()
+    expect((w.find('[data-editor-stub]').element as HTMLTextAreaElement).value).toBe('Ship on Wednesday.')
+    api.knowledgeRead.mockResolvedValue({ ...v1, hash: 'h3', body: 'Ship on Thursday.' })
+    app.freshness++
+    await flushPromises()
+    expect(w.find('[data-doc-changed-on-disk]').text()).toContain('changed on disk')
+    expect((w.find('[data-editor-stub]').element as HTMLTextAreaElement).value).toBe('Ship on Wednesday.')
+
+    await w.findAll('button').find((b) => b.text() === 'Cancel')!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('Ship on Thursday.')
+    expect(w.find('[data-doc-changed-on-disk]').exists()).toBe(false)
+  })
+
   it('instructions panel lists Claude’s own layers in order and what NEXUS adds', async () => {
     useProfileStore().list = [{ id: 'p', name: 'Personal' } as ClaudeProfile]
     const preview: InstructionsPreview = {

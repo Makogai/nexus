@@ -206,6 +206,23 @@ async function decide(d: LearnDraft, apply: boolean) {
   }
 }
 
+/**
+ * Drafts arrive while the tab is open — Claude writes them through MCP, files change on disk (watcher, ADR-0049). Only
+ * the drafts are read again (the map walks the repository); a decision in flight is never undone, errors stay.
+ */
+let active = true
+const deciding = () => decision.value?.state === 'pending'
+async function reloadDrafts() {
+  const ws = workspaces.active
+  if (!active || !ws || !map.value || busy.value || deciding()) return
+  const d = await api.projectLearnDrafts(ws.id, props.projectId).catch(() => null)
+  const same = (a: LearnDraft[]) => a.map((x) => `${x.id}@${x.updated}`).join()
+  if (!d || deciding() || same(d) === same(drafts.value)) return
+  drafts.value = d
+  if (!d.some((x) => x.id === open.value)) open.value = d[0]?.id ?? null
+}
+watch(() => [app.externalChanges, app.freshness], reloadDrafts)
+
 /** "Open overview" / "Open architecture" after a draft was accepted. */
 const viewing = ref<KnowledgeItem | null>(null)
 async function openDecided() {
@@ -240,11 +257,13 @@ onMounted(() => {
 })
 // The project page is kept alive: coming back to it (e.g. from the terminal) reads the project again.
 onActivated(() => {
+  active = true
   window.addEventListener('focus', onWindowFocus)
   if (Date.now() - lastLoad > 1500) void load()
   if (graphWatchUntil.value > Date.now()) startGraphTimer()
 })
 onDeactivated(() => {
+  active = false
   window.removeEventListener('focus', onWindowFocus)
   stopGraphTimer()
 })

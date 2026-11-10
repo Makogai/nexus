@@ -1,6 +1,7 @@
 // End-to-end: the project workbench milestone (W2–W4) against the REAL app — temporary workspace and repositories only.
 //   W2 Knowledge: a constitution opens as rule cards (no raw markers); a note opens as rendered Markdown with raw HTML
 //      escaped; Edit → Save writes the file (approved here); a stale save is a conflict; Constitutions open in Read mode.
+//      Files changed by another program reach the open document and the list without a reload (watcher, ADR-0049).
 //   W3 Explorer: project tree without .git and ignored output, read-only viewer, secrets never shown; commits with
 //      changed files, renames and diffs.
 //   W4 Learn: NEXUS's own map, Graphify optional, the learning task with the map as brief, drafts applied or set aside.
@@ -10,7 +11,8 @@
 //
 // Windows only (WebView2 DevTools protocol).
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -98,6 +100,12 @@ try {
   check('a note opens as rendered Markdown', html.includes('<h2>Plan</h2>') && html.includes('<strong>on Tuesday</strong>'), html.slice(0, 80))
   check('…raw HTML in a document is shown as text, never run', !html.includes('<script') && (await cdp.evaluate(`window.__pwned === undefined`)))
 
+  // Another program saves the file (an editor, `git pull`): the watcher refreshes the index and the open document
+  // follows — no reload, no window focus (ADR-0049).
+  writeFileSync(note.path, readFileSync(note.path, 'utf8').replace('Ship **on Tuesday**.', 'Ship **on Monday**.'))
+  const live = await until(async () => ((await htmlOf('[role=dialog] [data-markdown]')).includes('on Monday') ? true : null), 15000)
+  check('a document open in NEXUS shows a change another program saved', !!live)
+
   // --- W2: editing ---------------------------------------------------------------------------------------------------
   await click('[data-doc-edit-start]')
   await cdp.waitFor(`!!document.querySelector('[data-doc-edit] .cm-content')`, 10000)
@@ -114,6 +122,8 @@ try {
   await click('[data-doc-edit-start]')
   await cdp.waitFor(`!!document.querySelector('[data-doc-edit] .cm-content')`, 10000)
   writeFileSync(note.path, readFileSync(note.path, 'utf8').replace('on Wednesday', 'on Thursday'))
+  const told = await cdp.waitFor(`document.querySelector('[role=dialog] [data-doc-changed-on-disk]')?.innerText`, 15000).catch(() => '')
+  check('…an edit in progress is told at once that the file changed on disk', told.includes('changed on disk'), told.slice(0, 80))
   await setEditor('[data-doc-edit]', '## Plan\n\nShip **on Friday**.')
   await click('[data-doc-save]')
   const conflict = await cdp.waitFor(`document.querySelector('[role=dialog] .notice-error')?.innerText`, 10000).catch(() => '')
@@ -121,6 +131,15 @@ try {
   await cdp.evaluate(`document.querySelector('[role=dialog] footer .btn-ghost')?.click(); true`) // Cancel
   await cdp.evaluate(`document.querySelector('[data-confirm-ok]')?.click(); true`) // discard
   await closeDialog()
+
+  // A document another program writes appears in the open list, and leaves it when the file is deleted.
+  const arrived = join(dirname(note.path), 'arrived-on-disk.md')
+  writeFileSync(arrived, readFileSync(note.path, 'utf8').replace(/^id: .*$/m, `id: ${randomUUID()}`).replace(/^title: .*$/m, 'title: Arrived on disk'))
+  const arrivedListed = await until(async () => (await cdp.evaluate(`[...document.querySelectorAll('.list-row.doc')].some((r) => r.innerText.includes('Arrived on disk'))`)) || null, 15000)
+  check('a document written by another program appears in the list', !!arrivedListed)
+  rmSync(arrived)
+  const unlisted = await until(async () => (await cdp.evaluate(`![...document.querySelectorAll('.list-row.doc')].some((r) => r.innerText.includes('Arrived on disk'))`)) || null, 15000)
+  check('…and leaves it when the file is deleted', !!arrivedListed && !!unlisted)
 
   // Constitutions open formatted; Edit is one click away.
   await cdp.evaluate(`location.hash = '#/constitutions'; true`)

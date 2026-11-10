@@ -233,6 +233,22 @@ watch(
   { immediate: true },
 )
 onActivated(() => loadList())
+// Constitution files change outside NEXUS too (sync, an editor; the watcher moves `app.freshness`, ADR-0049): the list
+// follows, and so does the open document in Read mode — never under unsaved edits.
+watch(
+  () => app.freshness,
+  async () => {
+    await loadList()
+    const id = selectedId.value
+    if (!wsId.value || !id || mode.value !== 'read' || dirty.value) return
+    const v = await api.constitutionGet(wsId.value, id).catch(() => null)
+    if (v && selectedId.value === id && mode.value === 'read' && !dirty.value && v.hash !== view.value?.hash) {
+      view.value = v
+      draft.value = clone(v.structure)
+      raw.value = v.body
+    }
+  },
+)
 loadList()
 </script>
 

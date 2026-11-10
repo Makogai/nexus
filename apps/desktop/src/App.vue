@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { listen } from '@tauri-apps/api/event'
 import { useAppStore } from './stores/app'
 import { useUpdateStore } from './stores/updates'
 import { useWorkspaceStore } from './stores/workspaces'
@@ -8,7 +9,7 @@ import { useProjectStore } from './stores/projects'
 import { useProfileStore } from './stores/profiles'
 import { useSessionStore } from './stores/sessions'
 import { useNotificationStore } from './stores/notifications'
-import { api, toIpcError } from './lib/ipc'
+import { KNOWLEDGE_EVENT, api, toIpcError } from './lib/ipc'
 import AppSidebar from './components/AppSidebar.vue'
 import AppTopBar from './components/AppTopBar.vue'
 import WorkspaceBanner from './components/WorkspaceBanner.vue'
@@ -77,9 +78,10 @@ watch(
 )
 
 /**
- * Knowledge freshness without a file-system watcher (ADR-0048; a watcher is an open owner decision): files change outside
- * NEXUS — an editor, `git pull`, Claude. When the window regains focus and after a session ends, refresh the knowledge
- * index (incremental: unchanged files are not read); views follow through the data_version poll and `app.freshness`.
+ * Knowledge freshness: files change outside NEXUS — an editor, `git pull`, Claude. The desktop watches the active
+ * workspace's knowledge folders and refreshes the index itself (ADR-0049); its event moves `app.externalChanges` (lists)
+ * and `app.freshness` (open documents) at once. Window focus and the end of a session still refresh (ADR-0048), for
+ * folders whose changes are not reported (incremental: unchanged files are not read).
  */
 let lastFresh = 0
 async function refreshFromDisk() {
@@ -115,9 +117,17 @@ function onKey(e: KeyboardEvent) {
 }
 
 let unlistenClose: (() => void) | null = null
+let unlistenKnowledge: (() => void) | null = null
 onMounted(async () => {
   window.addEventListener('keydown', onKey)
   window.addEventListener('focus', refreshFromDisk)
+  // Not awaited: the app starts even if the event channel does not.
+  listen(KNOWLEDGE_EVENT, () => {
+    app.externalChanges++
+    app.freshness++
+  })
+    .then((u) => (unlistenKnowledge = u))
+    .catch(() => undefined)
   await boot()
   // Closing the window ends every running terminal: ask first when something is still running.
   unlistenClose = await getCurrentWindow().onCloseRequested(async (event) => {
@@ -136,6 +146,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('focus', refreshFromDisk)
   unlistenClose?.()
+  unlistenKnowledge?.()
 })
 </script>
 
