@@ -54,8 +54,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --config src-tauri/tauri.installer.conf.json --config src-tauri/tauri.updater.conf.json
-      # Code signing (decision pending, ADR-0033): sign nexus-desktop.exe, nexus.exe and the installer here, before the
-      # checksums and attestations — e.g. Azure Trusted Signing or `signtool` with a certificate from repository secrets.
+      # Code signing (ADR-0050, deferred): when switched on it runs *inside* the build above, through
+      # `bundle.windows.signCommand` (nexus-desktop.exe, the nexus sidecar, the installer) with a key held in an HSM — never
+      # as a step here: signing after the build would change the installer after its updater signature was made.
       - name: T18 — the release program ignores WebView2 debugging overrides
         working-directory: apps/desktop
         run: node e2e/t18-check.mjs ../../target/release/nexus-desktop.exe
