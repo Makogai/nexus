@@ -132,6 +132,36 @@ this branch.
 **Not verified locally:** the macOS behaviour itself (no Mac here) and the Unix symbolic-link test (no Linux toolchain) —
 CI on macOS and Ubuntu decides.
 
+### 0.5.1 = everything together (owner: "id like all this to go together as 0.5.1")
+
+* `fix/macos-knowledge-watcher` merged into `milestone/agents-dev-environment` (`8baf17f`); the owner's pending NEXUS push
+  request for the fix branch is superseded (to decline).
+* **Push review of a new branch (`e177f9c`, ADR-0047):** the owner's push of the fix branch showed 3 blocking findings
+  ("looks like a private key" in `workspace_sync/inspect.rs` and one more file) and could not be copied. Cause: a branch
+  the remote does not have was reviewed as `HEAD` — the whole history — and NEXUS's own secret scanner rule and test
+  fixtures (in `main`, already on the remote) contain a key-shaped line. Now `HEAD --not --remotes=<remote>`
+  (`git::log_revs`; `inspect::inspect_history` takes a revision list); into an empty remote still every commit. Test
+  `a_new_branch_sends_and_inspects_only_the_commits_the_remote_does_not_have` (seen **failing** with the old range: it
+  listed main's commit). The scanner rule (`PEM_BEGIN`/`PEM_PRIVATE_KEY`), its fixture, `knowledge` and
+  `release-check.mjs` no longer contain such a line (`git grep` finds none). Workspace sync's first push is unchanged
+  (a workspace repository's first push is into its own remote).
+* **Copy findings:** the push dialog's and the Sync page's commit/push findings are selectable and have *Copy findings*
+  (`CopyFindings.vue`, `findingsText`); vitest seen **failing** without `selectable`.
+* Release notes: 0.5.1 also ships Codex and the Dev Environment; two migrations since 0.1.x.
+* The installed NEXUS still has the old review: push this branch from a terminal.
+
+| # | Command (final code, sequential, `CARGO_BUILD_JOBS=2`) | Result |
+| --- | --- | --- |
+| 9 | `cargo test -p nexus-core --lib -- push_request workspace_sync knowledge::tests::credential` | 23/23 |
+| 10 | `npx vitest run tests/push-request.test.ts tests/sync.test.ts` | 13/13 |
+| 11 | `cargo test --workspace` | passed — 359 passed, 1 ignored (opt-in toast self-test): core 283, CLI 43 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4 |
+| 12 | `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy -p nexus-desktop --all-targets --features e2e-webview-debugging -- -D warnings` | clean · clean |
+| 13 | `npx vitest run` · `npm run typecheck` · `npx vite build` | 174/174 (33 files) · clean · built |
+| 14 | E2E build (`--features e2e-webview-debugging`) · `cargo build -p nexus-cli -p fake-claude` | ok |
+| 15 | `agents` · `run-smoke` · `task-flow` · `workbench` · `portable` · `sync` · `attention` · `workflows` | 16 · 28 · 43 · 51 · 50 · 18 · 27 · 24 — all OK, first run |
+| 16 | `mcp-interop` · `context` · `usage` · `constitutions` · `profiles-kits` · `restore` · `workspace-setup` | 9 · 12 · 18 · 13 · 9 · 12 · 17 — all OK, first run |
+| 17 | T18 · `installed.mjs` · macOS/Linux | **not run locally** (T18/installed need the owner's installed NEXUS closed; no Mac/Linux here) — CI on the branch and the release run decide |
+
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
 Task `01a1c4f1` (owner request 2026-11-10): sessions per project on top, feedback for every action, Git pushes that never
