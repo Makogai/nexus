@@ -190,6 +190,17 @@ pub async fn project_knowledge(ctx: State<'_, Ctx>, project_id: String) -> IpcRe
     .await
 }
 
+/// What waits for the person in the workspace, or in one project (ADR-0048): one list, each item naming what to open.
+#[tauri::command]
+pub async fn needs_you(ctx: State<'_, Ctx>, workspace_id: String, project_id: Option<String>) -> IpcResult<Vec<nexus_core::inbox::Item>> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let ws = available(&ctx, &workspace_id)?;
+        Ok(nexus_core::inbox::needs_you(&ctx.db(), &ctx.data_dir, &ws, project_id.as_deref())?)
+    })
+    .await
+}
+
 /// Memory proposals of the workspace (ADR-0022); `extract` first scans recent sessions.
 #[tauri::command]
 pub async fn knowledge_proposals(ctx: State<'_, Ctx>, workspace_id: String, extract: Option<bool>) -> IpcResult<Vec<nexus_core::knowledge::proposals::Proposal>> {

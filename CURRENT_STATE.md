@@ -69,6 +69,26 @@ now, a file-system watcher later; plain task session (no workflow run).
     the Repository card and in the header.
   * **Auto-sync:** first failed publication → one warning notification (resolved by the next success); a rejected push
     pauses and asks, no retry loop (ADR-0042 amendment).
+* **Phase 2 — project page (ADR-0048):**
+  * **Tabs** Overview · Sessions · Tasks · Knowledge · Learn · Files · Commits · Settings, in `?tab=`, Ctrl+1…8 (not in
+    fields or terminals); labels carry counts — sessions running/total with live and attention dots, open tasks and
+    those in review, notes; Overview shows the number waiting.
+  * **Overview** is a dashboard: "Needs you" (core `inbox::needs_you`, IPC `needs_you`: sessions waiting for input or a
+    permission, failed and pending push requests, workflow sign-offs, tasks in review, learning drafts, unapproved
+    rules/constitutions/workflows, new or changed kits — each opens where the person acts), Repository (conflicts,
+    in-progress operation, ahead/behind, last commit), stack, usage.
+  * **Sessions** (`ProjectSessions`): every session of the project, waiting/running first, filters all/running/ended/
+    archived (archived read on demand), Launch Claude and Shell; rows show last activity.
+  * **Tasks** (`ProjectTasks`): list (Done/Reopen optimistic with rollback, Launch/Continue, task opens on click) or the
+    board; *New task* preselects the project and opens the created task.
+  * **Knowledge**: notes and decisions (branch-aware), checkpoints, instructions panel. **Settings**: environment,
+    portable context, danger zone.
+  * **Header**: Launch Claude + Shell; Open folder, Resume project, Development history, Context, Run workflow in a "More"
+    menu (kept in the DOM, selectors unchanged).
+  * **Terminal panel**: each tab names its project (a chip in a stable per-project colour); on a project page *This
+    project only* narrows the tabs.
+  * **Suites updated in the same commit** (NX-8): task-flow, context, portable and smoke open `?tab=tasks|knowledge|
+    settings`; task-flow waits for the task file (the list moves before the write finishes).
 
 ## Project workbench — progress (session 10)
 
@@ -368,6 +388,12 @@ Per-phase checks while building (targeted); the full run on the final code follo
 | 10 | 1 | `npm run typecheck` · `npx vitest run` | clean · 124/124 (27 files; new `push-request.test.ts` 7) |
 | 11 | 1 | `npx tauri build --debug --no-bundle --features e2e-webview-debugging` · `cargo build -p nexus-cli -p fake-claude` | ok |
 | 12 | 1 | `node e2e/task-flow.mjs` | TASK FLOW OK (first run: the teammate fixture cloned without a branch — fixed with `clone -b`) |
+| 13 | 2 | `cargo test -p nexus-core --lib inbox` · `cargo test -p nexus-desktop --lib` · clippy | 1/1 · 11/11 · clean |
+| 14 | 2 | `npm run typecheck` · `npx vitest run` | clean · 129/129 (28 files; new `project-page.test.ts` 5) |
+| 15 | 2 | E2E build · `cargo build -p nexus-cli -p fake-claude` | ok |
+| 16 | 2 | `node e2e/workbench.mjs` | WORKBENCH OK, 46 checks (run twice by mistake, both OK) |
+| 17 | 2 | `node e2e/task-flow.mjs` | first run 41/43: Done/Reopen checks read the task file before the (now optimistic) write finished — suite waits for the file; rerun TASK FLOW OK 43/43 |
+| 18 | 2 | `context` · `portable` · `run-smoke` · `workflows` · `usage` | CONTEXT OK 12 · PORTABLE OK 50 · E2E OK 28 · WORKFLOWS OK 24 · USAGE OK 18 |
 
 ## Verification log — Portable Workspace stage (sequential groups, `CARGO_BUILD_JOBS=2`, final code `7c491fb`)
 

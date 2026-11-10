@@ -19,7 +19,9 @@ const projects = useProjectStore()
 
 type Tab = KnowledgeKind | 'health' | 'proposals'
 const route = useRoute()
-const tab = ref<Tab>(route.query.tab === 'proposals' ? 'proposals' : 'task')
+/** `?tab=` opens a kind (e.g. `rule` from the "Needs you" inbox) or the proposals. */
+const tabOf = (q: unknown): Tab | null => (q === 'proposals' || (typeof q === 'string' && q in KIND_LABELS) ? (q as Tab) : null)
+const tab = ref<Tab>(tabOf(route.query.tab) ?? 'task')
 const proposals = ref<MemoryProposal[]>([])
 const proposalBusy = ref(false)
 const overview = ref<KnowledgeOverview | null>(null)
@@ -94,7 +96,8 @@ watch(
   () => [route.name, route.query.tab, route.query.task],
   async () => {
     if (route.name !== 'knowledge') return
-    if (route.query.tab === 'proposals') tab.value = 'proposals'
+    const asked = tabOf(route.query.tab)
+    if (asked) tab.value = asked
     const taskId = typeof route.query.task === 'string' ? route.query.task : null
     if (taskId) {
       tab.value = 'task'

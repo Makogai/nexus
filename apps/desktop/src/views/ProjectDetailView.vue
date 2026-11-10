@@ -1,25 +1,26 @@
 <script setup lang="ts">
-import { computed, onActivated, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { ArrowLeft, ArrowUp, BookMarked, Boxes, Check, RotateCcw, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, GraduationCap, History, Link, ListTodo, NotebookPen, RefreshCw, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
-import { relativeTime } from '../lib/format'
+import { ArrowLeft, ArrowUp, BookMarked, Boxes, Ellipsis, FileText, FolderOpen, Gauge, GitBranch, GitCommitHorizontal, GraduationCap, History, Inbox, Link, ListTodo, NotebookPen, RefreshCw, Settings2, Sparkles, SquareTerminal, Trash2, TriangleAlert, Workflow } from '@lucide/vue'
+import { needsUser, relativeTime } from '../lib/format'
 import { api, toIpcError } from '../lib/ipc'
 import { useWorkspaceStore } from '../stores/workspaces'
 import { typeIntoTerminal } from '../lib/terminal'
-import { STATUS_LABELS } from '../lib/knowledge'
 import { failureGuidance, failureTitle } from '../lib/push'
-import type { Checkpoint, ContextInitialized, EnvCheckItem, EnvironmentReport, KnowledgeItem, ProjectKnowledge, PushRequest, TaskStatus } from '../lib/types'
+import type { Checkpoint, ContextInitialized, EnvCheckItem, EnvironmentReport, NeedsYouItem, ProjectKnowledge, PushRequest } from '../lib/types'
 import { useAppStore } from '../stores/app'
 import { useProjectStore } from '../stores/projects'
 import { useSessionStore } from '../stores/sessions'
 import GitSummary from '../components/GitSummary.vue'
 import UsageSummary from '../components/UsageSummary.vue'
-import SessionRow from '../components/SessionRow.vue'
 import InstructionsPanel from '../components/InstructionsPanel.vue'
+import NeedsYouList from '../components/NeedsYouList.vue'
 import ProjectCommits from '../components/ProjectCommits.vue'
 import ProjectFiles from '../components/ProjectFiles.vue'
 import ProjectLearn from '../components/ProjectLearn.vue'
+import ProjectSessions from '../components/ProjectSessions.vue'
+import ProjectTasks from '../components/ProjectTasks.vue'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
@@ -29,9 +30,18 @@ const router = useRouter()
 const route = useRoute()
 const refreshing = ref(false)
 
-/** Overview (cards), Learn (knowledge base, W4), Files (read-only explorer) and Commits (Git history) — W3; kept in the URL (`?tab=`). */
-type Tab = 'overview' | 'learn' | 'files' | 'commits'
-const tab = computed<Tab>(() => (route.query.tab === 'learn' || route.query.tab === 'files' || route.query.tab === 'commits' ? route.query.tab : 'overview'))
+/**
+ * Tabs (ADR-0048), kept in the URL (`?tab=`): Overview (what needs you, repository, stack, usage), Sessions, Tasks,
+ * Knowledge (notes, decisions, checkpoints, instructions), Learn (W4), Files and Commits (W3), Settings (environment,
+ * portable context, danger zone). Ctrl+1…8 switch between them.
+ */
+const TABS = ['overview', 'sessions', 'tasks', 'knowledge', 'learn', 'files', 'commits', 'settings'] as const
+type Tab = (typeof TABS)[number]
+const NEEDS_FOLDER: Tab[] = ['learn', 'files', 'commits']
+const tab = computed<Tab>(() => {
+  const q = route.query.tab
+  return typeof q === 'string' && (TABS as readonly string[]).includes(q) ? (q as Tab) : 'overview'
+})
 function setTab(t: Tab) {
   router.replace({ query: { ...route.query, tab: t === 'overview' ? undefined : t } })
 }
@@ -80,9 +90,26 @@ const git = computed(() => projects.git[props.id])
 const projectSessions = computed(() => sessions.list.filter((s) => s.projectId === props.id && !s.archivedAt))
 const checkpoints = ref<Checkpoint[]>([])
 const knowledge = ref<ProjectKnowledge | null>(null)
+/** What waits for the person in this project (ADR-0048). */
+const needsYou = ref<NeedsYouItem[]>([])
+
+/** Tab labels carry counts: running/total sessions (live and attention dots), open tasks and those in review. */
+const counts = computed(() => {
+  const live = projectSessions.value.filter((s) => s.running || s.liveElsewhere)
+  return {
+    running: live.length,
+    sessions: projectSessions.value.length,
+    waiting: live.some((s) => s.kind === 'claude' && needsUser(s.status)),
+    tasks: knowledge.value?.tasks.length ?? 0,
+    review: knowledge.value?.tasks.filter((t) => t.status === 'review').length ?? 0,
+    notes: knowledge.value?.notes.length ?? 0,
+  }
+})
 
 async function loadKnowledge() {
   pushRequests.value = await api.pushRequestOpen(props.id).catch(() => pushRequests.value)
+  const ws = workspaces.active
+  if (ws) needsYou.value = await api.needsYou(ws.id, props.id).catch(() => needsYou.value)
   if (!project.value?.available) return
   knowledge.value = await api.projectKnowledge(props.id).catch(() => knowledge.value)
 }
@@ -94,28 +121,12 @@ async function dismissPush(r: PushRequest) {
   try {
     await api.pushRequestDismiss(r.id)
     pushRequests.value = pushRequests.value.filter((x) => x.id !== r.id)
+    needsYou.value = needsYou.value.filter((x) => x.id !== r.id)
   } catch (e) {
     app.toast('error', `Could not dismiss: ${toIpcError(e).message}`)
   } finally {
     dismissing.value = null
   }
-}
-
-/** Finish a task (or reopen a finished one) from the project page — the task file records it in its log. */
-async function setTaskStatus(t: KnowledgeItem, status: 'done' | 'ready') {
-  const ws = workspaces.active
-  if (!ws || !t.id) return
-  try {
-    await api.knowledgeUpdateTask(ws.id, t.id, { status, log: status === 'done' ? 'Marked done' : 'Reopened' })
-    app.toast('success', status === 'done' ? `Done: ${t.title}` : `Reopened: ${t.title}`)
-    await loadKnowledge()
-  } catch (e) {
-    app.toast('error', toIpcError(e).message)
-  }
-}
-
-function launchTask(t: KnowledgeItem) {
-  if (t.id) app.openLaunch(props.id, null, { id: t.id, title: t.title, projectId: t.projectId })
 }
 
 async function loadCheckpoints() {
@@ -146,7 +157,36 @@ watch(
   () => app.pushRequestsChanged,
   () => loadGit(true),
 )
+// A session of this project starts waiting for the person (or stops): the "Needs you" strip follows.
+watch(
+  () => projectSessions.value.map((s) => `${s.id}:${s.status.status}`).join(),
+  () => loadKnowledge(),
+)
+
+/** Ctrl+1…8 switch tabs (not while typing in a field or a terminal). */
+function onKey(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return
+  const n = Number(e.key)
+  if (!Number.isInteger(n) || n < 1 || n > TABS.length) return
+  const target = e.target as HTMLElement | null
+  if (target?.closest?.('.xterm, input, textarea, select, [contenteditable="true"], .cm-editor')) return
+  const t = TABS[n - 1]!
+  if (NEEDS_FOLDER.includes(t) && !project.value?.available) return
+  e.preventDefault()
+  setTab(t)
+}
+let listening = false
+function listen(on: boolean) {
+  if (on === listening) return
+  listening = on
+  if (on) window.addEventListener('keydown', onKey)
+  else window.removeEventListener('keydown', onKey)
+}
+onMounted(() => listen(true))
+onUnmounted(() => listen(false))
+onDeactivated(() => listen(false))
 onActivated(() => {
+  listen(true)
   loadGit()
   loadCheckpoints()
   loadKnowledge()
@@ -164,6 +204,19 @@ async function openShell() {
 
 async function reveal() {
   if (project.value?.localPath) await app.attempt(() => revealItemInDir(project.value!.localPath!), 'Could not open the folder')
+}
+
+/** The header's "⋯" menu (kept in the DOM, so its items keep their selectors). */
+const menuOpen = ref(false)
+const menuRoot = ref<HTMLElement>()
+function onDocClick(e: MouseEvent) {
+  if (menuOpen.value && !menuRoot.value?.contains(e.target as Node)) menuOpen.value = false
+}
+onMounted(() => document.addEventListener('mousedown', onDocClick))
+onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
+function menu(action: () => unknown) {
+  menuOpen.value = false
+  action()
 }
 
 async function unregister() {
@@ -198,15 +251,20 @@ async function unregister() {
         </div>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost btn-icon" title="Re-detect stack and refresh Git" :disabled="refreshing" @click="refresh">
+        <button class="btn btn-ghost btn-icon" title="Re-detect stack and refresh Git" :disabled="refreshing" :aria-busy="refreshing" @click="refresh">
           <RefreshCw :class="{ spin: refreshing }" />
         </button>
-        <button class="btn" :disabled="!project.available" @click="reveal"><FolderOpen /> Open folder</button>
+        <div ref="menuRoot" class="more">
+          <button class="btn" :aria-expanded="menuOpen" aria-haspopup="menu" title="More project actions" data-project-more @click="menuOpen = !menuOpen"><Ellipsis /> More</button>
+          <div v-show="menuOpen" class="menu" role="menu">
+            <button class="menu-item" role="menuitem" :disabled="!project.available" @click="menu(reveal)"><FolderOpen /> Open folder</button>
+            <button class="menu-item" role="menuitem" data-resume-project @click="menu(() => router.push(`/projects/${project!.id}/resume`))"><History /> Resume project</button>
+            <button class="menu-item" role="menuitem" data-open-history @click="menu(() => router.push(`/projects/${project!.id}/history`))"><NotebookPen /> Development history</button>
+            <button class="menu-item" role="menuitem" data-project-context @click="menu(() => router.push({ name: 'context', query: { project: project!.id } }))"><Gauge /> Context</button>
+            <button class="menu-item" role="menuitem" data-project-workflow @click="menu(() => router.push({ name: 'workflows', query: { start: '1', project: project!.id } }))"><Workflow /> Run workflow</button>
+          </div>
+        </div>
         <button class="btn" :disabled="!project.available" @click="openShell"><SquareTerminal /> Shell</button>
-        <button class="btn" data-resume-project @click="router.push(`/projects/${project.id}/resume`)"><History /> Resume project</button>
-        <button class="btn btn-ghost" data-open-history @click="router.push(`/projects/${project.id}/history`)"><NotebookPen /> Development history</button>
-        <button class="btn" data-project-context @click="router.push({ name: 'context', query: { project: project.id } })"><Gauge /> Context</button>
-        <button class="btn" data-project-workflow @click="router.push({ name: 'workflows', query: { start: '1', project: project.id } })"><Workflow /> Run workflow</button>
         <button class="btn btn-primary" :disabled="!project.available" @click="app.openLaunch(project.id)"><Sparkles /> Launch Claude</button>
       </div>
     </div>
@@ -229,187 +287,180 @@ async function unregister() {
     </template>
 
     <div class="tabs" role="tablist" aria-label="Project views">
-      <button role="tab" class="tab" :class="{ active: tab === 'overview' }" :aria-selected="tab === 'overview'" data-project-tab="overview" @click="setTab('overview')">Overview</button>
-      <button role="tab" class="tab" :class="{ active: tab === 'learn' }" :aria-selected="tab === 'learn'" :disabled="!project.available" data-project-tab="learn" @click="setTab('learn')"><GraduationCap class="tab-ic" /> Learn</button>
-      <button role="tab" class="tab" :class="{ active: tab === 'files' }" :aria-selected="tab === 'files'" :disabled="!project.available" data-project-tab="files" @click="setTab('files')"><FileText class="tab-ic" /> Files</button>
-      <button role="tab" class="tab" :class="{ active: tab === 'commits' }" :aria-selected="tab === 'commits'" :disabled="!project.available" data-project-tab="commits" @click="setTab('commits')"><GitCommitHorizontal class="tab-ic" /> Commits</button>
+      <button role="tab" class="tab" :class="{ active: tab === 'overview' }" :aria-selected="tab === 'overview'" data-project-tab="overview" title="Ctrl+1" @click="setTab('overview')">
+        Overview<span v-if="needsYou.length" class="tab-badge" :title="`${needsYou.length} waiting for you`">{{ needsYou.length }}</span>
+      </button>
+      <button role="tab" class="tab" :class="{ active: tab === 'sessions' }" :aria-selected="tab === 'sessions'" data-project-tab="sessions" title="Ctrl+2" @click="setTab('sessions')">
+        <SquareTerminal class="tab-ic" /> Sessions
+        <span class="tab-count" data-tab-count="sessions">{{ counts.running }}/{{ counts.sessions }}</span>
+        <span v-if="counts.running" class="tab-dot live" title="Running" />
+        <span v-if="counts.waiting" class="tab-dot attention" title="A session waits for you" data-tab-attention />
+      </button>
+      <button role="tab" class="tab" :class="{ active: tab === 'tasks' }" :aria-selected="tab === 'tasks'" data-project-tab="tasks" title="Ctrl+3" @click="setTab('tasks')">
+        <ListTodo class="tab-ic" /> Tasks
+        <span class="tab-count" data-tab-count="tasks">{{ counts.tasks }}</span>
+        <span v-if="counts.review" class="tab-badge" :title="`${counts.review} ready for review`" data-tab-review>{{ counts.review }} review</span>
+      </button>
+      <button role="tab" class="tab" :class="{ active: tab === 'knowledge' }" :aria-selected="tab === 'knowledge'" data-project-tab="knowledge" title="Ctrl+4" @click="setTab('knowledge')">
+        <NotebookPen class="tab-ic" /> Knowledge<span class="tab-count">{{ counts.notes }}</span>
+      </button>
+      <button role="tab" class="tab" :class="{ active: tab === 'learn' }" :aria-selected="tab === 'learn'" :disabled="!project.available" data-project-tab="learn" title="Ctrl+5" @click="setTab('learn')"><GraduationCap class="tab-ic" /> Learn</button>
+      <button role="tab" class="tab" :class="{ active: tab === 'files' }" :aria-selected="tab === 'files'" :disabled="!project.available" data-project-tab="files" title="Ctrl+6" @click="setTab('files')"><FileText class="tab-ic" /> Files</button>
+      <button role="tab" class="tab" :class="{ active: tab === 'commits' }" :aria-selected="tab === 'commits'" :disabled="!project.available" data-project-tab="commits" title="Ctrl+7" @click="setTab('commits')"><GitCommitHorizontal class="tab-ic" /> Commits</button>
+      <button role="tab" class="tab" :class="{ active: tab === 'settings' }" :aria-selected="tab === 'settings'" data-project-tab="settings" title="Ctrl+8" @click="setTab('settings')"><Settings2 class="tab-ic" /> Settings</button>
     </div>
 
-    <ProjectLearn v-if="tab === 'learn' && project.available" :project-id="project.id" />
+    <ProjectSessions v-if="tab === 'sessions'" :project-id="project.id" :available="project.available" />
+    <ProjectTasks v-else-if="tab === 'tasks'" :project-id="project.id" :available="project.available" :knowledge="knowledge" @changed="loadKnowledge" />
+    <ProjectLearn v-else-if="tab === 'learn' && project.available" :project-id="project.id" />
     <ProjectFiles v-else-if="tab === 'files' && project.available && project.localPath" :project-id="project.id" :root="project.localPath" />
     <ProjectCommits v-else-if="tab === 'commits' && project.available" :project-id="project.id" />
+
+    <template v-else-if="tab === 'knowledge'">
+      <h2 class="section-title first"><NotebookPen class="title-ic" /> Notes and decisions for {{ knowledge?.git.branch ?? 'this project' }} <span class="count">{{ knowledge?.notes.length ?? 0 }}</span></h2>
+      <div v-if="knowledge?.notes.length" class="list" data-project-notes>
+        <div v-for="n in knowledge.notes" :key="n.path" class="list-row">
+          <span class="badge">{{ n.kind }}</span>
+          <span class="task-title">{{ n.title }}</span>
+          <span v-if="n.relevance === 'this-branch'" class="chip mono">this branch</span>
+          <span v-else-if="n.relevance === 'inherited'" class="chip mono" :title="`Recorded on ${n.branch}; its commit is part of this branch`">from {{ n.branch }}</span>
+        </div>
+      </div>
+      <p v-if="knowledge?.hiddenOtherBranch" class="faint">{{ knowledge.hiddenOtherBranch }} note(s) of other branches are hidden — Git decides: their commits are not in the checked-out branch.</p>
+      <div v-if="!knowledge?.notes.length && !knowledge?.hiddenOtherBranch" class="empty">
+        <p>No notes yet. Claude can record branch-specific memory with <code>record_memory</code> (scope <code>branch</code>).</p>
+      </div>
+
+      <h2 class="section-title">Checkpoints <span class="count">{{ checkpoints.length }}</span></h2>
+      <div v-if="checkpoints.length" class="list" data-project-checkpoints>
+        <div v-for="c in checkpoints" :key="c.id" class="list-row checkpoint">
+          <span class="badge" :class="{ 'badge-ok': c.kind === 'done', 'badge-warn': c.kind === 'blocker', 'badge-accent': c.kind === 'decision' }">{{ c.kind }}</span>
+          <span class="cp-summary selectable">{{ c.summary }}</span>
+          <span class="faint cp-meta">{{ c.sessionTitle }} · {{ relativeTime(c.createdAt) }}</span>
+        </div>
+      </div>
+      <div v-else class="empty">
+        <p>No checkpoints yet. In a NEXUS-launched session Claude can record decisions, blockers and progress with the NEXUS <code>checkpoint</code> tool. They appear here.</p>
+      </div>
+
+      <InstructionsPanel v-if="project.available" :project-id="project.id" class="instructions-card" />
+    </template>
+
+    <template v-else-if="tab === 'settings'">
+      <div class="grid grid-2 top">
+        <section class="card" data-project-environment>
+          <h2 class="card-title"><Boxes /> Environment</h2>
+          <p class="faint">What this project needs, read from its own files (they stay authoritative). Checking asks each tool for its version only; installing is always your step in a terminal.</p>
+          <div class="row-actions">
+            <button class="btn btn-sm" :disabled="envBusy" :aria-busy="envBusy" data-env-load @click="loadEnv(false)">Show requirements</button>
+            <button class="btn btn-sm" :disabled="envBusy" :aria-busy="envBusy" data-env-check @click="loadEnv(true)"><RefreshCw v-if="envBusy" class="spin" /> Check this computer</button>
+          </div>
+          <template v-if="env">
+            <p class="faint">From the {{ env.from }}.</p>
+            <table class="env-table" data-env-table>
+              <tbody>
+                <tr v-for="(r, i) in envRows" :key="r.tool + r.source + i" :data-env-row="r.tool">
+                  <td><strong>{{ r.name }}</strong></td>
+                  <td class="mono">{{ r.constraint || 'any' }}</td>
+                  <td class="faint">{{ r.source }}</td>
+                  <td v-if="r.status">
+                    <span class="badge" :class="ENV_STATUS[r.status]">{{ r.status }}</span>
+                    <span v-if="r.installed" class="faint"> {{ r.installed }}</span>
+                    <button v-if="r.installCommand" class="btn btn-sm btn-ghost" :data-env-install="r.tool" @click="typeIntoTerminal(r.installCommand.join(' '))">Type install command</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-if="env.environment.containers.composeServices.length" class="faint">Local services ({{ env.environment.containers.composeFile }}): {{ env.environment.containers.composeServices.join(', ') }}</p>
+            <p v-if="env.environment.containers.devcontainer" class="faint">Dev container: {{ env.environment.containers.devcontainer }} <span v-if="env.environment.containers.devcontainerImage" class="mono">{{ env.environment.containers.devcontainerImage }}</span></p>
+            <p v-if="env.environment.envVars.length" class="faint">Environment variables (names only): <span class="mono">{{ env.environment.envVars.map((v) => v.name).join(', ') }}</span></p>
+            <p v-if="env.environment.setupSection" class="faint">Setup instructions: README.md — “{{ env.environment.setupSection }}”</p>
+          </template>
+        </section>
+
+        <section class="card" data-project-context-card>
+          <h2 class="card-title"><BookMarked /> Portable context</h2>
+          <p class="faint">An overview, architecture notes, the current state and this project's tasks, decisions and memory live in the workspace repository (<span class="mono">project-context/</span>), so they travel with the workspace. Facts are read from the project's files and Git; nothing is invented, and documents you edit are never overwritten.</p>
+          <button class="btn btn-sm" :disabled="contextBusy || !workspaces.active?.compat?.writable" :aria-busy="contextBusy" data-project-context-init @click="initContext"><RefreshCw v-if="contextBusy" class="spin" /> {{ contextBusy ? 'Writing…' : 'Create or refresh' }}</button>
+          <p v-if="contextResult" class="faint" data-project-context-result>
+            <span class="mono">{{ contextResult.dir }}/</span> — {{ contextResult.created.length }} created, {{ contextResult.updated.length }} updated, {{ contextResult.kept.length }} kept
+          </p>
+        </section>
+      </div>
+
+      <h2 class="section-title danger-title">Danger zone</h2>
+      <div class="card danger">
+        <div>
+          <strong>Remove from workspace</strong>
+          <p class="muted">Unregisters the project. Files and Git history stay exactly as they are.</p>
+        </div>
+        <button class="btn btn-danger" @click="unregister"><Trash2 /> Remove</button>
+      </div>
+    </template>
+
     <template v-else>
-    <UsageSummary :project-id="project.id" />
+      <h2 class="section-title first"><Inbox class="title-ic" /> Needs you <span class="count">{{ needsYou.length }}</span></h2>
+      <NeedsYouList v-if="needsYou.length" :items="needsYou" :show-project="false" />
+      <p v-else class="faint nothing" data-needs-you-empty>Nothing waits for you in this project.</p>
 
-    <div class="grid grid-2 top">
-      <section class="card">
-        <h2 class="card-title"><GitBranch /> Repository</h2>
-        <GitSummary :status="git?.status ?? null" :loading="git?.loading" :error="git?.error" />
-        <dl v-if="git?.status?.isRepo" class="facts">
-          <dt>Upstream</dt>
-          <dd class="mono">{{ git.status.upstream ?? 'none' }}</dd>
-          <dt>Changes</dt>
-          <dd data-project-changes>
-            {{ git.status.staged }} staged · {{ git.status.unstaged }} modified · {{ git.status.untracked }} untracked<template v-if="git.status.conflicted"> · <strong class="conflicted">{{ git.status.conflicted }} conflicted</strong></template>
-            <span v-if="git.status.operation" class="badge badge-warn">{{ git.status.operation }} in progress</span>
-          </dd>
-          <template v-if="git.status.upstream">
-            <dt>Remote</dt>
-            <dd data-project-ahead-behind :title="`Against ${git.status.upstream}, as of the last fetch`">
-              {{ git.status.ahead }} ahead · {{ git.status.behind }} behind<span v-if="git.status.ahead && git.status.behind" class="badge badge-warn">diverged</span>
+      <div class="grid grid-2 top">
+        <section class="card" data-project-repository>
+          <h2 class="card-title"><GitBranch /> Repository</h2>
+          <GitSummary :status="git?.status ?? null" :loading="git?.loading" :error="git?.error" />
+          <dl v-if="git?.status?.isRepo" class="facts">
+            <dt>Upstream</dt>
+            <dd class="mono">{{ git.status.upstream ?? 'none' }}</dd>
+            <dt>Changes</dt>
+            <dd data-project-changes>
+              {{ git.status.staged }} staged · {{ git.status.unstaged }} modified · {{ git.status.untracked }} untracked<template v-if="git.status.conflicted"> · <strong class="conflicted">{{ git.status.conflicted }} conflicted</strong></template>
+              <span v-if="git.status.operation" class="badge badge-warn">{{ git.status.operation }} in progress</span>
             </dd>
+            <template v-if="git.status.upstream">
+              <dt>Remote</dt>
+              <dd data-project-ahead-behind :title="`Against ${git.status.upstream}, as of the last fetch`">
+                {{ git.status.ahead }} ahead · {{ git.status.behind }} behind<span v-if="git.status.ahead && git.status.behind" class="badge badge-warn">diverged</span>
+              </dd>
+            </template>
+            <template v-if="git.status.lastCommit">
+              <dt>Last commit</dt>
+              <dd class="row commit">
+                <GitCommitHorizontal />
+                <span class="truncate selectable">{{ git.status.lastCommit.summary }}</span>
+                <span class="faint">{{ relativeTime(git.status.lastCommit.timestampMs) }}</span>
+              </dd>
+            </template>
+            <template v-if="project.remoteUrl">
+              <dt>Remote URL</dt>
+              <dd class="row mono selectable"><Link class="ic" /> {{ project.remoteUrl }}</dd>
+            </template>
+          </dl>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title"><FileText /> Stack and conventions</h2>
+          <div class="chips">
+            <span v-for="s in project.stack.stacks" :key="s" class="chip">{{ s }}</span>
+            <span v-for="pm in project.stack.packageManagers" :key="pm" class="chip">{{ pm }}</span>
+            <span v-if="!project.stack.stacks.length" class="faint">No stack detected</span>
+          </div>
+          <div class="docs">
+            <span class="badge" :class="project.stack.hasClaudeMd ? 'badge-ok' : ''">CLAUDE.md</span>
+            <span class="badge" :class="project.stack.hasAgentsMd ? 'badge-ok' : ''">AGENTS.md</span>
+            <span class="badge" :class="project.stack.hasClaudeDir ? 'badge-ok' : ''">.claude/</span>
+            <span class="badge" :class="project.stack.hasReadme ? 'badge-ok' : ''">README</span>
+          </div>
+          <template v-if="project.stack.scripts.length">
+            <div class="label scripts-label">Suggested commands <span class="faint">(detected, never run automatically)</span></div>
+            <ul class="scripts">
+              <li v-for="s in project.stack.scripts" :key="s.kind + s.command">
+                <span class="kind">{{ s.kind }}</span><code class="selectable">{{ s.command }}</code>
+              </li>
+            </ul>
           </template>
-          <template v-if="git.status.lastCommit">
-            <dt>Last commit</dt>
-            <dd class="row commit">
-              <GitCommitHorizontal />
-              <span class="truncate selectable">{{ git.status.lastCommit.summary }}</span>
-              <span class="faint">{{ relativeTime(git.status.lastCommit.timestampMs) }}</span>
-            </dd>
-          </template>
-          <template v-if="project.remoteUrl">
-            <dt>Remote URL</dt>
-            <dd class="row mono selectable"><Link class="ic" /> {{ project.remoteUrl }}</dd>
-          </template>
-        </dl>
-      </section>
-
-      <section class="card">
-        <h2 class="card-title"><FileText /> Stack and conventions</h2>
-        <div class="chips">
-          <span v-for="s in project.stack.stacks" :key="s" class="chip">{{ s }}</span>
-          <span v-for="pm in project.stack.packageManagers" :key="pm" class="chip">{{ pm }}</span>
-          <span v-if="!project.stack.stacks.length" class="faint">No stack detected</span>
-        </div>
-        <div class="docs">
-          <span class="badge" :class="project.stack.hasClaudeMd ? 'badge-ok' : ''">CLAUDE.md</span>
-          <span class="badge" :class="project.stack.hasAgentsMd ? 'badge-ok' : ''">AGENTS.md</span>
-          <span class="badge" :class="project.stack.hasClaudeDir ? 'badge-ok' : ''">.claude/</span>
-          <span class="badge" :class="project.stack.hasReadme ? 'badge-ok' : ''">README</span>
-        </div>
-        <template v-if="project.stack.scripts.length">
-          <div class="label scripts-label">Suggested commands <span class="faint">(detected, never run automatically)</span></div>
-          <ul class="scripts">
-            <li v-for="s in project.stack.scripts" :key="s.kind + s.command">
-              <span class="kind">{{ s.kind }}</span><code class="selectable">{{ s.command }}</code>
-            </li>
-          </ul>
-        </template>
-      </section>
-
-      <section class="card" data-project-environment>
-        <h2 class="card-title"><Boxes /> Environment</h2>
-        <p class="faint">What this project needs, read from its own files (they stay authoritative). Checking asks each tool for its version only; installing is always your step in a terminal.</p>
-        <div class="row-actions">
-          <button class="btn btn-sm" :disabled="envBusy" data-env-load @click="loadEnv(false)">Show requirements</button>
-          <button class="btn btn-sm" :disabled="envBusy" data-env-check @click="loadEnv(true)">Check this computer</button>
-        </div>
-        <template v-if="env">
-          <p class="faint">From the {{ env.from }}.</p>
-          <table class="env-table" data-env-table>
-            <tbody>
-              <tr v-for="(r, i) in envRows" :key="r.tool + r.source + i" :data-env-row="r.tool">
-                <td><strong>{{ r.name }}</strong></td>
-                <td class="mono">{{ r.constraint || 'any' }}</td>
-                <td class="faint">{{ r.source }}</td>
-                <td v-if="r.status">
-                  <span class="badge" :class="ENV_STATUS[r.status]">{{ r.status }}</span>
-                  <span v-if="r.installed" class="faint"> {{ r.installed }}</span>
-                  <button v-if="r.installCommand" class="btn btn-sm btn-ghost" :data-env-install="r.tool" @click="typeIntoTerminal(r.installCommand.join(' '))">Type install command</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-if="env.environment.containers.composeServices.length" class="faint">Local services ({{ env.environment.containers.composeFile }}): {{ env.environment.containers.composeServices.join(', ') }}</p>
-          <p v-if="env.environment.containers.devcontainer" class="faint">Dev container: {{ env.environment.containers.devcontainer }} <span v-if="env.environment.containers.devcontainerImage" class="mono">{{ env.environment.containers.devcontainerImage }}</span></p>
-          <p v-if="env.environment.envVars.length" class="faint">Environment variables (names only): <span class="mono">{{ env.environment.envVars.map((v) => v.name).join(', ') }}</span></p>
-          <p v-if="env.environment.setupSection" class="faint">Setup instructions: README.md — “{{ env.environment.setupSection }}”</p>
-        </template>
-      </section>
-
-      <section class="card" data-project-context-card>
-        <h2 class="card-title"><BookMarked /> Portable context</h2>
-        <p class="faint">An overview, architecture notes, the current state and this project's tasks, decisions and memory live in the workspace repository (<span class="mono">project-context/</span>), so they travel with the workspace. Facts are read from the project's files and Git; nothing is invented, and documents you edit are never overwritten.</p>
-        <button class="btn btn-sm" :disabled="contextBusy || !workspaces.active?.compat?.writable" data-project-context-init @click="initContext">Create or refresh</button>
-        <p v-if="contextResult" class="faint" data-project-context-result>
-          <span class="mono">{{ contextResult.dir }}/</span> — {{ contextResult.created.length }} created, {{ contextResult.updated.length }} updated, {{ contextResult.kept.length }} kept
-        </p>
-      </section>
-    </div>
-
-    <h2 class="section-title"><ListTodo class="title-ic" /> Open tasks <span class="count">{{ knowledge?.tasks.length ?? 0 }}</span></h2>
-    <div v-if="knowledge?.tasks.length" class="list" data-project-tasks>
-      <div v-for="t in knowledge.tasks" :key="t.path" class="list-row task-row" :class="{ 'for-review': t.status === 'review' }" :data-task="t.id">
-        <span class="badge" :class="{ 'badge-accent': t.status === 'review' }">{{ t.status === 'review' ? 'Ready for review' : (STATUS_LABELS[t.status as TaskStatus] ?? t.status) }}</span>
-        <span class="task-title">{{ t.title }}</span>
-        <span v-if="t.priority && t.priority !== 'medium'" class="badge" :class="{ 'badge-warn': t.priority === 'high', 'badge-error': t.priority === 'urgent' }">{{ t.priority }}</span>
-        <span v-if="t.branch" class="chip mono">{{ t.branch }}</span>
-        <button class="btn btn-sm" :class="t.status === 'review' ? 'btn-primary' : 'btn-ghost'" title="Mark this task done" data-task-done @click="setTaskStatus(t, 'done')"><Check /> Done</button>
-        <button class="btn btn-sm" :class="t.status === 'review' ? 'btn-ghost' : 'btn-primary'" :disabled="!project.available" @click="launchTask(t)"><Sparkles /> {{ t.status === 'review' ? 'Continue' : 'Launch' }}</button>
+        </section>
       </div>
-    </div>
-    <details v-if="knowledge?.doneTasks?.length" class="done-tasks" data-project-done>
-      <summary>Recently done <span class="count">{{ knowledge.doneTasks.length }}</span></summary>
-      <div class="list">
-        <div v-for="t in knowledge.doneTasks" :key="t.path" class="list-row task-row" :data-done-task="t.id">
-          <span class="badge badge-ok">Done</span>
-          <span class="task-title">{{ t.title }}</span>
-          <span v-if="t.branch" class="chip mono">{{ t.branch }}</span>
-          <button class="btn btn-sm btn-ghost" title="Reopen this task" data-task-reopen @click="setTaskStatus(t, 'ready')"><RotateCcw /> Reopen</button>
-        </div>
-      </div>
-    </details>
-    <div v-if="!knowledge?.tasks.length" class="empty">
-      <p>No open tasks for this project. Add tasks in <RouterLink to="/knowledge">Knowledge</RouterLink>, or let Claude create them with the NEXUS tools.</p>
-    </div>
 
-    <h2 class="section-title"><NotebookPen class="title-ic" /> Notes for {{ knowledge?.git.branch ?? 'this project' }} <span class="count">{{ knowledge?.notes.length ?? 0 }}</span></h2>
-    <div v-if="knowledge?.notes.length" class="list" data-project-notes>
-      <div v-for="n in knowledge.notes" :key="n.path" class="list-row">
-        <span class="badge">{{ n.kind }}</span>
-        <span class="task-title">{{ n.title }}</span>
-        <span v-if="n.relevance === 'this-branch'" class="chip mono">this branch</span>
-        <span v-else-if="n.relevance === 'inherited'" class="chip mono" :title="`Recorded on ${n.branch}; its commit is part of this branch`">from {{ n.branch }}</span>
-      </div>
-    </div>
-    <p v-if="knowledge?.hiddenOtherBranch" class="faint">{{ knowledge.hiddenOtherBranch }} note(s) of other branches are hidden — Git decides: their commits are not in the checked-out branch.</p>
-    <div v-if="!knowledge?.notes.length && !knowledge?.hiddenOtherBranch" class="empty">
-      <p>No notes yet. Claude can record branch-specific memory with <code>record_memory</code> (scope <code>branch</code>).</p>
-    </div>
-
-    <InstructionsPanel v-if="project.available" :project-id="project.id" class="instructions-card" />
-
-    <h2 class="section-title">Checkpoints <span class="count">{{ checkpoints.length }}</span></h2>
-    <div v-if="checkpoints.length" class="list">
-      <div v-for="c in checkpoints" :key="c.id" class="list-row checkpoint">
-        <span class="badge" :class="{ 'badge-ok': c.kind === 'done', 'badge-warn': c.kind === 'blocker', 'badge-accent': c.kind === 'decision' }">{{ c.kind }}</span>
-        <span class="cp-summary selectable">{{ c.summary }}</span>
-        <span class="faint cp-meta">{{ c.sessionTitle }} · {{ relativeTime(c.createdAt) }}</span>
-      </div>
-    </div>
-    <div v-else class="empty">
-      <p>No checkpoints yet. In a NEXUS-launched session Claude can record decisions, blockers and progress with the NEXUS <code>checkpoint</code> tool. They appear here.</p>
-    </div>
-
-    <h2 class="section-title">
-      Sessions <span class="count">{{ projectSessions.length }}</span>
-      <RouterLink v-if="projectSessions.length > 5" class="all-link" :to="{ name: 'sessions', query: { project: project.id } }" data-project-all-sessions>All {{ projectSessions.length }} sessions →</RouterLink>
-    </h2>
-    <div v-if="projectSessions.length" class="list">
-      <SessionRow v-for="s in projectSessions.slice(0, 5)" :key="s.id" :session="s" :show-project="false" />
-    </div>
-    <div v-else class="empty">
-      <p>No sessions yet. Launch Claude here to start one — NEXUS records it so you can resume later.</p>
-    </div>
-
-    <h2 class="section-title danger-title">Danger zone</h2>
-    <div class="card danger">
-      <div>
-        <strong>Remove from workspace</strong>
-        <p class="muted">Unregisters the project. Files and Git history stay exactly as they are.</p>
-      </div>
-      <button class="btn btn-danger" @click="unregister"><Trash2 /> Remove</button>
-    </div>
+      <UsageSummary :project-id="project.id" class="usage" />
     </template>
   </div>
   <div v-else class="page">
@@ -450,6 +501,85 @@ async function unregister() {
   width: 14px;
   height: 14px;
 }
+.tabs {
+  flex-wrap: wrap;
+}
+.tab-count {
+  color: var(--text-faint);
+  font-weight: 500;
+  font-size: 12px;
+}
+.tab-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.tab-dot.live {
+  background: var(--green);
+}
+.tab-dot.attention {
+  background: var(--amber);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 30%, transparent);
+}
+.more {
+  position: relative;
+}
+.more .menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  min-width: 210px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow, 0 8px 24px rgb(0 0 0 / 0.25));
+  display: grid;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.menu-item svg {
+  width: 15px;
+  height: 15px;
+}
+.section-title.first {
+  margin-top: 4px;
+}
+.nothing {
+  margin: 0 0 6px;
+}
+.usage {
+  margin-top: 16px;
+}
 .row-actions {
   display: flex;
   gap: 8px;
@@ -467,27 +597,6 @@ async function unregister() {
 }
 .back {
   margin: -8px 0 10px -8px;
-}
-.task-row .btn {
-  margin-left: auto;
-}
-.task-row .btn + .btn {
-  margin-left: 6px;
-}
-.task-row.for-review {
-  border-left: 3px solid var(--accent);
-}
-.done-tasks {
-  margin-top: 10px;
-}
-.done-tasks summary {
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-.done-tasks .task-title {
-  color: var(--text-muted);
 }
 .push-banner {
   align-items: center;
@@ -508,11 +617,6 @@ async function unregister() {
 }
 .facts dd .badge {
   margin-left: 6px;
-}
-.all-link {
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 500;
 }
 .task-title {
   font-weight: 550;

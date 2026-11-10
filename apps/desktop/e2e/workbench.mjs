@@ -250,6 +250,24 @@ try {
   check('…recorded with the session (depth, skill, folders)', learnSession?.integrations?.learn?.depth === 'quick' && learnSession?.integrations?.learn?.skill === 'nexus:learn-project' && learnSession?.integrations?.learn?.folders?.[0] === mono, JSON.stringify(learnSession?.integrations?.learn ?? null))
   const taskBody = (await inv('knowledge_read', { workspaceId: ws.id, id: learnTaskId })).body
   check('…and the notes are in the learning task, before NEXUS’s map', taskBody.indexOf('## Notes from the person') > 0 && taskBody.indexOf('mono/packages') > 0 && taskBody.indexOf('mono/packages') < taskBody.indexOf("## NEXUS's map"), taskBody.slice(0, 120))
+
+  // ADR-0048: the Sessions tab lists the project's sessions (count in the tab label); a row brings its terminal forward.
+  await click('[data-project-tab="sessions"]')
+  const sessRow = await cdp.waitFor(`document.querySelector('[data-project-sessions] [data-session="${learnSession?.id}"]')?.innerText`, 15000).catch(() => '')
+  const sessCount = await textOf('[data-tab-count="sessions"]')
+  check('the Sessions tab lists the launched session, its count in the tab label', sessRow.includes('Learn App') && /^\d+\/[1-9]\d*$/.test(sessCount.trim()), `${sessCount} · ${sessRow.replace(/\n/g, ' ').slice(0, 80)}`)
+  await cdp.evaluate(`[...document.querySelectorAll('button')].find((b) => (b.title || '').startsWith('Hide terminal'))?.click(); true`)
+  await cdp.evaluate(`document.querySelector('[data-project-sessions] [data-session="${learnSession?.id}"] .actions .btn')?.click(); true`)
+  const focused = await cdp.waitFor(`document.querySelector('section.panel.open') && document.querySelector('[data-tab-session="${learnSession?.id}"]')?.getAttribute('aria-selected') === 'true'`, 10000).catch(() => false)
+  const chipped = await cdp.evaluate(`!!document.querySelector('[data-tab-session="${learnSession?.id}"] [data-tab-project="${proj.id}"]') && !!document.querySelector('[data-terminal-only-project]')`)
+  check('…its row opens the terminal on that tab, which names the project (and the panel can narrow to it)', !!focused && chipped)
+  // The Tasks tab: the learning task in the list and on the board, counted in the tab label.
+  await click('[data-project-tab="tasks"]')
+  const taskRow = await cdp.waitFor(`document.querySelector('[data-project-tasks] [data-task="${learnTaskId}"]')?.innerText`, 15000).catch(() => '')
+  await click('[data-tasks-view="board"]')
+  const onBoard = await cdp.waitFor(`!!document.querySelector('[data-status] [data-task="${learnTaskId}"]')`, 15000).catch(() => false)
+  check('the Tasks tab lists the project’s open task and shows it on the board', taskRow.includes('Learn App') && !!onBoard && Number(await textOf('[data-tab-count="tasks"]')) >= 1, taskRow.replace(/\n/g, ' ').slice(0, 80))
+  await click('[data-tasks-view="list"]')
   await click('[data-project-tab="learn"]')
 
   // Back returns where you came from: project → Learn → Memory proposals (Knowledge) → Back → the project's Learn tab.

@@ -245,6 +245,7 @@ pub fn run() {
             commands::knowledge::knowledge_update,
             commands::knowledge::knowledge_task,
             commands::knowledge::project_knowledge,
+            commands::knowledge::needs_you,
             commands::knowledge::instructions_inspect,
             commands::knowledge::project_resume,
             commands::knowledge::knowledge_proposals,

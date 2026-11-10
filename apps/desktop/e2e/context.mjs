@@ -158,7 +158,7 @@ try {
 
   // 5. A task handed to the running session (it already has the project's context) instead of a new session.
   const t2 = await inv('knowledge_create', { workspaceId: ws.id, input: { kind: 'task', title: 'Fix rounding', projectId: project.id, body: 'Round cents.\n' } })
-  await cdp.evaluate(`location.hash = '#/projects/${project.id}'; true`)
+  await cdp.evaluate(`location.hash = '#/projects/${project.id}?tab=tasks'; true`)
   await cdp.waitFor(`!!document.querySelector('[data-task="${t2.id}"]')`, 15000)
   await cdp.evaluate(`[...document.querySelectorAll('[data-task="${t2.id}"] .btn')].find((b) => b.innerText.includes('Launch'))?.click(); true`)
   const startIn = await cdp.waitFor(`document.querySelector('[data-launch-start-in]')?.innerText`, 10000).catch(() => '')

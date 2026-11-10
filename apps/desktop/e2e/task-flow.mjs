@@ -139,7 +139,7 @@ try {
   const taskFile = setup.task.path
 
   // 1. Select the project, then the task, then launch Claude from the UI.
-  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}'; location.reload(); true`)
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}?tab=tasks'; location.reload(); true`)
   const listed = await cdp.waitFor(`document.querySelector('[data-project-tasks]')?.innerText.includes('Ship checkout')`, 20000).catch(() => false)
   check('the project page lists its open task', !!listed)
   await cdp.evaluate(`document.querySelector('[data-task="${setup.task.id}"] .btn-primary').click(), true`)
@@ -213,7 +213,7 @@ try {
   const resumed = (await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('session_list', { filter: null })`)).find((s) => s.resumedFrom === s1.id)
   check('the resumed session keeps the task', resumed?.taskId === setup.task.id && resumed?.running === true)
   check('resuming does not reset the task', readFileSync(taskFile, 'utf8').includes('status: review'))
-  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}', true`)
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}?tab=knowledge', true`)
   const note = await cdp.waitFor(`document.querySelector('[data-project-notes]')?.innerText.includes('Checkout uses the payment sandbox')`, 15000).catch(() => false)
   check('the branch note appears for the checked-out branch', !!note)
   const inspector = await cdp.waitFor(`document.querySelector('[data-instructions]')?.innerText.includes('NEXUS appends')`, 15000).catch(() => false)
@@ -235,15 +235,25 @@ try {
   check('approving writes an accepted decision file', !!approved && files.length === 1 && readFileSync(join(decisionsDir, files[0]), 'utf8').includes('status: accepted'), files.join(','))
 
   // Finished work: the task Claude put into review leads the list; Done moves it to "Recently done"; Reopen brings it back.
-  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}'; true`)
+  await cdp.evaluate(`location.hash = '#/projects/${setup.project.id}?tab=tasks'; true`)
   const review = await cdp.waitFor(`document.querySelector('[data-task="${setup.task.id}"].for-review')?.innerText`, 15000).catch(() => '')
   check('a task in review shows as ready for review', review.includes('Ready for review'), review.replace(/\n/g, ' ').slice(0, 80))
   await cdp.evaluate(`document.querySelector('[data-task="${setup.task.id}"] [data-task-done]').click(), true`)
   const done = await cdp.waitFor(`!document.querySelector('[data-task="${setup.task.id}"]') && !!document.querySelector('[data-done-task="${setup.task.id}"]')`, 15000).catch(() => false)
-  check('Done moves it to Recently done (the file says done)', !!done && readFileSync(setup.task.path, 'utf8').includes('status: done'))
+  // The list moves at once (optimistic); the file follows when the write finishes.
+  const fileSays = async (status) => {
+    for (let i = 0; i < 100; i++) {
+      if (readFileSync(setup.task.path, 'utf8').includes(`status: ${status}`)) return true
+      await new Promise((r) => setTimeout(r, 150))
+    }
+    return false
+  }
+  const doneWritten = await fileSays('done')
+  const toasts = await cdp.waitFor(`[...document.querySelectorAll('.toast')].map((t) => t.innerText).join(' | ').includes('Done:') && !document.querySelector('[data-done-task="${setup.task.id}"] [data-task-reopen]').disabled`, 10000).catch(() => false)
+  check('Done moves it to Recently done (the file says done)', !!done && doneWritten && !!toasts)
   await cdp.evaluate(`document.querySelector('[data-project-done]').open = true; document.querySelector('[data-done-task="${setup.task.id}"] [data-task-reopen]').click(); true`)
   const reopened = await cdp.waitFor(`!!document.querySelector('[data-task="${setup.task.id}"]')`, 15000).catch(() => false)
-  check('…and Reopen brings it back', !!reopened && readFileSync(setup.task.path, 'utf8').includes('status: ready'))
+  check('…and Reopen brings it back', !!reopened && (await fileSays('ready')))
 
   // Sessions can be filtered by project (kept in the URL).
   await cdp.evaluate(`location.hash = '#/sessions?project=${setup.project.id}'; true`)

@@ -1954,3 +1954,17 @@ export interface LearnDraft {
   updated: string | null
   body: string
 }
+
+/** What waits for the person (`inbox::Item`, ADR-0048). */
+export interface NeedsYouItem {
+  kind: 'session' | 'push-failed' | 'push' | 'workflow-review' | 'task-review' | 'draft' | 'approval' | 'kit'
+  /** What to open: the session, push request, workflow run, task, draft note, document or kit id. */
+  id: string
+  title: string
+  detail: string
+  projectId: string | null
+  projectName: string | null
+  /** For approvals: `constitution`, `rule` or `workflow` (each is approved in its own view). */
+  docKind: string | null
+  since: number | null
+}

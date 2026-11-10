@@ -15,6 +15,7 @@ pub mod env;
 pub mod error;
 pub mod git;
 pub mod host;
+pub mod inbox;
 pub mod kits;
 pub mod knowledge;
 pub mod notify;

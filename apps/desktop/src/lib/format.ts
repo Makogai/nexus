@@ -128,3 +128,10 @@ export const priorityLabels: Record<NotificationPriority, string> = {
   warning: 'Warning',
   info: 'Information',
 }
+
+/** A stable hue (0–359) for a project id: its terminal tabs and chips share one colour. */
+export function projectHue(id: string): number {
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
+  return h % 360
+}

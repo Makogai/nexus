@@ -114,6 +114,10 @@ async function archive() {
           <span>·</span>
           <span>{{ duration(s.startedAt, s.endedAt) }}</span>
         </template>
+        <template v-if="live && s.lastActivityAt">
+          <span>·</span>
+          <span :title="new Date(s.lastActivityAt).toLocaleString()" data-last-activity>active {{ relativeTime(s.lastActivityAt) }}</span>
+        </template>
         <template v-if="s.resumedFrom">
           <span>·</span>
           <span>resumed</span>
