@@ -25,7 +25,10 @@ refused.
    file: a Markdown file other than a README in a scanned folder, with no hidden component (editor temp files, `.git`).
    A folder counts only when it appears, vanishes or is renamed; its "modified" only echoes a change inside it. A test
    compares the predicate with the walk over the same tree. A watcher error or a rescan flag (an overflowing buffer during
-   a large checkout) counts as a change.
+   a large checkout) counts as a change. macOS (FSEvents) names a changed file by its real path — `/private/var/…` for a
+   folder watched as `/var/…`, the target of a symbolic link — so a change reported under a watched folder's real name
+   is mapped back to the watched name first (`watch::real_names`, `watch::as_watched`; 0.5.1, found by the 0.5.0 release
+   run's macOS tests).
 4. **Settle, then refresh incrementally on its own connection.** After the first relevant event the thread waits until
    400 ms pass without another (at most 2 s), then runs `knowledge::service::refresh` (unchanged files are not read) on a
    connection of its own, so a scan never holds the connection the UI uses. Every 5 s it looks at the active workspace and

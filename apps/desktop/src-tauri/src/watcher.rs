@@ -3,7 +3,7 @@
 //! scan never holds the connection the UI uses) and tells the UI when the index changed. The refreshes on window focus
 //! and after a session ends (ADR-0048) stay as the fallback for folders whose changes are not reported.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
@@ -42,12 +42,15 @@ pub struct Folders {
     events: Receiver<notify::Result<notify::Event>>,
     roots: Vec<Root>,
     watched: Vec<PathBuf>,
+    /// The watched folders under their real names: macOS reports changes by those (`watch::real_names`).
+    real_names: Vec<(PathBuf, PathBuf)>,
 }
 
 impl Folders {
     pub fn new() -> notify::Result<Self> {
         let (tx, events) = channel();
-        Ok(Folders { watcher: notify::recommended_watcher(tx)?, events, roots: Vec::new(), watched: Vec::new() })
+        let watcher = notify::recommended_watcher(tx)?;
+        Ok(Folders { watcher, events, roots: Vec::new(), watched: Vec::new(), real_names: Vec::new() })
     }
 
     /// Watch the folders of `roots` and nothing else. True when what is watched changed (a workspace was activated, a
@@ -66,6 +69,7 @@ impl Folders {
                 tracing::warn!(error = %e, dir = %dir.display(), "knowledge folder not watched; it refreshes on focus");
             }
         }
+        self.real_names = watch::real_names(&want);
         self.watched = want;
         true
     }
@@ -106,9 +110,14 @@ impl Folders {
             Ok(e) if e.need_rescan() => true,
             Ok(e) => {
                 let moved = matches!(e.kind, EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)));
-                !matches!(e.kind, EventKind::Access(_)) && e.paths.iter().any(|p| watch::affects_index(&self.roots, p, moved))
+                !matches!(e.kind, EventKind::Access(_)) && e.paths.iter().any(|p| self.affects_index(p, moved))
             }
         }
+    }
+
+    fn affects_index(&self, path: &Path, moved: bool) -> bool {
+        watch::affects_index(&self.roots, path, moved)
+            || watch::as_watched(&self.real_names, path).is_some_and(|p| watch::affects_index(&self.roots, &p, moved))
     }
 }
 
@@ -173,6 +182,7 @@ mod tests {
         while f.events.try_recv().is_ok() {}
     }
 
+    /// On macOS the temporary folder is `/var/…` and its changes are reported as `/private/var/…` (`watch::real_names`).
     #[test]
     fn documents_saved_created_moved_or_removed_are_seen_and_nothing_else_is() {
         let t = tempfile::tempdir().unwrap();
