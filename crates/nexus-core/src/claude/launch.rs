@@ -93,10 +93,7 @@ pub fn profile_env(
         set.push(("CLAUDE_CONFIG_DIR".into(), dir.to_string_lossy().into_owned(), Reason::ProfileManaged));
     }
     set.extend(extra.iter().cloned());
-    let policy = Policy {
-        claude: true,
-        inherit_provider_env: profile.inherit_provider_env,
-    };
+    let policy = Policy::agent(crate::agent::Kind::Claude, profile.inherit_provider_env);
     env::compose(base_env, &set, policy)
 }
 

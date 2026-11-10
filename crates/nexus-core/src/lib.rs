@@ -4,9 +4,11 @@
 //! This crate has no dependency on Tauri, PTYs or any UI (see `docs/ARCHITECTURE.md`).
 
 pub mod activity;
+pub mod agent;
 pub mod attention;
 pub mod checkpoint;
 pub mod claude;
+pub mod codex;
 pub mod context;
 pub mod db;
 pub mod devenv;

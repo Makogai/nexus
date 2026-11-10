@@ -202,7 +202,7 @@ pub fn preview(r: &PreviewRequest<'_>) -> Result<Preview> {
             ws: &ws,
             project: project.as_ref(),
             task_id: r.task_id,
-            inspection: &claude,
+            inspection: Some(&claude),
             ctx: &ctx,
             mcp_on: nexus.mcp.is_none(),
             hooks_on: nexus.hooks.is_none(),
@@ -222,14 +222,14 @@ pub fn preview(r: &PreviewRequest<'_>) -> Result<Preview> {
 /// NEXUS-authored text appended after the work profile — approved rules, the commit-message note, the task pointer,
 /// the workflow line, a learning task's rules. One builder for [`prepare`] (which sends it) and [`preview`] (the Context
 /// Inspector's counts), so the two cannot drift.
-struct Append {
-    parts: Vec<String>,
-    rules: Option<context::LaunchRules>,
-    task: Option<tasks::TaskView>,
+pub(crate) struct Append {
+    pub(crate) parts: Vec<String>,
+    pub(crate) rules: Option<context::LaunchRules>,
+    pub(crate) task: Option<tasks::TaskView>,
     /// Characters of the task-related parts (pointer, workflow line, learning rules) with their separators.
-    task_chars: usize,
-    learn: Option<crate::project::learn::Depth>,
-    add_dirs: Vec<std::path::PathBuf>,
+    pub(crate) task_chars: usize,
+    pub(crate) learn: Option<crate::project::learn::Depth>,
+    pub(crate) add_dirs: Vec<std::path::PathBuf>,
 }
 
 impl Append {
@@ -238,25 +238,26 @@ impl Append {
     }
 }
 
-struct AppendInput<'a> {
-    conn: &'a Connection,
-    data_dir: &'a Path,
-    ws: &'a workspace::Workspace,
-    project: Option<&'a project::Project>,
-    task_id: Option<&'a str>,
-    inspection: &'a Inspection,
-    ctx: &'a crate::context::Settings,
-    mcp_on: bool,
-    hooks_on: bool,
-    run: Option<&'a crate::workflow::run::Run>,
+pub(crate) struct AppendInput<'a> {
+    pub(crate) conn: &'a Connection,
+    pub(crate) data_dir: &'a Path,
+    pub(crate) ws: &'a workspace::Workspace,
+    pub(crate) project: Option<&'a project::Project>,
+    pub(crate) task_id: Option<&'a str>,
+    /// What Claude loads itself (rules already in a CLAUDE.md are not repeated); `None` for other agents.
+    pub(crate) inspection: Option<&'a Inspection>,
+    pub(crate) ctx: &'a crate::context::Settings,
+    pub(crate) mcp_on: bool,
+    pub(crate) hooks_on: bool,
+    pub(crate) run: Option<&'a crate::workflow::run::Run>,
     /// A new session for the task (prepare only): move a `backlog`/`ready` task to `in-progress` first.
-    start_task: bool,
+    pub(crate) start_task: bool,
 }
 
-fn build_append(i: &AppendInput<'_>) -> Result<Append> {
+pub(crate) fn build_append(i: &AppendInput<'_>) -> Result<Append> {
     let stacks = i.project.map(|p| p.stack.stacks.clone()).unwrap_or_default();
     let scope = i.project.map(|p| (p.id.as_str(), stacks.as_slice()));
-    let lr = context::launch_rules_with(i.conn, &i.ws.id, scope, Some(i.inspection), i.task_id, &context::RuleOptions::from(i.ctx))?;
+    let lr = context::launch_rules_with(i.conn, &i.ws.id, scope, i.inspection, i.task_id, &context::RuleOptions::from(i.ctx))?;
     let mut parts: Vec<String> = lr.text.clone().into_iter().collect();
     // Commit messages come from the session that made the changes (ADR-0042) — NEXUS-authored, one line.
     if i.mcp_on {
@@ -304,7 +305,7 @@ fn build_append(i: &AppendInput<'_>) -> Result<Append> {
 }
 
 /// How the task's (untrusted) text reaches Claude: hook context at session start, else the MCP tools, else not at all.
-fn task_delivery(hooks_on: bool, mcp_on: bool) -> &'static str {
+pub(crate) fn task_delivery(hooks_on: bool, mcp_on: bool) -> &'static str {
     match (hooks_on, mcp_on) {
         (true, _) => "session-start",
         (false, true) => "tools",
@@ -341,7 +342,7 @@ pub fn prepare(r: &Request<'_>) -> Result<Prepared> {
                 ws,
                 project: project.as_ref(),
                 task_id: r.task_id,
-                inspection: &inspection,
+                inspection: Some(&inspection),
                 ctx: &ctx,
                 mcp_on,
                 hooks_on,

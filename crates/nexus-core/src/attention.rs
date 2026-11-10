@@ -110,6 +110,11 @@ pub fn owns(s: &Session, payload: &Value) -> bool {
     }
 }
 
+/// The agent's short name for messages ("Codex finished in …"); sessions from before ADR-0052 are Claude's.
+fn agent_name(s: &Session) -> &'static str {
+    s.agent.unwrap_or(crate::agent::Kind::Claude).short()
+}
+
 fn set_kind(conn: &Connection, id: &str, kind: Option<&str>, text: Option<&str>) -> Result<()> {
     conn.execute(
         "UPDATE sessions SET attention_kind = ?2, attention_at = CASE WHEN ?2 IS NULL THEN NULL ELSE ?3 END,
@@ -161,7 +166,7 @@ pub fn apply(conn: &Connection, s: &Session, signal: Signal) -> Result<()> {
             if s.attention_kind.as_deref() != Some(ERROR) {
                 notify::publish(
                     conn,
-                    NewEvent::for_session(Category::AgentFinished, "hook", s, format!("Claude finished in “{label}”"))
+                    NewEvent::for_session(Category::AgentFinished, "hook", s, format!("{} finished in “{label}”", agent_name(s)))
                         .body("Waiting for your next prompt.")
                         .dedupe(format!("turn:{}", s.id)),
                 )?;
@@ -226,9 +231,9 @@ impl Request {
 pub fn request(conn: &Connection, s: &Session, reason: Request, message: &str) -> Result<notify::Published> {
     let message = crate::knowledge::tasks::escape_untrusted(message, 200);
     let (category, title, priority) = match reason {
-        Request::Question => (Category::InputRequired, format!("Claude needs your input in “{}”", s.title), Priority::Action),
+        Request::Question => (Category::InputRequired, format!("{} needs your input in “{}”", agent_name(s), s.title), Priority::Action),
         Request::Review => (Category::ReviewRequired, format!("Ready for your review in “{}”", s.title), Priority::Action),
-        Request::Done => (Category::AgentFinished, format!("Claude reports done in “{}”", s.title), Priority::Success),
+        Request::Done => (Category::AgentFinished, format!("{} reports done in “{}”", agent_name(s), s.title), Priority::Success),
     };
     let published = notify::publish(
         conn,
@@ -300,6 +305,11 @@ pub fn status(s: &Session, live: bool) -> SessionStatus {
             Some(IDLE) => return reported(Status::Idle, s.attention_at, None),
             Some(ERROR) => return reported(Status::Error, s.attention_at, s.attention.clone()),
             _ => {}
+        }
+        if s.agent == Some(crate::agent::Kind::Codex) {
+            // No hooks for Codex (ADR-0052 §5): only finished turns are reported.
+            let detail = "Codex reports finished turns to NEXUS, not permission prompts or questions";
+            return SessionStatus { status: Status::Running, certainty: "assumed", since: s.last_activity_at, detail: Some(detail.into()) };
         }
         if !hooks_enabled(s) {
             return SessionStatus { status: Status::Unknown, certainty: "assumed", since: None, detail: Some("NEXUS hooks are off for this session; prompts cannot be detected".into()) };

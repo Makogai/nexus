@@ -1,6 +1,7 @@
 //! `nexus` — the NEXUS command-line interface. Every command is a thin layer over `nexus-core`; nothing here
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
+mod agents;
 mod backup;
 mod constitution;
 mod context;
@@ -111,8 +112,21 @@ enum Command {
     /// Show the instruction files Claude loads for a profile and project (CLAUDE.md layers, rules, imports) and what
     /// NEXUS appends. Read-only.
     Instructions(instructions::InstructionsArgs),
-    /// Start Claude Code in this terminal with a profile's own configuration.
+    /// Start an AI agent in this terminal (Claude Code by default; `--agent codex`) with a profile's own configuration.
     Launch(launch::LaunchArgs),
+    /// AI agents beyond Claude Code (OpenAI Codex CLI): what NEXUS gives their sessions, their profiles (ADR-0052).
+    #[command(subcommand)]
+    Agents(agents::AgentCmd),
+    /// Codex's turn-notification program for NEXUS sessions (started by Codex via `-c notify=[…]`). Always exits 0.
+    #[command(hide = true)]
+    AgentNotify {
+        #[arg(long)]
+        agent: String,
+        #[arg(long)]
+        session: String,
+        /// The JSON payload Codex appends.
+        payload: Option<String>,
+    },
     /// NEXUS MCP server over stdio, bound to one NEXUS session (started by Claude from the session's --mcp-config).
     /// `--list-tools` prints the server's tool definitions as JSON instead (no session, nothing is opened).
     Mcp {
@@ -340,6 +354,8 @@ fn main() -> ExitCode {
         Command::Workflow(c) => workflow::run_workflow(&ctx, c),
         Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),
+        Command::Agents(c) => agents::run(&ctx, c),
+        Command::AgentNotify { agent, session, payload } => Ok(agents::notify(&ctx, &agent, &session, payload.as_deref())),
         Command::Mcp { session, .. } => mcp::run(&ctx, &session.unwrap_or_default()),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),
     };

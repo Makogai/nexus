@@ -1124,6 +1124,82 @@ fn environment_requirements_and_claude_code_setup() {
     assert_eq!(v["docsUrl"], "https://code.claude.com/docs/en/setup");
 }
 
+fn fake_codex() -> PathBuf {
+    let exe = if cfg!(windows) { "fake-codex.exe" } else { "fake-codex" };
+    let path = Path::new(NEXUS).parent().unwrap().join(exe);
+    if !path.is_file() {
+        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+        assert!(Command::new(cargo).args(["build", "-q", "-p", "fake-claude", "--bin", "fake-codex"]).status().unwrap().success());
+    }
+    path
+}
+
+/// ADR-0052: a Codex session gets the NEXUS MCP server and NEXUS's context through `-c` overrides only (fake-codex
+/// parses them like Codex and asks the server for its tools), a clean environment, and — through Codex's notify
+/// program — its conversation id and finished turns, without any prompt text stored; resume continues that thread.
+#[test]
+fn codex_sessions_get_nexus_through_overrides_and_resume_their_thread() {
+    let e = Env::new();
+    e.setup();
+    let added = e.json(&["agents", "add", "codex", "--executable", fake_codex().to_str().unwrap(), "--work-profile", "professional", "--arg=--search"]);
+    assert_eq!((added["agent"].as_str(), added["homeDir"].is_null()), (Some("codex"), true), "{added}");
+    let refused = e.run(&["agents", "add", "codex", "--name", "Yolo", "--arg=--dangerously-bypass-approvals-and-sandbox"]);
+    assert!(!refused.status.success());
+
+    let report = e.data.parent().unwrap().join("codex.json");
+    let out = e
+        .cmd(&["launch", "--agent", "codex", "--project", "repo", "-q"])
+        .env("FAKE_CODEX_REPORT", &report)
+        .env("FAKE_CODEX_MCP", "1")
+        .env("FAKE_CODEX_TURN", "1")
+        .env("CODEX_HOME", "/parent/codex-home")
+        .env("OPENAI_API_KEY", "sk-ambient-openai")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let r = read_report(&report);
+    assert_eq!(r["fakeCodex"], true);
+    let env = &r["env"];
+    assert!(env["CODEX_HOME"].is_null() && env["OPENAI_API_KEY"].is_null() && env["CLAUDECODE"].is_null(), "clean environment: {env}");
+    assert!(env["NEXUS_SESSION_ID"].is_string() && env["NEXUS_PROJECT_ID"].is_string());
+    let o = &r["overrides"];
+    assert!(nexus_core::paths::same_path(Path::new(o["mcp_servers.nexus.command"].as_str().unwrap()), Path::new(NEXUS)), "{o}");
+    let listed = Command::new(NEXUS).args(["mcp", "--list-tools"]).output().unwrap();
+    let defs: Vec<Value> = serde_json::from_slice(&listed.stdout).unwrap();
+    let names: Vec<&str> = defs.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(r["mcpTools"].as_array().map(|a| a.iter().map(|t| t.as_str().unwrap()).collect::<Vec<_>>()), Some(names), "Codex sees every NEXUS tool: {}", r["mcpError"]);
+    let instructions = o["developer_instructions"].as_str().unwrap();
+    assert!(instructions.starts_with("NEXUS work profile: PROFESSIONAL") && instructions.contains("propose_commit_message"), "{instructions}");
+    assert_eq!(r["notified"], true, "the notify program ran");
+    let args: Vec<String> = serde_json::from_value(r["args"].clone()).unwrap();
+    assert_eq!(args[0], "--search", "the profile's allowlisted options");
+
+    let sessions = e.json(&["sessions"]);
+    let s = &sessions[0];
+    assert_eq!((s["agent"].as_str(), s["state"].as_str(), s["turns"].as_i64()), (Some("codex"), Some("exited"), Some(1)), "{s}");
+    let thread = s["claudeSessionId"].as_str().unwrap().to_string();
+    assert_eq!(thread, "0199a213-81c0-7800-8aa1-bbab2a035a53", "the conversation id came from Codex");
+    assert_eq!(s["integrations"]["hooks"]["state"], "unavailable");
+    let notes = e.json(&["notifications", "list", "--all"]).to_string();
+    assert!(notes.contains("Codex finished") && !notes.contains("FAKE PROMPT TEXT") && !notes.contains("FAKE ANSWER TEXT"), "{notes}");
+
+    // Resume continues that thread with fresh session-scoped overrides.
+    let report2 = e.data.parent().unwrap().join("codex-resume.json");
+    let out = e.cmd(&["launch", "--agent", "codex", "--resume", "last", "--cwd", e.repo.to_str().unwrap(), "-q"]).env("FAKE_CODEX_REPORT", &report2).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let r2 = read_report(&report2);
+    let args2: Vec<String> = serde_json::from_value(r2["args"].clone()).unwrap();
+    assert_eq!((args2.first().map(String::as_str), args2.last().map(String::as_str)), (Some("resume"), Some(thread.as_str())));
+    let resumed = &e.json(&["sessions"])[0];
+    assert_eq!((resumed["resumedFrom"].as_str(), resumed["agent"].as_str()), (s["id"].as_str(), Some("codex")));
+    assert!(r2["overrides"]["mcp_servers.nexus.args"].to_string().contains(resumed["id"].as_str().unwrap()), "a new session scope");
+
+    // `nexus agents list` says what Codex sessions get.
+    let list = e.json(&["agents", "list"]);
+    let codex = list["agents"].as_array().unwrap().iter().find(|a| a["id"] == "codex").unwrap().clone();
+    assert!(codex["capabilities"].as_array().unwrap().iter().any(|c| c["id"] == "usage" && c["support"] == "unavailable"));
+}
+
 /// Dev Environment (ADR-0051): `nexus tools` lists this computer's tools with every project need and whether it is met;
 /// an unmet need (here a Node.js version no computer has) makes the exit code 1.
 #[test]

@@ -1,7 +1,8 @@
 //! Session records and lifecycle (ADR-0008).
 //!
-//! A *session* is a NEXUS-managed terminal process (Claude or a shell). A *conversation* is Claude's own
-//! resumable transcript, identified by the `claude_session_id` NEXUS assigned with `--session-id`.
+//! A *session* is a NEXUS-managed terminal process (an AI agent or a shell). A *conversation* is the agent's own
+//! resumable transcript: for Claude the `claude_session_id` NEXUS assigned with `--session-id`; for Codex the thread id
+//! Codex reported after its first turn (ADR-0052), kept in the same column.
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,7 @@ use crate::{new_id, now_ms};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
+    /// An AI agent session (historical name, kept in the database): which agent is in `Session::agent`.
     Claude,
     Shell,
 }
@@ -77,6 +79,10 @@ pub struct Session {
     pub transcript_path: Option<PathBuf>,
     /// Knowledge task this session works on (ADR-0018).
     pub task_id: Option<String>,
+    /// Which agent an agent session runs (ADR-0052); `None` for shells.
+    pub agent: Option<crate::agent::Kind>,
+    /// The agent profile of a non-Claude agent session (Claude sessions use `profile_id`).
+    pub agent_profile_id: Option<String>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,
     pub profile_id: Option<String>,
@@ -117,12 +123,15 @@ pub struct NewSession {
     pub program: String,
     pub resumed_from: Option<String>,
     pub task_id: Option<String>,
+    /// The agent of an agent session (`None` = Claude for `Kind::Claude`, nothing for shells).
+    pub agent: Option<crate::agent::Kind>,
+    pub agent_profile_id: Option<String>,
 }
 
 const SELECT: &str = "SELECT id, kind, workspace_id, project_id, profile_id, claude_session_id, title, cwd, branch,
     work_profile, effort, model, program, pid, state, exit_code, error, resumed_from, started_at, ended_at,
     archived_at, host, host_id, integrations, turns, prompts, subagents, last_activity_at, attention, end_reason,
-    transcript_path, task_id, attention_kind, attention_at FROM sessions";
+    transcript_path, task_id, attention_kind, attention_at, agent, agent_profile_id FROM sessions";
 
 fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
     let kind: String = r.get(1)?;
@@ -143,6 +152,8 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<Session> {
         task_id: r.get(31)?,
         attention_kind: r.get(32)?,
         attention_at: r.get(33)?,
+        agent: r.get::<_, Option<String>>(34)?.as_deref().and_then(crate::agent::Kind::parse),
+        agent_profile_id: r.get(35)?,
         workspace_id: r.get(2)?,
         project_id: r.get(3)?,
         profile_id: r.get(4)?,
@@ -192,6 +203,12 @@ pub fn insert_starting(conn: &Connection, s: NewSession) -> Result<Session> {
             s.task_id,
         ],
     )?;
+    let kind = s.kind.unwrap_or(Kind::Claude);
+    let agent = match kind {
+        Kind::Claude => Some(s.agent.unwrap_or(crate::agent::Kind::Claude).id()),
+        Kind::Shell => None,
+    };
+    conn.execute("UPDATE sessions SET agent = ?2, agent_profile_id = ?3 WHERE id = ?1", params![id, agent, s.agent_profile_id])?;
     // Where the project stood when the session started: commits made during it can be listed for its development
     // record (ADR-0038). Claude sessions in a Git repository only; a cheap rev-parse.
     if s.kind.unwrap_or(Kind::Claude) == Kind::Claude && s.project_id.is_some()

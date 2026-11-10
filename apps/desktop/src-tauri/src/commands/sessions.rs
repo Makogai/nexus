@@ -305,6 +305,8 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                     program: exe.display().to_string(),
                     resumed_from: None,
                     task_id: integrations.task.as_ref().map(|t| t.id.clone()),
+                    agent: Some(nexus_core::agent::Kind::Claude),
+                    agent_profile_id: None,
                 },
             )?;
             session::set_integrations(&db, &s.id, &integrations)?;
@@ -416,6 +418,8 @@ pub async fn session_resume(
                     program: exe.display().to_string(),
                     resumed_from: Some(prev.id.clone()),
                     task_id: prev.task_id.clone(),
+                    agent: Some(nexus_core::agent::Kind::Claude),
+                    agent_profile_id: None,
                 },
             )?;
             session::set_integrations(&db, &s.id, &integrations)?;

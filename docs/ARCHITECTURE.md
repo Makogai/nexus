@@ -259,6 +259,8 @@ knowledge_approvals(path PK, content_hash, approved_at)                         
 --      message, created_at, decided_at) (ADR-0043)
 -- v19: learn_folders(project_id FK, path, added_at) — extra folders for learning sessions (ADR-0045)
 -- v20: push_requests.failure_kind (rejected|auth|offline|remote-missing|timeout|other), dismissed_at (ADR-0047)
+-- v21: agent_profiles(id, agent, name, home_dir NULL = the agent's default, executable, extra args, provider env, turn
+--      notifications, defaults); sessions.agent ('claude' backfilled, 'codex'), agent_profile_id FK (ADR-0052)
 ```
 
 Timestamps are Unix milliseconds (INTEGER). Foreign keys enforced (`PRAGMA foreign_keys=ON`).

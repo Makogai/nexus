@@ -269,6 +269,8 @@ pub fn summarize(conn: &Connection, data_dir: &Path, home: &Path, project_id: &s
         !s.state.is_live()
             && s.cwd.is_dir()
             && match (&s.profile_id, &s.claude_session_id) {
+                // Codex: the thread id arrives only after a finished turn (ADR-0052 §6).
+                (_, Some(_)) if s.agent == Some(crate::agent::Kind::Codex) => s.agent_profile_id.is_some(),
                 (Some(pid), Some(csid)) => profiles.iter().find(|p| &p.id == pid).is_some_and(|p| session::conversation_recorded(&p.effective_config_dir(home), csid)),
                 _ => false,
             }

@@ -25,36 +25,39 @@ use crate::Ctx;
 
 #[derive(Args)]
 pub struct LaunchArgs {
-    /// Claude profile (name or id). Optional when only one profile is registered.
+    /// The agent: claude (default) or codex (ADR-0052).
+    #[arg(long, default_value = "claude")]
+    pub(crate) agent: String,
+    /// Profile (name or id) of that agent. Optional when only one is registered.
     #[arg(long, short = 'p')]
-    profile: Option<String>,
+    pub(crate) profile: Option<String>,
     /// Project of the active workspace (name or id). Default: the project containing the working directory.
     #[arg(long)]
-    project: Option<String>,
+    pub(crate) project: Option<String>,
     /// Working directory when no project is given (default: current directory).
     #[arg(long, value_name = "DIR")]
-    cwd: Option<String>,
+    pub(crate) cwd: Option<String>,
     /// Engineering rigor: prototype | balanced | professional | critical.
     #[arg(long = "work-profile", short = 'w')]
-    work_profile: Option<String>,
-    /// Native reasoning effort: low | medium | high | xhigh | max.
+    pub(crate) work_profile: Option<String>,
+    /// Native reasoning effort (Claude Code): low | medium | high | xhigh | max.
     #[arg(long)]
-    effort: Option<String>,
+    pub(crate) effort: Option<String>,
     #[arg(long)]
-    model: Option<String>,
+    pub(crate) model: Option<String>,
     /// Session name shown in Claude and NEXUS.
     #[arg(long)]
-    name: Option<String>,
+    pub(crate) name: Option<String>,
     /// Resume a NEXUS session (id or id prefix), or `last` for the most recent resumable one here.
     #[arg(long, value_name = "SESSION|last", conflicts_with = "task")]
-    resume: Option<String>,
+    pub(crate) resume: Option<String>,
     /// Work on a task of the active workspace (id, its last digits, or title): its project is used, a backlog/ready task
-    /// moves to in-progress, and Claude gets a short brief plus the NEXUS task tools.
+    /// moves to in-progress, and the agent gets a short pointer plus the NEXUS task tools.
     #[arg(long)]
-    task: Option<String>,
+    pub(crate) task: Option<String>,
     /// Do not print the one-line launch summary.
     #[arg(long, short = 'q')]
-    quiet: bool,
+    pub(crate) quiet: bool,
 }
 
 struct Plan {
@@ -73,6 +76,10 @@ struct Plan {
 }
 
 pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
+    match crate::agents::parse_agent(&a.agent)? {
+        nexus_core::agent::Kind::Claude => {}
+        other => return crate::agents::launch(ctx, &a, other),
+    }
     let conn = ctx.db()?;
     let plan = if let Some(r) = a.resume.as_deref() {
         plan_resume(&conn, ctx, &a, r)?
@@ -147,6 +154,8 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
             program: exe.display().to_string(),
             resumed_from: plan.resumed_from.clone(),
             task_id: plan.task_id.clone(),
+            agent: Some(nexus_core::agent::Kind::Claude),
+            agent_profile_id: None,
         },
     )?;
     session::set_integrations(&conn, &session.id, &integrations)?;
@@ -225,7 +234,7 @@ pub fn run(ctx: &Ctx, a: LaunchArgs) -> Result<i32> {
 }
 
 /// Lease refresh on its own connection (a `Connection` is not shared across threads).
-fn spawn_heartbeat(db_path: PathBuf, host_id: String, session_id: String, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
+pub(crate) fn spawn_heartbeat(db_path: PathBuf, host_id: String, session_id: String, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let Ok(conn) = db::open(&db_path) else { return };
         let mut last = Instant::now();
@@ -283,7 +292,7 @@ fn starts_with_path(path: &Path, prefix: &Path) -> bool {
 }
 
 /// The task a launch works on: id, id prefix or exact title among the active workspace's tasks.
-fn find_task(conn: &Connection, data_dir: &Path, ws: Option<&workspace::Workspace>, q: &str) -> Result<nexus_core::knowledge::index::Item> {
+pub(crate) fn find_task(conn: &Connection, data_dir: &Path, ws: Option<&workspace::Workspace>, q: &str) -> Result<nexus_core::knowledge::index::Item> {
     let ws = ws.ok_or_else(|| CoreError::invalid("tasks belong to a workspace — activate one first"))?;
     knowledge::refresh(conn, data_dir, ws)?;
     let tasks: Vec<_> = knowledge::list(conn, ws, &[DocKind::Task], false)?.into_iter().filter(|t| t.id.is_some()).collect();

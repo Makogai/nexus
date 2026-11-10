@@ -37,12 +37,17 @@ const SHIM_FIX: &str = "This is a package-manager shim, which NEXUS does not lau
 
 /// Is this path something NEXUS may spawn directly?
 pub fn launchability(path: &Path) -> (bool, Option<String>) {
+    native_launchability(path, SHIM_FIX)
+}
+
+/// The same rule for any agent's executable: native programs only; `shim_fix` explains what to do about a shim.
+pub fn native_launchability(path: &Path, shim_fix: &str) -> (bool, Option<String>) {
     if !path.is_file() {
         return (false, Some("file not found".into()));
     }
     let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
     match ext.as_deref() {
-        Some("cmd" | "bat" | "ps1") => (false, Some(SHIM_FIX.into())),
+        Some("cmd" | "bat" | "ps1") => (false, Some(shim_fix.into())),
         Some("exe") | Some("com") => (true, None),
         None if !cfg!(windows) => (true, None),
         _ if cfg!(windows) => (false, Some("not a Windows executable".into())),
