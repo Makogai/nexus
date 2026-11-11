@@ -203,7 +203,8 @@ and shipped later; plain task session.
 
 ## Stage: Agents & Dev Environment (owner request, 2026-11-10)
 
-Branch `milestone/agents-dev-environment` (off `main` at `431f8c6`). Decisions: ADR-0051 (dev environment), ADR-0052
+Branch `milestone/agents-dev-environment` (off `main` at `431f8c6`; merged as `f7248dd`, tagged `v0.5.1` together with
+the macOS watcher fix — the `v0.5.0` release run failed on macOS). Decisions: ADR-0051 (dev environment), ADR-0052
 (agents beyond Claude). Owner: Codex first, built so further agents are easy to add; install commands stay typed, never
 run (ADR-0051 §7).
 
@@ -217,6 +218,7 @@ run (ADR-0051 §7).
 | G2 | Codex adapter: argv builder (`-c` TOML overrides: MCP server, `developer_instructions`, `notify`), refused extra arguments, `codex::prepare` (task delivery through tools), `nexus agent-notify` (thread id + turn ended, no text stored), resume only with a recorded thread id; `fake-codex` | core + PTY integration with `fake-codex` + CLI E2E | ✅ (core + CLI E2E with `fake-codex`) |
 | G3 | Desktop and CLI: Codex profiles (detect default, register a home), agent choice when launching from a project or task, agent badges, capability explanations; `nexus launch --agent codex`, `nexus agents` | vitest + desktop E2E with `fake-codex` | ✅ (CLI, vitest; desktop E2E `agents.mjs` 16/16) |
 | G4 | Real Codex check by the owner: NEXUS tools listed in a session, thread id recorded after a turn, resume | `docs/MANUAL_CHECKS.md` | ☐ |
+| R1 | Release 0.5.1: this stage, the macOS knowledge-watcher fix, push reviews of a new branch inspect only what the remote lacks, copyable findings; versions, release notes, full verification | CURRENT_STATE 0.5.1 log; CI run 42981710177 green on Windows, Ubuntu and macOS | ✅ merged, tagged `v0.5.1` |
 
 Later: a workspace toolchain baseline in the manifest; Codex review as a workflow step (M26); Gemini CLI, GitHub Copilot
 CLI and OpenCode adapters (each measured first, as Codex was).
