@@ -175,6 +175,9 @@ the watch began; the test creates `tasks/` right before `arm`, and a created fol
 macOS event was dropped, so this race could not show. The app is unaffected (one extra refresh that finds nothing).
 Fix on `fix/macos-watcher-test-race`: the test drains after `arm`, and the negative check lists the relevant events it
 saw (`relevant_within`), so a recurrence names its cause.
+Owner chose to re-run the failed job for `v0.5.1` (`gh run rerun 42983434559 --failed`): attempt 2 **success** — macOS
+Rust passed, *Draft release* created **NEXUS v0.5.1** (draft) with the same file set as v0.1.5 and `latest.json` 0.5.1
+with signed entries for windows-x86_64, darwin-aarch64, darwin-x86_64 and linux-x86_64. Publishing is the owner's.
 
 | # | Command (`CARGO_BUILD_JOBS=2`) | Result |
 | --- | --- | --- |
