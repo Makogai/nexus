@@ -177,7 +177,9 @@ Fix on `fix/macos-watcher-test-race`: the test drains after `arm`, and the negat
 saw (`relevant_within`), so a recurrence names its cause.
 Owner chose to re-run the failed job for `v0.5.1` (`gh run rerun 42983434559 --failed`): attempt 2 **success** — macOS
 Rust passed, *Draft release* created **NEXUS v0.5.1** (draft) with the same file set as v0.1.5 and `latest.json` 0.5.1
-with signed entries for windows-x86_64, darwin-aarch64, darwin-x86_64 and linux-x86_64. Publishing is the owner's.
+with signed entries for windows-x86_64, darwin-aarch64, darwin-x86_64 and linux-x86_64. **Published by the owner
+2026-11-11 09:08 UTC** (`https://github.com/Makogai/nexus/releases/tag/v0.5.1`), now the latest release; `pages.yml` run
+42992650213 redeployed the site (`release.json` says 0.5.1) and `releases/latest/download/latest.json` resolves to v0.5.1.
 
 | # | Command (`CARGO_BUILD_JOBS=2`) | Result |
 | --- | --- | --- |
