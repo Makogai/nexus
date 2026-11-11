@@ -407,7 +407,7 @@ pub fn review_push(s: &Sync<'_>) -> Result<PushReview> {
     };
     let commits = git::log_range(root, &range, 200)?;
     let files = git::diff_raw(root, &base, Some("HEAD"))?;
-    let inspection = if commits.is_empty() { Inspection::default() } else { inspect::inspect_history(root, &s.ctx(), &range)? };
+    let inspection = if commits.is_empty() { Inspection::default() } else { inspect::inspect_history(root, &s.ctx(), &[&range])? };
     let head = git::head(root).unwrap_or_default();
     let tracked_oid = tracking.as_deref().and_then(|t| git::rev_parse(root, t)).unwrap_or_else(|| "none".into());
     let token = crate::knowledge::content_hash(format!("{head}\0{tracked_oid}\0{remote}\0{branch}").as_bytes());

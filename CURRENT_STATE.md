@@ -1,6 +1,7 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-10 (session 12: 0.5 alpha merged into `main` and tagged `v0.5.0`)._ Read this first,
+_Last updated: 2026-11-10 (session 13: NEXUS 0.5.1 on `milestone/agents-dev-environment` — Agents & Dev Environment,
+Codex first, plus the fix for the failed `v0.5.0` release run)._ Read this first,
 then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
@@ -32,6 +33,134 @@ then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, miles
   from the latest *published* release. The `github-pages` environment allows `main` and (since 2026-11-05) tags `v*`,
   so publishing a release redeploys the download page; for v0.1.0 the site was redeployed by hand (the tag rule came
   after).
+
+## Agents & Dev Environment — progress (session 13, branch `milestone/agents-dev-environment`, not merged)
+
+Owner request 2026-11-10: "make it work with other AIs, include useful things like devtools, dev environments … seeing
+all dev tools you can install"; then "i got Codex, so we can add it for starters but make it so later its easy to add
+others". Decisions: ADR-0051 (Dev Environment), ADR-0052 (agents beyond Claude; changes PRODUCT.md's non-goal).
+Defaults taken without asking (stated to the owner): Codex runs *alongside* Claude; install commands stay typed, never run.
+
+* **Dev Environment (ADR-0051, `f34ea3d`):**
+  * `toolchain::TOOLS`: 50 tools in 10 categories, built with `const fn` builders; WinGet ids checked with `winget show
+    --id … -e` (publisher), Homebrew names against formulae.brew.sh (casks get `brew install --cask`); no official
+    package → install page only (make on Windows, psql, MySQL); nvm for Windows only on Windows; probes set telemetry
+    opt-outs (Terraform checkpoint, Azure CLI, .NET).
+  * `toolchain::inventory`: all tools on 8 threads (~3 s on the owner's machine), every copy on PATH, program names
+    tried in order until one answers (`python3` → Store placeholder → `python`), the Store placeholder reported as such.
+  * Version hints for exact versions only (digits and dots) via fnm/Volta/nvm/mise/uv/pyenv/rustup; never `mise use`.
+  * Detection: Java (+ Maven/Gradle unless wrappers), .NET (global.json named, not compared), Ruby/Bundler, Deno, make,
+    CMake, Terraform, Helm, `mise.toml`, more `.tool-versions` plugins. `environment::fit` shared.
+  * `devenv::view` joins the inventory with the active workspace's project needs; `nexus tools [--needed|--missing]`
+    (exit 1 when a need is unmet); desktop `dev_environment` / `dev_environment_check` (inventory kept in memory), page
+    `/environment` (sidebar *Dev Environment*).
+* **Agents (ADR-0052, `b221926` + desktop commit):**
+  * `agent::Kind` (Claude, Codex) with home variable, credentials, markers and a 9-row capability table; Codex: tools
+    full; context, resume, attention, activity partial; usage, kits, inspector unavailable — each with its reason.
+  * Migration 0021: `agent_profiles`; `sessions.agent` (backfilled `'claude'`), `agent_profile_id`. `kind = 'claude'`
+    stays "agent session". Usage analytics selects Claude only; project resume knows Codex threads.
+  * Measured on codex-cli 0.166.0 with a temporary `CODEX_HOME`: `-c` TOML overrides survive argv with Windows paths
+    (`mcp list --json`); `developer_instructions` is added after Codex's own (`debug prompt-input`); hooks need trust
+    persisted in the person's config → not used. `notify` not yet observed with a real turn (MANUAL_CHECKS 34).
+  * `codex::launch` (pure builder, TOML escaping, allowlisted extra options, `resume <uuid>` only), `codex::prepare`
+    (same rules/commit note/task pointer builder as Claude, inspection optional; task text via `get_task`),
+    `codex::notify` + hidden `nexus agent-notify` (thread id + turn ended, no text stored, exit 0),
+    `agent::launch::prepare` for every host; `env::Policy` names the agent.
+  * CLI: `nexus agents list|detect|add|remove`, `nexus launch --agent codex [--resume …]`.
+  * Desktop: `agents_overview`, `agent_profile_*`, `session_start_agent`, `session_resume` for Codex; Profiles page
+    (renamed from *Claude profiles*) with *Other agents*; launch dialog *Agent* choice (no effort for Codex); Codex
+    badge on session rows and terminal tabs; attention says "Codex finished in …".
+  * Test double `fake-codex` (in `crates/fake-claude`): parses the overrides like Codex, asks the MCP server for its
+    tools, runs notify. Threats T55 (agents) and T56 (catalog).
+
+### Verification log — Agents & Dev Environment (sequential, `CARGO_BUILD_JOBS=2`)
+
+| # | Command | Result |
+| --- | --- | --- |
+| 1 | spike: `codex -c mcp_servers.nexus.* mcp list --json`, `codex debug prompt-input -c developer_instructions=…` (temporary `CODEX_HOME`, node argv spawn) | overrides parsed exactly (Windows paths, spaces, quotes); developer instructions added after Codex's own. Git Bash mangles `\\` in native argv — the spike used node `spawnSync` |
+| 2 | `cargo test -p nexus-core --lib -- toolchain devenv environment` · CLI `dev_environment_lists_tools_and_what_projects_need` | 15/15 · 1/1 |
+| 3 | `nexus tools` against this computer (empty data dir) | 50 tools in 3.2 s; first run showed Python as the Store placeholder with no version → program names tried in order + placeholder note; rerun: Python 3.14.6 with the alias listed as a second copy |
+| 4 | vitest `dev-environment` · typecheck · clippy ×1 | 5/5 · clean (one annotation fix) · first run 1 finding (`unnecessary to_string`), fixed, clean |
+| 5 | `cargo test -p nexus-core --lib` (agents slice) | 281 passed |
+| 6 | CLI `codex_sessions_get_nexus_through_overrides_and_resume_their_thread` (fake-codex) | 1/1, first run |
+| 7 | vitest `components` (+ Codex launch) · `agent-profiles` | 22/22 (one expectation updated: `lastLaunch` now records the agent) · 2/2 |
+| 8 | `cargo test --workspace` | passed — 357 passed, 1 ignored (opt-in toast self-test): core 281, CLI 43 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4 |
+| 9 | after a review fix (unknown agents never read as Codex): `cargo test -p nexus-core --lib agent` · CLI `codex` | 5/5 · 1/1 |
+| 10 | `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy -p nexus-desktop --all-targets --features e2e-webview-debugging -- -D warnings` | clean · clean |
+| 11 | `npx vitest run` · `npm run typecheck` · `npx vite build` | 172/172 (33 files) · clean · built |
+| 12 | E2E build (`npx tauri build --debug --no-bundle --features e2e-webview-debugging`, then `cargo build -p nexus-cli -p fake-claude`) | **killed — the system ran low on memory** (stopped by the harness while compiling `nexus-desktop`); not restarted (NX-2). `e2e/agents.mjs` and the other desktop suites **not run** on this code |
+| 13 | E2E build again (owner: "enough ram now"), after `cargo clean` (drive D: was full; recorded on `fix/macos-knowledge-watcher`) and a PC crash mid-build (one checked-out file zeroed — restored from Git; no other zeroed file, `git fsck` clean) | ok |
+| 14 | `node e2e/agents.mjs` | AGENTS & DEV ENVIRONMENT OK 16/16, first run |
+| 15 | `run-smoke` · `task-flow` · `workbench` · `portable` · `sync` · `attention` · `workflows` | 28 · 43 · 51 · 50 · 18 · 27 · 24 — all OK, first run |
+| 16 | `mcp-interop` · `context` · `usage` · `constitutions` · `profiles-kits` · `restore` · `workspace-setup` | 9 · 12 · 18 · 13 · 9 · 12 · 17 — all OK, first run |
+| 17 | T18 · `installed.mjs` | **not run** — not attempted (they need the owner's installed NEXUS closed / uninstalled, see the 0.5 rows); CI's release job runs both |
+
+**Not verified:** a real Codex turn (`notify` with a real thread id) — MANUAL_CHECKS 34; macOS/Linux CI has not run on
+this branch.
+
+## 0.5.1 — the 0.5.0 release run failed on macOS (session 13, branch `fix/macos-knowledge-watcher`, merged into the milestone)
+
+* **What failed:** release run 42828270171 (`v0.5.0`): every installer built (Windows, macOS ×2, Linux) and every other
+  check passed, but *CI checks / Rust (macos-latest)* failed one test —
+  `watcher::tests::documents_saved_created_moved_or_removed_are_seen_and_nothing_else_is` ("a saved document", no change
+  seen in 10 s) — so the draft release was never created. Nothing was released; the tag `v0.5.0` stays where it is
+  (moving a pushed tag needs a force push).
+* **Cause:** macOS FSEvents names a changed file by its *real* path (`/private/var/folders/…`), while the watcher compared
+  it with the path it watched (`/var/folders/…`, a symbolic link — the temporary folder). No event matched a knowledge
+  root. The same would have hit any workspace reached through a symbolic link. Windows and Linux report the watched path.
+* **Why CI did not catch it earlier:** the watcher (ADR-0049) landed on `main` together with the `release:` commit and the
+  tag in one atomic push, and the standalone CI run skips a `release:` commit — the macOS tests first ran inside the
+  release run. Lesson: run CI on the branch before it is merged and tagged (`gh workflow run ci.yml --ref <branch>`
+  after the owner pushed it).
+* **Fix (`692da59`):** `knowledge::watch::real_names` records each watched folder's real name where it differs;
+  `watch::as_watched` maps a reported path back before `affects_index` decides; the desktop `Folders` uses both. Tests:
+  a pure mapping test (all platforms) and a symbolic-link workspace test (`#[cfg(unix)]`, runs on Linux/macOS CI only).
+* **Release prep (`55f9e65`):** version 0.5.1 (Cargo.toml + lock, package.json + lock, tauri.conf.json, README); release
+  notes say 0.5.0 was never released. The updater offers 0.1.x → 0.5.1.
+
+| # | Command (sequential, `CARGO_BUILD_JOBS=2`) | Result |
+| --- | --- | --- |
+| 1 | `cargo test -p nexus-core --lib knowledge::watch` · `cargo test -p nexus-desktop --lib watcher` | 3 passed · 1 passed (Windows; the `#[cfg(unix)]` test is not compiled here) |
+| 2 | `cargo test --workspace` | passed — 333 passed, 1 ignored (opt-in toast self-test): core 259, CLI 41 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4 |
+| 3 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| 4 | E2E build (`--features e2e-webview-debugging`) | **failed**: drive D: full (361 MB free; `target/` 92 GB) — owner chose `cargo clean` (105 GB freed) |
+| 5 | `npx vitest run` · `npm run typecheck` | 164/164 (31 files) · clean |
+| 6 | E2E build (from clean) · `cargo build -p nexus-cli -p fake-claude` | ok (8 min) |
+| 7 | `node e2e/workbench.mjs` (live knowledge, ADR-0049) | first run (first start after the clean build) WORKBENCH FAILED (1) — the failing check was not captured; the next two runs WORKBENCH OK 51/51 |
+| 8 | `node e2e/run-smoke.mjs` | E2E OK 28 |
+
+**Not verified locally:** the macOS behaviour itself (no Mac here) and the Unix symbolic-link test (no Linux toolchain) —
+CI on macOS and Ubuntu decides.
+
+### 0.5.1 = everything together (owner: "id like all this to go together as 0.5.1")
+
+* `fix/macos-knowledge-watcher` merged into `milestone/agents-dev-environment` (`8baf17f`); the owner's pending NEXUS push
+  request for the fix branch is superseded (to decline).
+* **Push review of a new branch (`e177f9c`, ADR-0047):** the owner's push of the fix branch showed 3 blocking findings
+  ("looks like a private key" in `workspace_sync/inspect.rs` and one more file) and could not be copied. Cause: a branch
+  the remote does not have was reviewed as `HEAD` — the whole history — and NEXUS's own secret scanner rule and test
+  fixtures (in `main`, already on the remote) contain a key-shaped line. Now `HEAD --not --remotes=<remote>`
+  (`git::log_revs`; `inspect::inspect_history` takes a revision list); into an empty remote still every commit. Test
+  `a_new_branch_sends_and_inspects_only_the_commits_the_remote_does_not_have` (seen **failing** with the old range: it
+  listed main's commit). The scanner rule (`PEM_BEGIN`/`PEM_PRIVATE_KEY`), its fixture, `knowledge` and
+  `release-check.mjs` no longer contain such a line (`git grep` finds none). Workspace sync's first push is unchanged
+  (a workspace repository's first push is into its own remote).
+* **Copy findings:** the push dialog's and the Sync page's commit/push findings are selectable and have *Copy findings*
+  (`CopyFindings.vue`, `findingsText`); vitest seen **failing** without `selectable`.
+* Release notes: 0.5.1 also ships Codex and the Dev Environment; two migrations since 0.1.x.
+* The installed NEXUS still has the old review: push this branch from a terminal.
+
+| # | Command (final code, sequential, `CARGO_BUILD_JOBS=2`) | Result |
+| --- | --- | --- |
+| 9 | `cargo test -p nexus-core --lib -- push_request workspace_sync knowledge::tests::credential` | 23/23 |
+| 10 | `npx vitest run tests/push-request.test.ts tests/sync.test.ts` | 13/13 |
+| 11 | `cargo test --workspace` | passed — 359 passed, 1 ignored (opt-in toast self-test): core 283, CLI 43 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4 |
+| 12 | `cargo clippy --workspace --all-targets -- -D warnings` · `cargo clippy -p nexus-desktop --all-targets --features e2e-webview-debugging -- -D warnings` | clean · clean |
+| 13 | `npx vitest run` · `npm run typecheck` · `npx vite build` | 174/174 (33 files) · clean · built |
+| 14 | E2E build (`--features e2e-webview-debugging`) · `cargo build -p nexus-cli -p fake-claude` | ok |
+| 15 | `agents` · `run-smoke` · `task-flow` · `workbench` · `portable` · `sync` · `attention` · `workflows` | 16 · 28 · 43 · 51 · 50 · 18 · 27 · 24 — all OK, first run |
+| 16 | `mcp-interop` · `context` · `usage` · `constitutions` · `profiles-kits` · `restore` · `workspace-setup` | 9 · 12 · 18 · 13 · 9 · 12 · 17 — all OK, first run |
+| 17 | T18 · `installed.mjs` · macOS/Linux | **not run locally** (T18/installed need the owner's installed NEXUS closed; no Mac/Linux here) — CI on the branch and the release run decide |
 
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
@@ -524,10 +653,19 @@ free.
 
 ## Next actions (in order)
 
-1. Owner: approve the push request for `main` in NEXUS (the owner reviewed 0.5 alpha, approved the "NEXUS
-   engineering" constitution and accepted the manual checks; merged `--no-ff`, `release:` commit, tag `v0.5.0`). A NEXUS
-   push request pushes a branch, not tags: then `git push origin v0.5.0` starts the release pipeline (CI checks +
-   builds, ≈ 20 minutes); publish the draft when it is green. NEXUS 0.1.x updates itself to 0.5.0.
+1. **Ship 0.5.1 = this branch** (owner 2026-11-10: "id like all this to go together as 0.5.1"): Agents & Dev
+   Environment, the macOS watcher fix (`v0.5.0` failed on macOS and was never released) and the push-review fixes.
+   1. Owner: push `milestone/agents-dev-environment` **from a terminal** (`git push -u origin
+      milestone/agents-dev-environment`) — the installed NEXUS still inspects a new branch's whole history and blocks
+      on the scanner's own source — then run CI on it: `gh workflow run ci.yml --ref milestone/agents-dev-environment`
+      (Rust on Windows, Ubuntu and macOS, frontend, Windows E2E). The macOS fix is verified only there.
+   2. When it is green: merge `--no-ff` into `main`, `release:` commit, tag `v0.5.1`, then
+      `git push --atomic origin main v0.5.1` (owner) starts the release pipeline (≈ 20 minutes); publish the draft.
+      NEXUS 0.1.x updates itself to 0.5.1.
+   3. Owner: MANUAL_CHECKS 34 (Codex with the owner's own login — confirms `notify` delivers the thread id on 0.166.0)
+      and 35 (Dev Environment). Follow-ups in ROADMAP: workspace toolchain baseline, Codex review as a workflow step
+      (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first). The project page's button
+      still says *Launch Claude* (the dialog then offers Codex) — rename with its tests if the owner wants.
    Then define and approve the `nexus` gates under Workflows → Gates (`lint`, `test`, `frontend`, `typecheck`); rule
    NX-1 is verified by the `test` gate. Open: context size of running sessions in the task launcher — owner to decide.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a

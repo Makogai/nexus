@@ -123,5 +123,17 @@
     launch a session in a project and ask Claude which constitution documents are available — it should list them by
     title and read one only when relevant.
 
+34. **Codex with your own login** (owner, ADR-0052 — automated tests use `fake-codex` only): note the newest write time
+    in `~/.codex` (as in step 1, with `$HOME\.codex`) → *Profiles → Other agents → Codex → Add profile* with the home
+    left empty → launch Codex from a project → in Codex, run `/mcp`: the `nexus` server is listed with its tools → ask
+    it to call `get_session_context` → it answers with the project → send one short prompt and let the turn finish →
+    the session row shows *1 turn* and, after you quit Codex, *Resume* → Resume continues the same conversation
+    (`codex resume <id>` in the terminal) → `~/.codex/config.toml` is unchanged (NEXUS passed everything with `-c`);
+    new files there are Codex's own (sessions, history). If *Resume* never appears, Codex did not run the `notify`
+    program: report the Codex version (the profile's turn-notification setting must be on).
+35. **Dev Environment** (owner, once): *Dev Environment* → the tools you know you have are found with their versions;
+    a tool installed twice shows both copies; a project with a pinned Node.js or Python version shows whether it fits and,
+    with fnm/Volta/nvm/uv/pyenv installed, the manager's install command — typed into a terminal, never run.
+
 Report the step number of anything unexpected. To undo: *Claude profiles → archive/forget* removes the registration;
 deleting `%TEMP%\nexus-manual` removes all NEXUS state. NEXUS itself has nothing to undo in `~/.claude-personal`.

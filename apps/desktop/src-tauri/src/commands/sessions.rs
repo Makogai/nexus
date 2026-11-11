@@ -1,4 +1,5 @@
-//! Session commands: launching Claude and shells in PTYs, attaching terminals, lifecycle (ADR-0008).
+//! Session commands: launching AI agents (Claude Code, Codex — ADR-0052) and shells in PTYs, attaching terminals,
+//! lifecycle (ADR-0008).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -7,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, State};
 
+use nexus_core::agent::{self, profile as agent_profile, profile::AgentProfile};
 use nexus_core::claude::install;
 use nexus_core::claude::mcp::{self, IntegrationStatus};
 use nexus_core::claude::prepare::{self, Prepared};
@@ -36,7 +38,8 @@ pub struct SessionView {
     pub running: bool,
     /// Live, but owned by another session host (e.g. `nexus launch` in a terminal): visible, not attachable here.
     pub live_elsewhere: bool,
-    /// Claude sessions: whether Claude recorded a conversation that `--resume` can continue.
+    /// Agent sessions: whether the agent recorded a conversation NEXUS can resume (Claude: its transcript; Codex: the
+    /// thread id it reported after a finished turn).
     pub conversation_recorded: Option<bool>,
     pub resumable: bool,
     /// What the session needs from the user, from reported signals only (ADR-0025).
@@ -45,8 +48,10 @@ pub struct SessionView {
 
 fn view(ctx: &Ctx, s: Session, profiles: &HashMap<String, ClaudeProfile>) -> SessionView {
     let running = ctx.pty.is_running(&s.id);
-    let conversation_recorded = match (s.kind, &s.claude_session_id, &s.profile_id) {
-        (Kind::Claude, Some(csid), Some(pid)) => profiles
+    let conversation_recorded = match (s.kind, s.agent, &s.claude_session_id, &s.profile_id) {
+        // Codex (ADR-0052 §6): the thread id is recorded only once Codex reported a finished turn.
+        (Kind::Claude, Some(nexus_core::agent::Kind::Codex), csid, _) => Some(csid.is_some() && s.agent_profile_id.is_some()),
+        (Kind::Claude, _, Some(csid), Some(pid)) => profiles
             .get(pid)
             .map(|p| session::conversation_recorded(&p.effective_config_dir(&ctx.home), csid)),
         _ => None,
@@ -305,6 +310,8 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
                     program: exe.display().to_string(),
                     resumed_from: None,
                     task_id: integrations.task.as_ref().map(|t| t.id.clone()),
+                    agent: Some(nexus_core::agent::Kind::Claude),
+                    agent_profile_id: None,
                 },
             )?;
             session::set_integrations(&db, &s.id, &integrations)?;
@@ -327,6 +334,126 @@ pub async fn session_start_claude(app: AppHandle, ctx: State<'_, Ctx>, args: Sta
     .await
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartAgent {
+    /// An agent profile (Codex …); Claude sessions start with `session_start_claude`.
+    pub agent_profile_id: String,
+    pub project_id: Option<String>,
+    pub cwd: Option<String>,
+    pub work_profile: Option<String>,
+    pub model: Option<String>,
+    pub title: Option<String>,
+    pub task_id: Option<String>,
+    pub start_task: Option<bool>,
+    pub kickoff: Option<bool>,
+    pub cols: Option<u16>,
+    pub rows: Option<u16>,
+}
+
+/// A non-Claude agent session (ADR-0052): `agent::launch::prepare` — the same builder as `nexus launch --agent`.
+#[allow(clippy::too_many_arguments)]
+fn start_agent_session(
+    app: &AppHandle,
+    ctx: &Ctx,
+    profile: &AgentProfile,
+    target: Target,
+    title: String,
+    work_profile: Option<&'static workprofile::WorkProfile>,
+    model: Option<String>,
+    task_id: Option<&str>,
+    start_task: bool,
+    kickoff: bool,
+    resume: Option<&Session>,
+    size: (u16, u16),
+) -> IpcResult<SessionView> {
+    let nexus_id = new_id();
+    let exe = mcp::nexus_next_to_current_exe();
+    let base_env = env::current();
+    let thread = resume.and_then(|p| p.claude_session_id.clone());
+    let prepared = {
+        let db = ctx.db();
+        agent::launch::prepare(&agent::launch::Request {
+            conn: &db,
+            data_dir: &ctx.data_dir,
+            profile,
+            nexus_exe: exe.as_deref(),
+            nexus_session_id: &nexus_id,
+            workspace_id: target.workspace_id.as_deref(),
+            project_id: target.project_id.as_deref(),
+            task_id,
+            cwd: &target.cwd,
+            start_task,
+            work_profile,
+            model: model.as_deref(),
+            resume: thread.as_deref(),
+            kickoff,
+            base_env: &base_env,
+        })?
+    };
+    let branch = git::status(&target.cwd).ok().and_then(|s| s.branch);
+    let session = {
+        let db = ctx.db();
+        let s = session::insert_starting(
+            &db,
+            NewSession {
+                id: Some(nexus_id),
+                kind: Some(Kind::Claude),
+                agent: Some(profile.agent),
+                agent_profile_id: Some(profile.id.clone()),
+                host: Some(HostKind::Desktop),
+                host_id: Some(ctx.host.id.clone()),
+                workspace_id: target.workspace_id,
+                project_id: target.project_id.clone(),
+                profile_id: None,
+                claude_session_id: thread,
+                title,
+                cwd: target.cwd,
+                branch,
+                work_profile: work_profile.map(|w| w.id.to_string()),
+                effort: None,
+                model,
+                program: prepared.executable.display().to_string(),
+                resumed_from: resume.map(|p| p.id.clone()),
+                task_id: prepared.integrations.task.as_ref().map(|t| t.id.clone()).or_else(|| task_id.map(str::to_string)),
+            },
+        )?;
+        session::set_integrations(&db, &s.id, &prepared.integrations)?;
+        agent_profile::touch_used(&db, &profile.id)?;
+        if let Some(pid) = &target.project_id {
+            project::touch_opened(&db, pid)?;
+        }
+        s
+    };
+    let spec = prepared.spec;
+    spawn(app, ctx, &session, SpawnRequest { program: spec.program, args: spec.args, cwd: spec.cwd, env: spec.env, cols: size.0, rows: size.1 })
+}
+
+#[tauri::command]
+pub async fn session_start_agent(app: AppHandle, ctx: State<'_, Ctx>, args: StartAgent) -> IpcResult<SessionView> {
+    let ctx = ctx.inner().clone();
+    blocking(move || {
+        let profile = agent_profile::get(&ctx.db(), &args.agent_profile_id)?;
+        if profile.archived_at.is_some() {
+            return Err(IpcError::invalid("this profile is archived"));
+        }
+        let project_id = match (&args.project_id, &args.task_id) {
+            (None, Some(t)) => task_project(&ctx, t)?,
+            (p, _) => p.clone(),
+        };
+        let target = resolve_target(&ctx, project_id.as_deref(), args.cwd.as_deref())?;
+        let wp = match args.work_profile.or_else(|| profile.default_work_profile.clone()).as_deref() {
+            Some(id) => Some(workprofile::get(id).ok_or_else(|| IpcError::invalid(format!("unknown work profile '{id}'")))?),
+            None => None,
+        };
+        let model = args.model.filter(|m| !m.is_empty()).or_else(|| profile.default_model.clone());
+        let title = args.title.as_deref().map(launch::sanitize_title).filter(|t| !t.is_empty()).unwrap_or_else(|| target.default_title.clone());
+        let size = pty_size(args.cols, args.rows);
+        start_agent_session(&app, &ctx, &profile, target, title, wp, model, args.task_id.as_deref(), args.start_task.unwrap_or(true), args.kickoff == Some(true), None, size)
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn session_resume(
     app: AppHandle,
@@ -339,10 +466,24 @@ pub async fn session_resume(
     blocking(move || {
         let prev = session::get(&ctx.db(), &id)?;
         if prev.kind != Kind::Claude {
-            return Err(IpcError::invalid("only Claude sessions can be resumed"));
+            return Err(IpcError::invalid("only agent sessions can be resumed"));
         }
         if ctx.pty.is_running(&prev.id) {
             return Err(IpcError::invalid("this session is still running"));
+        }
+        if let Some(kind) = prev.agent.filter(|k| *k != nexus_core::agent::Kind::Claude) {
+            // ADR-0052 §6: only a conversation the agent reported (Codex: after its first finished turn).
+            if prev.claude_session_id.is_none() {
+                return Err(IpcError::invalid(format!("{} has not reported a conversation for this session yet", kind.short())));
+            }
+            let profile_id = prev.agent_profile_id.clone().ok_or_else(|| IpcError::invalid("the session's profile was removed"))?;
+            let profile = agent_profile::get(&ctx.db(), &profile_id)?;
+            if !prev.cwd.is_dir() {
+                return Err(IpcError::invalid(format!("{} no longer exists", prev.cwd.display())));
+            }
+            let target = Target { cwd: prev.cwd.clone(), workspace_id: prev.workspace_id.clone(), project_id: prev.project_id.clone(), default_title: prev.title.clone() };
+            let wp = prev.work_profile.as_deref().and_then(workprofile::get);
+            return start_agent_session(&app, &ctx, &profile, target, prev.title.clone(), wp, prev.model.clone(), prev.task_id.as_deref(), false, false, Some(&prev), pty_size(cols, rows));
         }
         let csid = prev.claude_session_id.clone().ok_or_else(|| IpcError::invalid("session has no conversation id"))?;
         let profile_id = prev.profile_id.clone().ok_or_else(|| IpcError::invalid("the session's profile was removed"))?;
@@ -416,6 +557,8 @@ pub async fn session_resume(
                     program: exe.display().to_string(),
                     resumed_from: Some(prev.id.clone()),
                     task_id: prev.task_id.clone(),
+                    agent: Some(nexus_core::agent::Kind::Claude),
+                    agent_profile_id: None,
                 },
             )?;
             session::set_integrations(&db, &s.id, &integrations)?;

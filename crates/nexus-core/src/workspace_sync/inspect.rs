@@ -223,8 +223,12 @@ fn token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
+/// A PEM private key's first line contains both, kept apart so that no line of NEXUS's source looks like a key to itself.
+const PEM_BEGIN: &str = "-----BEGIN";
+const PEM_PRIVATE_KEY: &str = "PRIVATE KEY";
+
 fn secret_in(line: &str) -> Option<&'static str> {
-    if line.contains("-----BEGIN") && line.contains("PRIVATE KEY") {
+    if line.contains(PEM_BEGIN) && line.contains(PEM_PRIVATE_KEY) {
         return Some("a private key");
     }
     for (prefix, min, kind) in TOKEN_PREFIXES {
@@ -413,11 +417,13 @@ pub fn inspect_worktree(repo: &Path, ctx: &Context<'_>, changes: &[(String, Stri
     Ok(insp)
 }
 
-/// What a push of `range` (e.g. `origin/main..HEAD`, or `HEAD` for a first push = the whole history) would send.
-pub fn inspect_history(repo: &Path, ctx: &Context<'_>, range: &str) -> Result<Inspection> {
+/// What a push of the revisions `revs` would send: `origin/main..HEAD`, `HEAD --not --remotes=origin` for a branch the
+/// remote does not have yet, or `HEAD` for a first push into an empty remote (the whole history).
+pub fn inspect_history(repo: &Path, ctx: &Context<'_>, revs: &[&str]) -> Result<Inspection> {
     let mut insp = Inspection::default();
     // Every path touched by any commit in the range (a file added and removed again still travels in history).
-    let (names, _) = log_text(repo, &["log", "--format=", "--name-only", range, "--"], 4 << 20)?;
+    let names_args: [&[&str]; 3] = [&["log", "--format=", "--name-only"], revs, &["--"]];
+    let (names, _) = log_text(repo, &names_args.concat(), 4 << 20)?;
     let mut paths: Vec<&str> = names.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     paths.sort();
     paths.dedup();
@@ -428,7 +434,8 @@ pub fn inspect_history(repo: &Path, ctx: &Context<'_>, range: &str) -> Result<In
             insp.push(f);
         }
     }
-    let (patches, truncated) = log_text(repo, &["log", "-p", "--format=", "--no-ext-diff", "--no-textconv", "-U0", range, "--"], MAX_SCAN_BYTES)?;
+    let patch_args: [&[&str]; 3] = [&["log", "-p", "--format=", "--no-ext-diff", "--no-textconv", "-U0"], revs, &["--"]];
+    let (patches, truncated) = log_text(repo, &patch_args.concat(), MAX_SCAN_BYTES)?;
     insp.scanned_bytes = patches.len();
     insp.truncated = truncated;
     for (path, lines) in added_lines(&patches) {
@@ -497,7 +504,7 @@ mod tests {
         let gh = format!("token = {}{}", "ghp_", "a".repeat(36));
         let aws = format!("key {}{}", "AKIA", "ABCDEFGHIJKLMNOP");
         let url = format!("url = https://deploy:{}@git.example.invalid/x.git", "hunter".to_string() + "22");
-        let pem = format!("-----BEGIN {} PRIVATE KEY-----", "OPENSSH");
+        let pem = format!("{PEM_BEGIN} OPENSSH {PEM_PRIVATE_KEY}-----");
         let lines = vec![
             (1, gh.as_str()),
             (2, url.as_str()),

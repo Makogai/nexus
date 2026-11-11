@@ -446,7 +446,7 @@ fn coverage(conn: &Connection, f: &Filter) -> Result<Coverage> {
     let mut c = Coverage::default();
     let mut st = conn.prepare(&format!(
         "SELECT COALESCE(u.status, 'pending'), COUNT(*) FROM sessions s LEFT JOIN usage_state u ON u.session_id = s.id
-         WHERE s.kind = 'claude'{} GROUP BY 1",
+         WHERE s.kind = 'claude' AND COALESCE(s.agent, 'claude') = 'claude'{} GROUP BY 1",
         w.sql
     ))?;
     let rows = st.query_map(w.refs().as_slice(), |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
@@ -567,7 +567,7 @@ pub fn sessions(conn: &Connection, f: &Filter, limit: usize) -> Result<Vec<Sessi
          LEFT JOIN (SELECT session_id, COUNT(*) n, SUM(input_tokens) inp, SUM(output_tokens) outp, SUM(cache_write_tokens) cw,
                            SUM(cache_read_tokens) cr, SUM(web_searches) web, SUM(subagent) sub
                     FROM usage_messages WHERE session_id IS NOT NULL{inner_sql} GROUP BY session_id) a ON a.session_id = s.id
-         WHERE s.kind = 'claude'{where_sql}
+         WHERE s.kind = 'claude' AND COALESCE(s.agent, 'claude') = 'claude'{where_sql}
          ORDER BY s.started_at DESC LIMIT {limit}",
         strategy = Dimension::Strategy.key(),
         where_sql = w.sql,

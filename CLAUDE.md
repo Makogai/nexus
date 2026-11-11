@@ -20,6 +20,7 @@ cd apps/desktop && node e2e/instructions-real-claude.mjs # inspector vs. real Cl
 cd apps/desktop && node e2e/security-real-claude.mjs # isolation + task-text-as-data vs. real Claude
 cd apps/desktop && node e2e/profiles-kits.mjs # diagnostics + kits through the desktop UI (E2E build)
 cd apps/desktop && node e2e/kits-real-claude.mjs # diagnostics + per-profile kits vs. real Claude
+cd apps/desktop && node e2e/agents.mjs     # Codex profile, launch, notify, resume (fake-codex) + Dev Environment page (E2E build)
 cd apps/desktop && node e2e/attention.mjs   # notifications + multi-session attention (E2E build, recording notifier)
 cd apps/desktop && node e2e/constitutions.mjs # Constitution Manager through the UI (E2E build)
 cd apps/desktop && node e2e/context.mjs     # Context Manager: wizard, strategy, inspector (E2E build)
@@ -48,6 +49,13 @@ cargo test -p nexus-desktop --test toast_selftest -- --ignored # opt-in: real Wi
 * New schema → append a migration in `crates/nexus-core/src/db/migrations/` (never edit a released one).
 * Claude integration is session-scoped CLI flags only (ADR-0004). Never write into a Claude config dir NEXUS did
   not create.
+* Other agents (ADR-0052) get the same treatment: per-session overrides only (Codex: TOML-escaped `-c`, built by
+  `codex::launch`), never a write into the agent's home, task text only through MCP tools, extra arguments allowlisted,
+  no sandbox/hook-trust bypass. One entry point for every host (`agent::launch::prepare`); each agent states its
+  capabilities (`agent::Kind::capabilities`) and the UI shows them instead of guessing. Claude-only subsystems (usage,
+  kits, inspector, diagnostics) select `sessions.agent = 'claude'`.
+* Dev tools are known by catalog id only (`toolchain::TOOLS`, ADR-0051): package ids verified when added; NEXUS runs
+  only version commands — install commands and version-manager hints are typed into a terminal, never run.
 * Every process that owns sessions is a session host (ADR-0014): register, heartbeat, `host::shutdown` on exit.
 * MCP tools stay workspace-scoped, bounded and free of exec/network/arbitrary-file access (ADR-0009); their only file
   writes are knowledge records (task/note/decision) through `knowledge::service` (ADR-0017).

@@ -8,6 +8,8 @@ import type { ClaudeProfile, LaunchOptions, Project, SessionView } from '../src/
 
 const api = vi.hoisted(() => ({
   sessionStartClaude: vi.fn(),
+  sessionStartAgent: vi.fn(),
+  agentsOverview: vi.fn(),
   sessionResume: vi.fn(),
   sessionContinueTask: vi.fn(),
   sessionInterrupt: vi.fn(),
@@ -135,6 +137,8 @@ function session(over: Partial<SessionView> = {}): SessionView {
     endReason: null,
     transcriptPath: null,
     taskId: null,
+    agent: 'claude',
+    agentProfileId: null,
     conversationRecorded: true,
     resumable: true,
     status: { status: 'completed', certainty: 'reported', since: null, detail: null },
@@ -166,6 +170,7 @@ beforeEach(() => {
   api.sessionRelease.mockResolvedValue(true)
   api.uiPreferencesSet.mockResolvedValue(undefined)
   api.shellList.mockResolvedValue([])
+  api.agentsOverview.mockResolvedValue({ agents: [], profiles: [], detected: [] })
   document.body.innerHTML = ''
 })
 
@@ -204,8 +209,43 @@ describe('LaunchDialog', () => {
       title: 'Boss fight',
     })
     expect(app.launchDialog.open).toBe(false)
-    expect(app.prefs.lastLaunch).toEqual({ profileId: 'game', workProfile: 'prototype', effort: null })
+    expect(app.prefs.lastLaunch).toEqual({ profileId: 'game', workProfile: 'prototype', effort: null, agent: 'claude' })
     expect(useSessionStore().tabs).toContain('new')
+  })
+
+  it('launches Codex from its own profile when Codex is chosen (ADR-0052)', async () => {
+    seed()
+    const codexProfile = {
+      id: 'cx', agent: 'codex' as const, name: 'Codex', homeDir: null, executable: null, extraArgs: [], inheritProviderEnv: false, turnNotifications: true,
+      defaultWorkProfile: 'critical', defaultModel: null, createdAt: 0, updatedAt: 0, lastUsedAt: null, archivedAt: null,
+    }
+    const caps = [{ id: 'tools' as const, label: 'NEXUS tools (MCP)', support: 'full' as const, detail: 'x' }]
+    api.agentsOverview.mockResolvedValue({
+      agents: [
+        { id: 'claude', name: 'Claude Code', installUrl: 'https://code.claude.com', installed: null, capabilities: caps },
+        { id: 'codex', name: 'OpenAI Codex CLI', installUrl: 'https://github.com/openai/codex', installed: { path: 'C:\\codex.exe', version: '0.166.0' }, capabilities: caps },
+      ],
+      profiles: [codexProfile],
+      detected: [],
+    })
+    const app = useAppStore()
+    const w = mountWith(LaunchDialog)
+    app.openLaunch(null, 'game')
+    await flushPromises()
+    expect(w.findAll('[data-launch-agent]').map((b) => b.attributes('data-launch-agent'))).toEqual(['claude', 'codex'])
+    expect(w.find('#launch-effort').exists()).toBe(true)
+    await w.find('[data-launch-agent="codex"]').trigger('click')
+    expect(w.find('#launch-effort').exists()).toBe(false)
+    expect(w.find('[data-launch-agent-profile]').text()).toContain('Your own Codex home')
+    expect(w.find('.segment.selected[role="radio"]:not([data-launch-agent])').text()).toBe('Critical')
+
+    api.sessionStartAgent.mockResolvedValue(session({ id: 'cx-session', running: true, state: 'running', agent: 'codex', agentProfileId: 'cx' }))
+    await w.findAll('footer .btn-primary')[0]!.trigger('click')
+    await flushPromises()
+    expect(api.sessionStartClaude).not.toHaveBeenCalled()
+    expect(api.sessionStartAgent.mock.calls[0]![0]).toMatchObject({ agentProfileId: 'cx', projectId: 'p1', workProfile: 'critical' })
+    expect(api.sessionStartAgent.mock.calls[0]![0]).not.toHaveProperty('effort')
+    expect(app.prefs.lastLaunch).toMatchObject({ agent: 'codex', agentProfileId: 'cx', profileId: 'game' })
   })
 
   it('launches for a task: its project is fixed, the task id and start choice are sent', async () => {

@@ -13,6 +13,7 @@ import { useAction } from '../composables/useAction'
 import ActionButton from '../components/ActionButton.vue'
 import BaseModal from '../components/BaseModal.vue'
 import CloneWorkspaceForm from '../components/CloneWorkspaceForm.vue'
+import CopyFindings from '../components/CopyFindings.vue'
 import SyncPolicyCard from '../components/SyncPolicyCard.vue'
 import { useAppStore } from '../stores/app'
 import { useWorkspaceStore } from '../stores/workspaces'
@@ -368,8 +369,8 @@ watch(wsId, () => {
           <li v-for="f in commitReview.files" :key="f.path"><span class="st">{{ f.status }}</span> <span class="mono">{{ f.path }}</span></li>
         </ul>
         <div class="inspection" :class="{ blocked: commitReview.inspection.blocked }" data-sync-inspection>
-          <div class="ins-head"><ShieldAlert v-if="commitReview.inspection.blocked" /><ShieldCheck v-else /> {{ commitReview.inspection.blocked ? 'The security inspection blocks this commit' : commitReview.inspection.findings.length ? 'Warnings to check' : 'Nothing found by the security inspection' }}</div>
-          <ul>
+          <div class="ins-head"><ShieldAlert v-if="commitReview.inspection.blocked" /><ShieldCheck v-else /> {{ commitReview.inspection.blocked ? 'The security inspection blocks this commit' : commitReview.inspection.findings.length ? 'Warnings to check' : 'Nothing found by the security inspection' }}<CopyFindings :findings="commitReview.inspection.findings" /></div>
+          <ul class="selectable">
             <li v-for="(f, i) in commitReview.inspection.findings" :key="i" :data-sync-finding="`${f.kind}:${f.severity}`">
               <span class="badge" :class="f.severity === 'block' ? 'badge-error' : 'badge-warn'">{{ f.severity === 'block' ? 'blocks' : 'warning' }}</span>
               <span class="mono">{{ f.path }}{{ f.line ? `:${f.line}` : '' }}</span> — {{ f.message }}
@@ -404,8 +405,8 @@ watch(wsId, () => {
           <li v-for="c in pushReview.commits" :key="c.oid"><span class="mono faint">{{ c.oid.slice(0, 8) }}</span> {{ c.summary }}</li>
         </ul>
         <div class="inspection" :class="{ blocked: pushReview.inspection.blocked }" data-sync-push-inspection>
-          <div class="ins-head"><ShieldAlert v-if="pushReview.inspection.blocked" /><ShieldCheck v-else /> {{ pushReview.inspection.blocked ? 'The security inspection blocks this push' : pushReview.inspection.findings.length ? 'Warnings to check' : 'Nothing found by the security inspection' }}</div>
-          <ul>
+          <div class="ins-head"><ShieldAlert v-if="pushReview.inspection.blocked" /><ShieldCheck v-else /> {{ pushReview.inspection.blocked ? 'The security inspection blocks this push' : pushReview.inspection.findings.length ? 'Warnings to check' : 'Nothing found by the security inspection' }}<CopyFindings :findings="pushReview.inspection.findings" /></div>
+          <ul class="selectable">
             <li v-for="(f, i) in pushReview.inspection.findings" :key="i" :data-sync-finding="`${f.kind}:${f.severity}`">
               <span class="badge" :class="f.severity === 'block' ? 'badge-error' : 'badge-warn'">{{ f.severity === 'block' ? 'blocks' : 'warning' }}</span>
               <span class="mono">{{ f.path }}{{ f.line ? `:${f.line}` : '' }}</span> — {{ f.message }}
@@ -582,6 +583,10 @@ watch(wsId, () => {
 .ins-head svg {
   width: 16px;
   height: 16px;
+}
+.ins-head .btn {
+  margin-left: auto;
+  font-weight: normal;
 }
 .inspection ul {
   margin: 0;

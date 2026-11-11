@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { api, SESSION_EVENT } from '../lib/ipc'
-import type { SessionView, StartClaude } from '../lib/types'
+import type { SessionView, StartAgent, StartClaude } from '../lib/types'
 import { useAppStore } from './app'
 
 /** Last measured terminal size, so new PTYs start at the size they will be shown at. */
@@ -83,6 +83,14 @@ export const useSessionStore = defineStore('sessions', () => {
     return s
   }
 
+  /** A Codex (or later agent) session (ADR-0052). */
+  async function startAgent(args: Omit<StartAgent, 'cols' | 'rows'>) {
+    const s = await api.sessionStartAgent({ ...args, ...lastSize })
+    upsert(s)
+    openTab(s.id)
+    return s
+  }
+
   async function continueTask(id: string, taskId: string) {
     const s = await api.sessionContinueTask(id, taskId)
     upsert(s)
@@ -130,6 +138,7 @@ export const useSessionStore = defineStore('sessions', () => {
     closeTab,
     rememberSize,
     startClaude,
+    startAgent,
     resume,
     openShell,
     rename,

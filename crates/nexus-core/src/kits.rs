@@ -666,7 +666,7 @@ pub fn validate(data_dir: &Path, k: &Kit, claude: &Path, base_env: &[(String, St
     std::fs::create_dir_all(&cfg).map_err(|e| CoreError::io("cannot create", &cfg, e))?;
     let mut cmd = proc::command(claude);
     cmd.args(["plugin", "validate"]).arg(&dir);
-    let policy = crate::env::Policy { claude: true, inherit_provider_env: false };
+    let policy = crate::env::Policy::CLAUDE;
     let extra = [("CLAUDE_CONFIG_DIR".to_string(), cfg.to_string_lossy().into_owned(), crate::env::Reason::ProfileManaged)];
     let (envs, _) = crate::env::compose(base_env, &extra, policy);
     crate::env::apply(&mut cmd, &envs);

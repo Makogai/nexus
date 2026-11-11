@@ -259,6 +259,8 @@ knowledge_approvals(path PK, content_hash, approved_at)                         
 --      message, created_at, decided_at) (ADR-0043)
 -- v19: learn_folders(project_id FK, path, added_at) — extra folders for learning sessions (ADR-0045)
 -- v20: push_requests.failure_kind (rejected|auth|offline|remote-missing|timeout|other), dismissed_at (ADR-0047)
+-- v21: agent_profiles(id, agent, name, home_dir NULL = the agent's default, executable, extra args, provider env, turn
+--      notifications, defaults); sessions.agent ('claude' backfilled, 'codex'), agent_profile_id FK (ADR-0052)
 ```
 
 Timestamps are Unix milliseconds (INTEGER). Foreign keys enforced (`PRAGMA foreign_keys=ON`).
@@ -283,8 +285,10 @@ absolute, normalized, existing, no device/UNC namespace tricks (`\\?\`, `\\.\`).
 | Push requests | `push_request_open` (pending, and failed until dismissed or superseded), `push_request_review` (fetches first), `push_request_decide`, `push_request_dismiss` (ADR-0043, ADR-0047) |
 | Skills | `skills_list`, `skills_read`, `skills_create`, `skills_save`, `skills_delete` (ADR-0046) |
 | Claude | `claude_setup_status`, `claude_installations`, `profile_list`, `profile_detect`, `profile_register`, `profile_create`, `profile_update`, `profile_set_archived`, `profile_forget`, `profile_details`, `profile_auth_status`, `launch_options`, `nexus_tools` |
-| Sessions | `session_list`, `session_get`, `session_start_claude`, `session_resume`, `session_open_shell`, `session_attach`, `session_write`, `session_resize`, `session_interrupt`, `session_terminate`, `session_release`, `session_rename`, `session_set_archived`, `session_continue_task` |
+| Sessions | `session_list`, `session_get`, `session_start_claude`, `session_start_agent` (Codex and later agents, ADR-0052), `session_resume` (Claude or the agent's reported conversation), `session_open_shell`, `session_attach`, `session_write`, `session_resize`, `session_interrupt`, `session_terminate`, `session_release`, `session_rename`, `session_set_archived`, `session_continue_task` |
+| Agents | `agents_overview` (agents, capabilities, profiles, detected homes), `agent_profile_register`, `agent_profile_update`, `agent_profile_set_archived`, `agent_profile_forget` (ADR-0052) |
 | Shell | `shell_list` |
+| Dev Environment | `dev_environment` (refresh: probe every tool again), `dev_environment_check` (one tool again); version commands only, the last inventory kept in memory (ADR-0051) |
 | Knowledge | `knowledge_overview` (refresh or rebuild + health), `knowledge_read`, `knowledge_search`, `knowledge_create`, `knowledge_update_task` (status, log, checklist, expected hash), `knowledge_approve`, `knowledge_update` (edit a document, expected hash), `knowledge_task`, `project_knowledge` (open tasks + branch-relevant notes), `needs_you` (what waits for the person, workspace or project — ADR-0048); event `nexus://knowledge` (`{ workspaceId, changed, removed }`) from the desktop's knowledge watcher (ADR-0049) |
 | Instructions | `instructions_inspect` (Claude's own instruction layers + NEXUS append, read-only) |
 | Resume | `project_resume` (verified Git state, saved history, next action — ADR-0021) |

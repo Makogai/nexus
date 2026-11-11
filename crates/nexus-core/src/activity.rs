@@ -178,9 +178,7 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
             Ok(Outcome::default())
         }
         HookEvent::Stop => {
-            touch(conn, &s.id, ", turns = turns + 1")?;
-            attention::apply(conn, &s, Signal::TurnEnded)?;
-            sync_after_turn(conn, &s);
+            turn_finished(conn, &s)?;
             Ok(Outcome::default())
         }
         HookEvent::UserPrompt => {
@@ -273,6 +271,15 @@ pub fn handle(conn: &Connection, nexus_session_id: &str, event: HookEvent, paylo
 /// Claude finished a turn (or the session ended): under the autonomous sync policy, the session's workspace becomes due
 /// a little later — the host commits and pushes it (ADR-0042). Only a settings write here: hooks stay cheap, and the
 /// Git work happens in the host, never in the hook.
+/// The agent finished a turn and waits for the next prompt (Claude's Stop hook, Codex's notify — ADR-0052): count it,
+/// raise the "finished" attention, let an automatic sync follow.
+pub fn turn_finished(conn: &Connection, s: &Session) -> Result<()> {
+    touch(conn, &s.id, ", turns = turns + 1")?;
+    attention::apply(conn, s, Signal::TurnEnded)?;
+    sync_after_turn(conn, s);
+    Ok(())
+}
+
 fn sync_after_turn(conn: &Connection, s: &Session) {
     let Some(ws) = s.workspace_id.as_deref() else { return };
     use crate::workspace_sync::policy;

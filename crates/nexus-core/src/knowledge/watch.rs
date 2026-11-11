@@ -19,6 +19,19 @@ pub fn targets(roots: &[Root]) -> Vec<PathBuf> {
     out
 }
 
+/// The watched folders under their real names where those differ, as `(real, watched)`. macOS reports a change by the
+/// file's real path — `/private/var/…` for a folder watched as `/var/…`, the target of a symbolic link — not by the path
+/// that was watched; [`as_watched`] maps it back.
+pub fn real_names(targets: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
+    let real = |t: &PathBuf| std::fs::canonicalize(t).ok().filter(|r| r != t);
+    targets.iter().filter_map(|t| real(t).map(|r| (r, t.clone()))).collect()
+}
+
+/// A reported `path` under the name its folder was watched by, when it was reported under the folder's real name.
+pub fn as_watched(real_names: &[(PathBuf, PathBuf)], path: &Path) -> Option<PathBuf> {
+    real_names.iter().find_map(|(real, watched)| path.strip_prefix(real).ok().map(|rel| watched.join(rel)))
+}
+
 /// True when a change at `path` can change the index: a Markdown file (other than a folder's README) in one of the
 /// scanned folders of a root, with no hidden component (editor temp files, `.git`). A folder counts only when it
 /// `appeared_or_vanished` (created, removed, renamed): that takes its files along without an event per file, while a
@@ -104,5 +117,30 @@ mod tests {
         assert_eq!(targets(&roots), vec![ws.clone()], ".nexus-local is covered by the workspace folder");
         std::fs::create_dir_all(data.join("global")).unwrap();
         assert_eq!(targets(&roots), vec![ws, data.join("global")]);
+    }
+
+    #[test]
+    fn a_change_reported_under_a_folders_real_name_maps_back_to_the_watched_name() {
+        let real = vec![(PathBuf::from("/private/var/t/ws"), PathBuf::from("/var/t/ws"))];
+        assert_eq!(as_watched(&real, Path::new("/private/var/t/ws/tasks/a.md")), Some(PathBuf::from("/var/t/ws/tasks/a.md")));
+        assert_eq!(as_watched(&real, Path::new("/var/t/ws/tasks/a.md")), None, "already the watched name");
+        assert_eq!(as_watched(&real, Path::new("/private/var/t/other/a.md")), None, "outside every watched folder");
+    }
+
+    /// The macOS case on every Unix: the workspace folder is a symbolic link, changes arrive under its target.
+    #[cfg(unix)]
+    #[test]
+    fn a_workspace_behind_a_symbolic_link_is_matched_by_its_real_name() {
+        let t = tempfile::tempdir().unwrap();
+        let (real_ws, ws) = (t.path().join("real-ws"), t.path().join("ws"));
+        std::fs::create_dir_all(real_ws.join("tasks")).unwrap();
+        std::os::unix::fs::symlink(&real_ws, &ws).unwrap();
+        let roots = roots("w1", &ws, &t.path().join("data"));
+        let names = real_names(&targets(&roots));
+        let reported = std::fs::canonicalize(&real_ws).unwrap().join("tasks/a.md");
+        assert!(!affects_index(&roots, &reported, false), "the real name is not a root");
+        let mapped = as_watched(&names, &reported).expect("mapped to the watched name");
+        assert_eq!(mapped, ws.join("tasks/a.md"));
+        assert!(affects_index(&roots, &mapped, false));
     }
 }

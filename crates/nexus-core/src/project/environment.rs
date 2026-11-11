@@ -74,6 +74,41 @@ fn simple_value(text: &str, key: &str) -> Option<String> {
     })
 }
 
+/// Tool id for an asdf / mise plugin name.
+fn asdf_tool(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "nodejs" | "node" => "node",
+        "python" => "python",
+        "rust" => "rustc",
+        "php" => "php",
+        "golang" | "go" => "go",
+        "flutter" => "flutter",
+        "dart" => "dart",
+        "java" => "java",
+        "ruby" => "ruby",
+        "deno" => "deno",
+        "bun" => "bun",
+        "terraform" => "terraform",
+        "kubectl" => "kubectl",
+        "helm" => "helm",
+        "dotnet" | "dotnet-core" => "dotnet",
+        _ => return None,
+    })
+}
+
+/// The first file directly in `root` with one of these extensions (sorted, so the answer is stable).
+fn top_level_with(root: &Path, extensions: &[&str]) -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir(root)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| extensions.iter().any(|x| n.to_ascii_lowercase().ends_with(x)))
+        .collect();
+    names.sort();
+    names.into_iter().next()
+}
+
 fn push(reqs: &mut Vec<Requirement>, tool: &str, constraint: &str, source: &str) {
     if reqs.iter().any(|r| r.tool == tool && r.source == source) {
         return;
@@ -119,17 +154,27 @@ pub fn detect(root: &Path) -> Environment {
         for l in t.lines() {
             let mut parts = l.split_whitespace();
             if let (Some(name), Some(v)) = (parts.next(), parts.next()) {
-                let tool = match name {
-                    "nodejs" | "node" => "node",
-                    "python" => "python",
-                    "rust" => "rustc",
-                    "php" => "php",
-                    "golang" | "go" => "go",
-                    "flutter" => "flutter",
-                    "dart" => "dart",
-                    _ => continue,
-                };
+                let Some(tool) = asdf_tool(name) else { continue };
                 push(reqs, tool, v, ".tool-versions");
+            }
+        }
+    }
+    // mise: `[tools]` in mise.toml / .mise.toml (`node = "20"`, `python = ["3.12"]`).
+    for f in ["mise.toml", ".mise.toml"] {
+        if let Some(t) = read(root, f) {
+            let mut in_tools = false;
+            for l in t.lines().map(str::trim) {
+                if l.starts_with('[') {
+                    in_tools = l == "[tools]";
+                    continue;
+                }
+                if let (true, Some((name, v))) = (in_tools, l.split_once('=')) {
+                    let name = name.trim().trim_matches('"');
+                    let v = v.trim().trim_start_matches('[').trim_end_matches(']').split(',').next().unwrap_or("").trim().trim_matches(['"', '\'']);
+                    if let Some(tool) = asdf_tool(name) {
+                        push(reqs, tool, v, f);
+                    }
+                }
             }
         }
     }
@@ -189,6 +234,59 @@ pub fn detect(root: &Path) -> Environment {
         let v = t.lines().find_map(|l| l.trim().strip_prefix("go ").map(|v| format!(">={}", v.trim()))).unwrap_or_default();
         push(reqs, "go", &v, "go.mod");
     }
+    // Java: the version file, then Maven/Gradle builds (a wrapper script brings its own Maven/Gradle).
+    if let Some(v) = read(root, ".java-version") {
+        push(reqs, "java", &first_line(&v), ".java-version");
+    }
+    if root.join("pom.xml").is_file() {
+        push(reqs, "java", "", "pom.xml");
+        if !root.join("mvnw").is_file() && !root.join("mvnw.cmd").is_file() {
+            push(reqs, "maven", "", "pom.xml");
+        }
+    }
+    if let Some(f) = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"].iter().find(|f| root.join(f).is_file()) {
+        push(reqs, "java", "", f);
+        if !root.join("gradlew").is_file() && !root.join("gradlew.bat").is_file() {
+            push(reqs, "gradle", "", f);
+        }
+    }
+    // .NET: global.json pins an SDK; otherwise a solution or project file at the top. `dotnet --version` reports one
+    // SDK of several, so the pinned version is named in the source instead of being compared.
+    if let Some(g) = read(root, "global.json").and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) {
+        let pinned = g.pointer("/sdk/version").and_then(|v| v.as_str()).map(|v| format!("global.json sdk.version {}", v.chars().take(20).collect::<String>()));
+        push(reqs, "dotnet", "", pinned.as_deref().unwrap_or("global.json"));
+    } else if let Some(f) = top_level_with(root, &[".sln", ".slnx", ".csproj", ".fsproj", ".vbproj"]) {
+        push(reqs, "dotnet", "", &f);
+    }
+    // Ruby
+    if let Some(v) = read(root, ".ruby-version") {
+        push(reqs, "ruby", first_line(&v).trim_start_matches("ruby-"), ".ruby-version");
+    }
+    if root.join("Gemfile").is_file() {
+        push(reqs, "ruby", "", "Gemfile");
+        push(reqs, "bundler", "", "Gemfile");
+    }
+    // Deno
+    if let Some(f) = ["deno.json", "deno.jsonc"].iter().find(|f| root.join(f).is_file()) {
+        push(reqs, "deno", "", f);
+    }
+    // Build tools and infrastructure the repository drives.
+    if let Some(f) = ["Makefile", "GNUmakefile"].iter().find(|f| root.join(f).is_file()) {
+        push(reqs, "make", "", f);
+    }
+    if root.join("CMakeLists.txt").is_file() {
+        push(reqs, "cmake", "", "CMakeLists.txt");
+    }
+    if let Some(v) = read(root, ".terraform-version") {
+        push(reqs, "terraform", &first_line(&v), ".terraform-version");
+    } else if let Some(f) = top_level_with(root, &[".tf"]) {
+        push(reqs, "terraform", "", &f);
+    }
+    if root.join("Chart.yaml").is_file() {
+        push(reqs, "helm", "", "Chart.yaml");
+    }
+    // Only catalog ids are recorded (they are what another computer looks up).
+    reqs.retain(|r| crate::toolchain::tool(&r.tool).is_some());
 
     // Containers
     let c = &mut env.containers;
@@ -270,6 +368,20 @@ pub struct CheckItem {
     pub install_command: Option<Vec<String>>,
 }
 
+/// Whether what is installed fits a constraint: `missing` (`None`), `ok`, `mismatch`, or `unknown` when the version
+/// could not be read or the constraint cannot be evaluated (a channel such as `stable` — never guessed).
+pub fn fit(installed: Option<Option<&str>>, constraint: &str) -> &'static str {
+    match installed {
+        None => "missing",
+        Some(version) => match version.map(|v| crate::toolchain::satisfies(v, constraint)) {
+            Some(Some(true)) => "ok",
+            Some(Some(false)) => "mismatch",
+            _ if constraint.is_empty() => "ok",
+            _ => "unknown",
+        },
+    }
+}
+
 /// Compare the requirements with what `probe` finds on this computer (one probe per tool).
 pub fn check_with(env: &Environment, probe: &mut dyn FnMut(&str) -> Option<crate::toolchain::Probe>) -> Vec<CheckItem> {
     let mut cache: std::collections::HashMap<String, Option<crate::toolchain::Probe>> = Default::default();
@@ -278,16 +390,7 @@ pub fn check_with(env: &Environment, probe: &mut dyn FnMut(&str) -> Option<crate
         .map(|r| {
             let t = crate::toolchain::tool(&r.tool);
             let found = cache.entry(r.tool.clone()).or_insert_with(|| if t.is_some() { probe(&r.tool) } else { None }).clone();
-            let status = match (&found, t) {
-                (_, None) => "unknown",
-                (None, _) => "missing",
-                (Some(p), _) => match p.version.as_deref().map(|v| crate::toolchain::satisfies(v, &r.constraint)) {
-                    Some(Some(true)) => "ok",
-                    Some(Some(false)) => "mismatch",
-                    _ if r.constraint.is_empty() => "ok",
-                    _ => "unknown",
-                },
-            };
+            let status = if t.is_none() { "unknown" } else { fit(found.as_ref().map(|p| p.version.as_deref()), &r.constraint) };
             CheckItem {
                 tool: r.tool.clone(),
                 name: t.map(|t| t.name.to_string()).unwrap_or_else(|| r.tool.clone()),
@@ -438,5 +541,53 @@ mod tests {
         assert_eq!(st, [("node", "mismatch"), ("node", "ok"), ("php", "missing"), ("rustc", "unknown"), ("made-up", "unknown")]);
         assert_eq!(probes, ["node", "php", "rustc"], "one probe per known tool; unknown ids are never probed");
         assert!(items[2].install_url.is_some());
+    }
+
+    #[test]
+    fn more_ecosystems_are_recognised_from_their_files() {
+        let t = tempfile::tempdir().unwrap();
+        let r = t.path();
+        write(r, ".java-version", "21\n");
+        write(r, "pom.xml", "<project/>");
+        write(r, "build.gradle.kts", "plugins {}");
+        write(r, "gradlew", "#!/bin/sh");
+        write(r, "global.json", r#"{"sdk":{"version":"8.0.100","rollForward":"latestFeature"}}"#);
+        write(r, ".ruby-version", "ruby-3.3.5\n");
+        write(r, "Gemfile", "source 'https://rubygems.org'");
+        write(r, "deno.jsonc", "{}");
+        write(r, "Makefile", "all:");
+        write(r, "CMakeLists.txt", "project(x)");
+        write(r, "main.tf", "terraform {}");
+        write(r, "Chart.yaml", "name: x");
+        write(r, ".tool-versions", "kubectl 1.31.1\nunknown-plugin 1\n");
+        write(r, "mise.toml", "[env]\nNODE = \"x\"\n[tools]\nnode = \"22\"\npython = [\"3.12\", \"3.11\"]\nsomething = \"1\"\n");
+        let e = detect(r);
+        let find = |tool: &str, source: &str| e.requirements.iter().find(|q| q.tool == tool && q.source == source).map(|q| q.constraint.clone());
+        assert_eq!(find("java", ".java-version").as_deref(), Some("21"));
+        assert_eq!(find("maven", "pom.xml").as_deref(), Some(""), "no Maven wrapper: Maven itself is needed");
+        assert!(!e.requirements.iter().any(|q| q.tool == "gradle"), "the Gradle wrapper brings its own Gradle");
+        assert_eq!(find("dotnet", "global.json sdk.version 8.0.100").as_deref(), Some(""), "the pinned SDK is named, not compared");
+        assert_eq!(find("ruby", ".ruby-version").as_deref(), Some("3.3.5"));
+        assert!(find("bundler", "Gemfile").is_some() && find("deno", "deno.jsonc").is_some());
+        assert!(find("make", "Makefile").is_some() && find("cmake", "CMakeLists.txt").is_some());
+        assert!(find("terraform", "main.tf").is_some() && find("helm", "Chart.yaml").is_some());
+        assert_eq!(find("kubectl", ".tool-versions").as_deref(), Some("1.31.1"));
+        assert_eq!(find("node", "mise.toml").as_deref(), Some("22"));
+        assert_eq!(find("python", "mise.toml").as_deref(), Some("3.12"), "the first of several versions");
+        assert!(e.requirements.iter().all(|q| crate::toolchain::tool(&q.tool).is_some()), "catalog ids only");
+
+        let t2 = tempfile::tempdir().unwrap();
+        write(t2.path(), "App.csproj", "<Project/>");
+        assert_eq!(detect(t2.path()).requirements.iter().map(|q| (q.tool.as_str(), q.source.as_str())).collect::<Vec<_>>(), [("dotnet", "App.csproj")]);
+    }
+
+    #[test]
+    fn fit_reports_what_it_can_and_never_guesses() {
+        assert_eq!(fit(None, ">=20"), "missing");
+        assert_eq!(fit(Some(Some("20.11.1")), ">=20"), "ok");
+        assert_eq!(fit(Some(Some("18.0.0")), ">=20"), "mismatch");
+        assert_eq!(fit(Some(None), ""), "ok", "installed, any version");
+        assert_eq!(fit(Some(None), ">=20"), "unknown", "version unreadable");
+        assert_eq!(fit(Some(Some("1.90.0")), "stable"), "unknown");
     }
 }

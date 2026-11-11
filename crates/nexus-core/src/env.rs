@@ -60,22 +60,24 @@ pub enum Reason {
 /// Which scrub rules apply.
 #[derive(Debug, Clone, Copy)]
 pub struct Policy {
-    /// Claude sessions: also scrub telemetry, `CLAUDE_CONFIG_DIR` and (unless allowed) provider credentials.
-    pub claude: bool,
-    /// Keep `ANTHROPIC_*` credentials (profile opt-in).
+    /// Agent sessions (ADR-0052): also scrub telemetry, the agent's home variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`),
+    /// its session markers and (unless allowed) its provider credentials. `None` = a plain shell.
+    pub agent: Option<crate::agent::Kind>,
+    /// Keep the agent's provider credentials (profile opt-in).
     pub inherit_provider_env: bool,
 }
 
 impl Policy {
-    pub const CLAUDE: Policy = Policy {
-        claude: true,
-        inherit_provider_env: false,
-    };
+    pub const CLAUDE: Policy = Policy::agent(crate::agent::Kind::Claude, false);
     /// Plain shells keep the user's environment except Claude session markers and NEXUS scope.
     pub const SHELL: Policy = Policy {
-        claude: false,
+        agent: None,
         inherit_provider_env: true,
     };
+
+    pub const fn agent(kind: crate::agent::Kind, inherit_provider_env: bool) -> Policy {
+        Policy { agent: Some(kind), inherit_provider_env }
+    }
 }
 
 pub fn scrub_reason(name: &str, policy: Policy) -> Option<Reason> {
@@ -86,16 +88,17 @@ pub fn scrub_reason(name: &str, policy: Policy) -> Option<Reason> {
     if NEXUS_SCOPE.contains(&up.as_str()) {
         return Some(Reason::NexusScope);
     }
-    if !policy.claude {
-        return None;
+    let agent = policy.agent?;
+    if agent.session_markers().contains(&up.as_str()) {
+        return Some(Reason::SessionMarker);
     }
-    if up == "CLAUDE_CONFIG_DIR" {
+    if up == agent.home_var() {
         return Some(Reason::ProfileManaged);
     }
     if up.starts_with("OTEL_") || up == "CLAUDE_CODE_ENABLE_TELEMETRY" {
         return Some(Reason::Telemetry);
     }
-    if !policy.inherit_provider_env && PROVIDER_CREDENTIALS.contains(&up.as_str()) {
+    if !policy.inherit_provider_env && agent.provider_credentials().contains(&up.as_str()) {
         return Some(Reason::ProviderCredential);
     }
     None
@@ -297,12 +300,31 @@ mod tests {
 
     #[test]
     fn provider_opt_in_keeps_key() {
-        let policy = Policy {
-            claude: true,
-            inherit_provider_env: true,
-        };
+        let policy = Policy::agent(crate::agent::Kind::Claude, true);
         let (env, _) = compose(&base(), &[], policy);
         assert!(names(&env).contains(&"ANTHROPIC_API_KEY".to_string()));
+    }
+
+    #[test]
+    fn codex_policy_scrubs_its_own_home_markers_and_credentials() {
+        let mut b = base();
+        for (k, v) in [("CODEX_HOME", "/parent/codex"), ("OPENAI_API_KEY", "sk-openai"), ("codex_api_key", "x"), ("CODEX_SANDBOX", "seatbelt"), ("CODEX_SANDBOX_NETWORK_DISABLED", "1")] {
+            b.push((k.into(), v.into()));
+        }
+        let set = vec![("CODEX_HOME".to_string(), "/p".to_string(), Reason::ProfileManaged)];
+        let (env, changes) = compose(&b, &set, Policy::agent(crate::agent::Kind::Codex, false));
+        let n = names(&env);
+        for gone in ["CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "OPENAI_API_KEY", "CODEX_API_KEY", "OTEL_EXPORTER_OTLP_ENDPOINT", "CLAUDECODE", "NEXUS_SESSION_ID"] {
+            assert!(!n.contains(&gone.to_string()), "{gone} reached Codex");
+        }
+        assert_eq!(env.iter().filter(|(k, _)| k.eq_ignore_ascii_case("CODEX_HOME")).map(|(_, v)| v.as_str()).collect::<Vec<_>>(), ["/p"]);
+        // Claude's own configuration is not Codex's business; it stays for the commands Codex runs.
+        assert!(n.contains(&"ANTHROPIC_API_KEY".to_string()) && n.contains(&"CLAUDE_CONFIG_DIR".to_string()));
+        assert!(!format!("{changes:?}").contains("sk-openai"), "removed values are never recorded");
+        let (kept, _) = compose(&b, &[], Policy::agent(crate::agent::Kind::Codex, true));
+        assert!(names(&kept).contains(&"OPENAI_API_KEY".to_string()), "profile opt-in");
+        let (shell, _) = compose(&b, &[], Policy::SHELL);
+        assert!(names(&shell).contains(&"CODEX_HOME".to_string()), "shells keep the user's own setup");
     }
 
     #[test]

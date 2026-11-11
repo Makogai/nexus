@@ -1,6 +1,7 @@
 //! `nexus` — the NEXUS command-line interface. Every command is a thin layer over `nexus-core`; nothing here
 //! re-implements behaviour the desktop app has. Works without the desktop app running.
 
+mod agents;
 mod backup;
 mod constitution;
 mod context;
@@ -52,6 +53,16 @@ enum Command {
     /// Claude Code setup: is it installed and startable, which version, and the official ways to install it here.
     /// NEXUS never installs it for you.
     Setup,
+    /// Development tools on this computer (runtimes, package and version managers, build, cloud, database, AI agents)
+    /// and what the active workspace's projects need. Runs only the tools' version commands; installs nothing.
+    Tools {
+        /// Only tools a project of the active workspace needs.
+        #[arg(long)]
+        needed: bool,
+        /// Only tools that are missing or whose version does not fit a project.
+        #[arg(long)]
+        missing: bool,
+    },
     /// Workspaces (portable folders with a nexus-workspace.json manifest).
     #[command(subcommand)]
     Workspaces(WorkspaceCmd),
@@ -101,8 +112,21 @@ enum Command {
     /// Show the instruction files Claude loads for a profile and project (CLAUDE.md layers, rules, imports) and what
     /// NEXUS appends. Read-only.
     Instructions(instructions::InstructionsArgs),
-    /// Start Claude Code in this terminal with a profile's own configuration.
+    /// Start an AI agent in this terminal (Claude Code by default; `--agent codex`) with a profile's own configuration.
     Launch(launch::LaunchArgs),
+    /// AI agents beyond Claude Code (OpenAI Codex CLI): what NEXUS gives their sessions, their profiles (ADR-0052).
+    #[command(subcommand)]
+    Agents(agents::AgentCmd),
+    /// Codex's turn-notification program for NEXUS sessions (started by Codex via `-c notify=[…]`). Always exits 0.
+    #[command(hide = true)]
+    AgentNotify {
+        #[arg(long)]
+        agent: String,
+        #[arg(long)]
+        session: String,
+        /// The JSON payload Codex appends.
+        payload: Option<String>,
+    },
     /// NEXUS MCP server over stdio, bound to one NEXUS session (started by Claude from the session's --mcp-config).
     /// `--list-tools` prints the server's tool definitions as JSON instead (no session, nothing is opened).
     Mcp {
@@ -311,6 +335,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Doctor => cmd_doctor(&ctx),
         Command::Setup => cmd_setup(&ctx),
+        Command::Tools { needed, missing } => cmd_tools(&ctx, needed, missing),
         Command::Workspaces(c) => cmd_workspaces(&ctx, c).map(|_| 0),
         Command::Projects(c) => cmd_projects(&ctx, c).map(|_| 0),
         Command::Profiles(c) => cmd_profiles(&ctx, c).map(|_| 0),
@@ -329,6 +354,8 @@ fn main() -> ExitCode {
         Command::Workflow(c) => workflow::run_workflow(&ctx, c),
         Command::Gates(c) => workflow::run_gates(&ctx, c),
         Command::Launch(a) => launch::run(&ctx, a),
+        Command::Agents(c) => agents::run(&ctx, c),
+        Command::AgentNotify { agent, session, payload } => Ok(agents::notify(&ctx, &agent, &session, payload.as_deref())),
         Command::Mcp { session, .. } => mcp::run(&ctx, &session.unwrap_or_default()),
         Command::Hook { session, event } => Ok(hook::run(&ctx, &session, &event)),
     };
@@ -380,6 +407,49 @@ fn cmd_setup(ctx: &Ctx) -> nexus_core::Result<i32> {
         println!("→ {n}");
     }
     Ok(if s.ready { 0 } else { 1 })
+}
+
+/// `nexus tools`: the Dev Environment page in a terminal (ADR-0051). Exit code 1 when a project's need is not met.
+fn cmd_tools(ctx: &Ctx, needed: bool, missing: bool) -> nexus_core::Result<i32> {
+    let conn = ctx.db()?;
+    let mut view = nexus_core::devenv::view(&conn, &nexus_core::toolchain::inventory(), now_ms())?;
+    let unmet = |e: &nexus_core::devenv::Entry| e.needed_by.iter().any(|n| matches!(n.status, "missing" | "mismatch"));
+    view.tools.retain(|e| (!needed || !e.needed_by.is_empty()) && (!missing || e.installed.path.is_none() || unmet(e)));
+    let code = if view.tools.iter().any(unmet) { 1 } else { 0 };
+    if ctx.json {
+        out::json(&view);
+        return Ok(code);
+    }
+    let mut category = None;
+    for e in &view.tools {
+        let i = &e.installed;
+        if category != Some(i.tool.category) {
+            category = Some(i.tool.category);
+            println!("{}", serde_json::to_value(i.tool.category).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default());
+        }
+        match (&i.path, &i.version) {
+            (Some(p), v) => println!("  ok      {:<26} {:<12} {}", i.tool.name, v.as_deref().unwrap_or("?"), p.display()),
+            (None, _) => println!("  missing {:<26} {:<12} {}", i.tool.name, "–", i.install_command.as_ref().map(|c| c.join(" ")).unwrap_or_else(|| i.tool.install_url.to_string())),
+        }
+        if let Some(n) = &i.note {
+            println!("            {n}");
+        }
+        for c in i.copies.iter().skip(1).filter(|_| i.path.is_some()) {
+            println!("            also on PATH: {}", c.display());
+        }
+        for n in &e.needed_by {
+            let want = if n.constraint.is_empty() { "any version".to_string() } else { n.constraint.clone() };
+            println!("            {:<9} {} needs {want} ({})", n.status, n.project, n.source);
+            if let Some(h) = &n.hint {
+                println!("                      with {}: {}", h.manager, h.command.join(" "));
+            }
+        }
+    }
+    if !view.projects_without_environment.is_empty() {
+        println!("Needs unknown (not on this computer, no environment record): {}", view.projects_without_environment.join(", "));
+    }
+    println!("NEXUS only ran version commands. Install commands are for you to run.");
+    Ok(code)
 }
 
 pub(crate) fn active_workspace(conn: &Connection) -> nexus_core::Result<workspace::Workspace> {

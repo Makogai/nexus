@@ -75,7 +75,7 @@ fn attribute(joined: &[(String, i64)], ts: i64) -> Option<String> {
 fn link_current(conn: &Connection) -> Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO session_conversations (session_id, claude_session_id, since)
-         SELECT id, claude_session_id, started_at FROM sessions WHERE kind = 'claude' AND claude_session_id IS NOT NULL",
+         SELECT id, claude_session_id, started_at FROM sessions WHERE kind = 'claude' AND COALESCE(agent, 'claude') = 'claude' AND claude_session_id IS NOT NULL",
         [],
     )?;
     Ok(())
@@ -285,7 +285,7 @@ pub fn scan_due(conn: &Connection, home: &Path, limit: usize) -> Result<Scanned>
     let ids: Vec<String> = conn
         .prepare(
             "SELECT s.id FROM sessions s LEFT JOIN usage_state u ON u.session_id = s.id
-             WHERE s.kind = 'claude' AND s.claude_session_id IS NOT NULL AND s.profile_id IS NOT NULL
+             WHERE s.kind = 'claude' AND COALESCE(s.agent, 'claude') = 'claude' AND s.claude_session_id IS NOT NULL AND s.profile_id IS NOT NULL
                AND (u.session_id IS NULL OR s.state IN ('starting', 'running') OR u.behind = 1 OR u.scanned_at < COALESCE(s.ended_at, 0))
              ORDER BY (s.state IN ('starting', 'running')) DESC, s.started_at DESC LIMIT ?1",
         )?

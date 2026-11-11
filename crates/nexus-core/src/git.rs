@@ -482,8 +482,16 @@ fn clean(s: &str, max: usize) -> String {
 
 /// Commits in `range` (e.g. `HEAD..@{u}`), newest first, at most `max`.
 pub fn log_range(repo: &Path, range: &str, max: usize) -> Result<Vec<LogEntry>> {
+    log_revs(repo, &[range], max)
+}
+
+/// [`log_range`] for a revision list of several arguments (e.g. `HEAD --not --remotes=origin`).
+pub fn log_revs(repo: &Path, revs: &[&str], max: usize) -> Result<Vec<LogEntry>> {
     let n = format!("-n{}", max.clamp(1, 500));
-    let out = run_git(Some(repo), &["log", "--no-color", &n, "--format=%H%x1f%at%x1f%an%x1f%s%x1e", range, "--"])?;
+    let mut args = vec!["log", "--no-color", &n, "--format=%H%x1f%at%x1f%an%x1f%s%x1e"];
+    args.extend_from_slice(revs);
+    args.push("--");
+    let out = run_git(Some(repo), &args)?;
     if !out.success() {
         return Err(CoreError::External { program: "git log".into(), message: first_line(&out.stderr_str()) });
     }

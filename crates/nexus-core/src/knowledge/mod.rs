@@ -393,7 +393,10 @@ mod tests {
     fn credential_detection_avoids_prose_false_positives() {
         assert!(check_portable(&Frontmatter::default(), "Keys look like AKIA followed by letters.").is_ok());
         assert!(check_portable(&Frontmatter::default(), "key AKIAIOSFODNN7EXAMPLE leaked").is_err());
-        assert!(check_portable(&Frontmatter::default(), "-----BEGIN OPENSSH PRIVATE KEY-----").is_err());
+        // Built from parts: a literal key header here would make NEXUS's own push review flag this line.
+        let pem_head = "-----BEGIN OPENSSH";
+        let pem = format!("{pem_head} PRIVATE KEY-----");
+        assert!(check_portable(&Frontmatter::default(), &pem).is_err());
         assert!(check_portable(&Frontmatter::default(), "paths like C:\\code are fine in prose").is_ok());
     }
 

@@ -24,7 +24,11 @@ pub struct AppCtx {
     /// Where the user is looking, for notification decisions (ADR-0025).
     pub attention: AttentionState,
     pub notifier: Box<dyn crate::notifier::Notifier>,
+    /// The last Dev Environment inventory (ADR-0051 §4): when it was taken and what was found. Memory only.
+    inventory: Mutex<Option<Inventory>>,
 }
+
+type Inventory = (i64, Vec<nexus_core::toolchain::Installed>);
 
 #[derive(Default)]
 pub struct AttentionState {
@@ -87,7 +91,18 @@ impl AppCtx {
             restore,
             attention: AttentionState::default(),
             notifier: crate::notifier::select(),
+            inventory: Mutex::new(None),
         }
+    }
+
+    pub fn inventory(&self) -> Option<Inventory> {
+        self.inventory.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    pub fn set_inventory(&self, at: i64, tools: Vec<nexus_core::toolchain::Installed>) -> Inventory {
+        let v = (at, tools);
+        *self.inventory.lock().unwrap_or_else(|p| p.into_inner()) = Some(v.clone());
+        v
     }
 
     /// The UI's database connection. Never hold it across an `.await` or a slow external call.

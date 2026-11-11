@@ -23,6 +23,7 @@ export const router = createRouter({
     { path: '/kits', name: 'kits', component: () => import('./views/KitsView.vue') },
     { path: '/skills', name: 'skills', component: () => import('./views/SkillsView.vue') },
     { path: '/tools', name: 'tools', component: () => import('./views/ToolsView.vue') },
+    { path: '/environment', name: 'dev-environment', component: () => import('./views/DevEnvironmentView.vue') },
     { path: '/notifications', name: 'notifications', component: () => import('./views/NotificationsView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
