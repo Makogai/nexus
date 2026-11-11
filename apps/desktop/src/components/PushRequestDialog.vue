@@ -66,13 +66,15 @@ const canPush = computed(() => {
   return !!r && !pushed.value && outcome.value?.status !== 'declined' && !r.inspection.blocked && r.commits.length > 0 && r.behind === 0
 })
 
+/** Declining needs no review, so a request that cannot be reviewed (its branch is no longer checked out) can still go. */
 async function decide(approve: boolean) {
+  const id = app.pushRequestId
   const r = review.value
-  if (!r || busy.value) return
+  if (!id || busy.value || (approve && !r)) return
   busy.value = true
   error.value = null
   try {
-    const done = await api.pushRequestDecide(r.request.id, approve, r.token)
+    const done = await api.pushRequestDecide(id, approve, r?.token ?? '')
     outcome.value = done
     app.pushRequestsChanged++
     if (done.status === 'declined') {
@@ -85,7 +87,7 @@ async function decide(approve: boolean) {
   } catch (e) {
     error.value = toIpcError(e).message
     // The branch may have moved: show what would be pushed now (the error stays).
-    await load(r.request.id)
+    await load(id)
   } finally {
     busy.value = false
   }
@@ -214,7 +216,7 @@ async function tellClaude() {
         </button>
         <button v-if="failed" class="btn btn-ghost" :disabled="busy" data-push-dismiss @click="dismiss">Dismiss</button>
         <button v-if="failed" class="btn btn-ghost" :disabled="busy || loading" data-push-review-again @click="reviewAgain"><RefreshCw :class="{ spin: loading }" /> Review again</button>
-        <button v-if="!failed" class="btn btn-ghost" :disabled="busy || !review" data-push-decline @click="decide(false)">Decline</button>
+        <button v-if="!failed" class="btn btn-ghost" :disabled="busy || loading" data-push-decline @click="decide(false)">Decline</button>
         <button class="btn btn-primary" :disabled="busy || loading || !canPush" :aria-busy="busy" data-push-approve @click="decide(true)">
           <RefreshCw v-if="busy" class="spin" /><ArrowUp v-else /> {{ busy ? 'Pushing…' : failed ? 'Push again' : 'Push' }}
         </button>

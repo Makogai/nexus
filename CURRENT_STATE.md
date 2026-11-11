@@ -183,6 +183,19 @@ saw (`relevant_within`), so a recurrence names its cause.
 | 21 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
 | 22 | macOS | **not verified** — only CI on macOS can run it, and a race needs more than one green run to mean much |
 
+**Stale push request could not be declined** (owner, after the 0.5.1 push: the NEXUS request for
+`fix/macos-knowledge-watcher` said "no longer checked out" on *Review and push*). The core declines without a review, but
+the dialog's *Decline* waited for one (`!review`) that could never load. Now *Decline* is available once loading ends and
+sends no token; the error says the request can be declined (ADR-0047). Until this ships: switch to the branch, decline,
+switch back.
+
+| # | Command | Result |
+| --- | --- | --- |
+| 23 | `npx vitest run tests/push-request.test.ts` with the new test, before the fix | **1 failed** (Decline did nothing), 9 passed |
+| 24 | same after the fix · `npx vitest run` · `npm run typecheck` | 10/10 · 175/175 (33 files) · clean |
+| 25 | `cargo test -p nexus-core --lib push_request` · `cargo clippy --workspace --all-targets -- -D warnings` | 3/3 · clean |
+| 26 | desktop E2E | not run — no suite drives *Decline*; the Windows E2E job of CI on this branch runs the rest |
+
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
 Task `01a1c4f1` (owner request 2026-11-10): sessions per project on top, feedback for every action, Git pushes that never

@@ -213,7 +213,7 @@ pub fn review(conn: &Connection, home: &Path, id: &str) -> Result<PushReview> {
     let repo = repo_of(conn, &request.project_id)?;
     let st = git::status(&repo)?;
     if st.branch.as_deref() != Some(request.branch.as_str()) {
-        return Err(CoreError::invalid(format!("{} is no longer checked out — switch back to it to push", request.branch)));
+        return Err(CoreError::invalid(format!("{} is no longer checked out — switch back to it to push it, or decline the request", request.branch)));
     }
     let head = st.head_oid.clone().ok_or_else(|| CoreError::invalid("the branch has no commits"))?;
     let (remote, remote_branch, first_push) = target(&repo, &request.branch)?;
