@@ -101,7 +101,7 @@ watch(
     <div v-else class="empty">
       <SquareTerminal class="empty-icon" />
       <h3>No sessions here</h3>
-      <p>Launch Claude or open a shell from a project. Running sessions, exit codes and resumable conversations appear here.</p>
+      <p>Launch a session (Claude Code or Codex) or open a shell from a project. Running sessions, exit codes and resumable conversations appear here.</p>
     </div>
 
     <p class="notice explain"><Info /> Live terminals end when NEXUS closes; their sessions then show as <em>interrupted</em>. Claude keeps the conversation, so <strong>Resume</strong> continues it with the same profile and directory.</p>

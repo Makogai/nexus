@@ -57,7 +57,7 @@ function onSelect(task: KnowledgeItem, e: Event) {
           <Lock v-if="t.privacy === 'local-only'" class="ic" aria-label="Local only" />
           <span v-if="t.branch" class="chip mono" :title="`Branch ${t.branch}`">{{ t.branch }}</span>
           <span class="spacer" />
-          <button v-if="t.status !== 'done'" class="btn btn-ghost btn-icon btn-sm launch" :title="`Launch Claude for “${t.title}”`" :aria-label="`Launch Claude for ${t.title}`" @click="emit('launch', t)"><Sparkles /></button>
+          <button v-if="t.status !== 'done'" class="btn btn-ghost btn-icon btn-sm launch" :title="`Launch a session for “${t.title}”`" :aria-label="`Launch a session for ${t.title}`" @click="emit('launch', t)"><Sparkles /></button>
           <select class="select status" :value="t.status ?? 'backlog'" :aria-label="`Status of ${t.title}`" @change="onSelect(t, $event)">
             <option v-for="o in TASK_STATUSES" :key="o" :value="o">{{ STATUS_LABELS[o] }}</option>
           </select>

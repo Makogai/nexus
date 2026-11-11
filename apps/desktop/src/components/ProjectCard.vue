@@ -33,7 +33,7 @@ onMounted(() => {
       <button
         v-if="project.available"
         class="btn btn-sm btn-ghost btn-icon launch"
-        title="Launch Claude here"
+        title="Launch a session here"
         @click.stop="app.openLaunch(project.id)"
       >
         <Sparkles />

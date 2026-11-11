@@ -121,7 +121,7 @@ function tone(id: string) {
       <div ref="newMenuRoot" class="new">
         <button class="btn btn-ghost btn-sm btn-icon" title="New terminal" @click="newMenu = !newMenu"><Plus /></button>
         <div v-if="newMenu" class="menu">
-          <button class="menu-item" @click="(newMenu = false), app.openLaunch()"><Sparkles /> Launch Claude…</button>
+          <button class="menu-item" @click="(newMenu = false), app.openLaunch()"><Sparkles /> Launch…</button>
           <div class="sep" />
           <button v-for="s in shells" :key="s.id" class="menu-item" @click="openShell(s.id)">
             <SquareTerminal /> {{ s.name }}
@@ -160,7 +160,7 @@ function tone(id: string) {
         <p>No terminals open.</p>
         <div class="row">
           <button class="btn btn-sm" @click="openShell()"><SquareTerminal /> Open shell</button>
-          <button class="btn btn-sm btn-primary" @click="app.openLaunch()"><Sparkles /> Launch Claude</button>
+          <button class="btn btn-sm btn-primary" @click="app.openLaunch()"><Sparkles /> Launch</button>
         </div>
       </div>
     </div>

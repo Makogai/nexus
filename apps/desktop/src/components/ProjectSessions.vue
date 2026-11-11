@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The project page's Sessions tab (ADR-0048): every session of the project, the ones running and waiting for the
-// person first; filters for running, ended and archived; Launch Claude and Shell at the top.
+// person first; filters for running, ended and archived; Launch and Shell at the top.
 import { computed, ref, watch } from 'vue'
 import { Sparkles, SquareTerminal } from '@lucide/vue'
 import SessionRow from './SessionRow.vue'
@@ -63,7 +63,7 @@ async function openShell() {
       </div>
       <span class="spacer" />
       <button class="btn" :disabled="!available" @click="openShell"><SquareTerminal /> Shell</button>
-      <button class="btn btn-primary" :disabled="!available" @click="app.openLaunch(projectId)"><Sparkles /> Launch Claude</button>
+      <button class="btn btn-primary" :disabled="!available" @click="app.openLaunch(projectId)"><Sparkles /> Launch</button>
     </div>
     <div v-if="shown.length" class="list">
       <SessionRow v-for="s in shown" :key="s.id" :session="s" :show-project="false" :data-session="s.id" />
@@ -72,7 +72,7 @@ async function openShell() {
       <p v-if="loadingArchived">Reading archived sessions…</p>
       <p v-else-if="filter === 'archived'">No archived sessions.</p>
       <p v-else-if="filter === 'running'">Nothing runs for this project right now.</p>
-      <p v-else>No sessions yet. Launch Claude here to start one — NEXUS records it so you can resume later.</p>
+      <p v-else>No sessions yet. Launch one here — Claude Code or Codex — and NEXUS records it so you can resume later.</p>
     </div>
   </div>
 </template>

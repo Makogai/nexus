@@ -58,7 +58,7 @@ watch(
 const commands = computed<Command[]>(() => {
   const go = (path: string) => () => router.push(path)
   const list: Command[] = [
-    { id: 'launch', title: 'Launch Claude…', group: 'Actions', icon: Sparkles, hint: 'Ctrl+Shift+L', run: () => app.openLaunch() },
+    { id: 'launch', title: 'Launch a session…', group: 'Actions', icon: Sparkles, hint: 'Ctrl+Shift+L', run: () => app.openLaunch() },
     { id: 'nav-home', title: 'Go to Home', group: 'Navigate', icon: House, run: go('/') },
     { id: 'nav-projects', title: 'Go to Projects', group: 'Navigate', icon: FolderGit2, run: go('/projects') },
     { id: 'nav-sessions', title: 'Go to Sessions', group: 'Navigate', icon: SquareTerminal, run: go('/sessions') },
@@ -92,7 +92,7 @@ const commands = computed<Command[]>(() => {
   for (const p of projects.list) {
     list.push({ id: `project-${p.id}`, title: p.name, group: 'Projects', icon: FolderGit2, hint: p.stack.stacks.slice(0, 2).join(' · '), run: go(`/projects/${p.id}`) })
     if (p.available) {
-      list.push({ id: `launch-${p.id}`, title: `Launch Claude in ${p.name}`, group: 'Projects', icon: Sparkles, run: () => app.openLaunch(p.id) })
+      list.push({ id: `launch-${p.id}`, title: `Launch in ${p.name}`, group: 'Projects', icon: Sparkles, run: () => app.openLaunch(p.id) })
       list.push({ id: `resume-${p.id}`, title: `Resume ${p.name}`, group: 'Projects', icon: History, run: () => router.push(`/projects/${p.id}/resume`) })
     }
   }

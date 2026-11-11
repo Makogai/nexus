@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
       <span v-if="lastWorkProfile" class="faint">· {{ lastWorkProfile.name }}</span>
     </button>
     <button class="btn btn-primary" @click="app.openLaunch()">
-      <Sparkles /> Launch Claude
+      <Sparkles /> Launch
     </button>
   </header>
 </template>

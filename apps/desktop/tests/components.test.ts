@@ -248,6 +248,44 @@ describe('LaunchDialog', () => {
     expect(app.prefs.lastLaunch).toMatchObject({ agent: 'codex', agentProfileId: 'cx', profileId: 'game' })
   })
 
+  it('a profile chosen to launch with decides the agent, whatever was used last', async () => {
+    seed()
+    const codex = (id: string, name: string) => ({
+      id, agent: 'codex' as const, name, homeDir: null, executable: null, extraArgs: [], inheritProviderEnv: false, turnNotifications: true,
+      defaultWorkProfile: null, defaultModel: null, createdAt: 0, updatedAt: 0, lastUsedAt: null, archivedAt: null,
+    })
+    api.agentsOverview.mockResolvedValue({
+      agents: [
+        { id: 'claude', name: 'Claude Code', installUrl: 'https://code.claude.com', installed: null, capabilities: [] },
+        { id: 'codex', name: 'OpenAI Codex CLI', installUrl: 'https://github.com/openai/codex', installed: null, capabilities: [] },
+      ],
+      profiles: [codex('cx', 'Codex'), codex('cx-work', 'Codex work')],
+      detected: [],
+    })
+    const app = useAppStore()
+    app.prefs.lastLaunch = { profileId: 'work', workProfile: 'balanced', effort: null, agent: 'codex', agentProfileId: 'cx' }
+    const w = mountWith(LaunchDialog)
+    const checked = () => w.findAll('[data-launch-agent]').filter((b) => b.attributes('aria-checked') === 'true').map((b) => b.attributes('data-launch-agent'))
+
+    app.openLaunch() // nothing chosen: the agent used last
+    await flushPromises()
+    expect(checked()).toEqual(['codex'])
+
+    app.launchDialog.open = false
+    await flushPromises()
+    app.openLaunch(null, 'game') // a Claude profile's "Launch with this profile"
+    await flushPromises()
+    expect(checked()).toEqual(['claude'])
+    expect((w.find('#launch-profile').element as HTMLSelectElement).value).toBe('game')
+
+    app.launchDialog.open = false
+    await flushPromises()
+    app.openLaunch(null, null, null, { agentProfileId: 'cx-work' }) // a Codex profile's
+    await flushPromises()
+    expect(checked()).toEqual(['codex'])
+    expect((w.find('#launch-agent-profile').element as HTMLSelectElement).value).toBe('cx-work')
+  })
+
   it('launches for a task: its project is fixed, the task id and start choice are sent', async () => {
     seed()
     const app = useAppStore()
@@ -562,7 +600,7 @@ describe('CommandPalette', () => {
     await flushPromises()
     await w.find('.palette input').setValue('launch game')
     const first = w.findAll('.results li')[0]!
-    expect(first.text()).toContain('Launch Claude in Game')
+    expect(first.text()).toContain('Launch in Game')
     await w.find('.palette input').trigger('keydown', { key: 'Enter' })
     expect(app.paletteOpen).toBe(false)
     expect(app.launchDialog).toEqual({ open: true, projectId: 'p1', profileId: undefined, task: null, kickoff: undefined })

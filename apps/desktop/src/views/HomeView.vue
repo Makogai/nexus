@@ -63,7 +63,7 @@ onActivated(() => {
       </div>
       <div class="page-actions">
         <button class="btn" @click="router.push('/projects')"><Plus /> Add project</button>
-        <button class="btn btn-primary" @click="app.openLaunch()"><Sparkles /> Launch Claude</button>
+        <button class="btn btn-primary" @click="app.openLaunch()"><Sparkles /> Launch</button>
       </div>
     </div>
 

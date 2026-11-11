@@ -201,6 +201,22 @@ switch back.
 | 25 | `cargo test -p nexus-core --lib push_request` · `cargo clippy --workspace --all-targets -- -D warnings` | 3/3 · clean |
 | 26 | desktop E2E | not run — no suite drives *Decline*; the Windows E2E job of CI on this branch runs the rest |
 
+**Codex could not be found to launch** (owner on 0.5.1: "i have codex and it added profile too, but it doenst give me any
+options to launch it"). Codex starts only from the launch dialog's *Agent* choice, but every button opening that dialog
+said "Launch Claude", and Codex profiles had no launch button. Owner chose "Launch" everywhere. Now: the buttons and
+commands that open the dialog say **Launch** (top bar, Home, project page, Sessions tab, terminal panel, palette, task
+rows, knowledge task, resume view); each Codex profile row has **Launch**; a profile chosen to launch with decides the
+agent — found on the way: a Claude profile's *Launch with this profile* opened Codex when Codex was used last (vitest seen
+failing: `['codex']` for `['claude']`). Workflow labels keep "Claude" (workflows start Claude only). ADR-0052 §10,
+FIRST_RUN, USER_GUIDE.
+
+| # | Command | Result |
+| --- | --- | --- |
+| 27 | new/changed vitest before the change (`agent-profiles`, `components`, `project-page`) | **4 failed** as intended (no row launch, Claude profile opened Codex, palette and header still "Launch Claude"), 27 passed |
+| 28 | same after · `npx vitest run` · `npm run typecheck` · `npx vite build` | 31/31 · 177/177 (33 files) · clean · built |
+| 29 | E2E build (`--features e2e-webview-debugging`) · `cargo build -p nexus-cli -p fake-claude` | ok · ok |
+| 30 | `agents` · `run-smoke` · `task-flow` · `profiles-kits` · `context` · `constitutions` · `workbench` (the suites that open the launch dialog) | 16 · 28 · 43 · 9 · 12 · 13 · 51 — all OK, first run |
+
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
 Task `01a1c4f1` (owner request 2026-11-10): sessions per project on top, feedback for every action, Git pushes that never

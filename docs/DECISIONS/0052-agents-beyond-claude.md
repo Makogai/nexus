@@ -74,6 +74,11 @@ Measured with codex-cli 0.166.0 (temporary `CODEX_HOME`, nothing in `~/.codex` t
    `--dangerously-bypass-hook-trust`, sandbox `danger-full-access`). Sandbox and approvals otherwise stay Codex's own.
 9. **One builder for both hosts**: the desktop and `nexus launch --agent codex` use `codex::prepare` and
    `codex::launch::build`, as Claude sessions share `claude::prepare`.
+10. **One launch dialog, found from everywhere** (after 0.5.1, owner: Codex had a profile but "doesnt give me any options
+    to launch it"): the buttons that open the dialog say **Launch**, not "Launch Claude"; each agent profile has its own
+    *Launch*, as Claude profiles have *Launch with this profile*. A profile chosen to launch with decides the agent (a
+    Claude profile means Claude Code even when Codex was used last); otherwise the dialog starts with the agent used
+    last. Workflow sessions still say Claude — workflows start Claude only (Codex as a workflow step is M26).
 
 ## Capabilities of Codex sessions in this stage
 

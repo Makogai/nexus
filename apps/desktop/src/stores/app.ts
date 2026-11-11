@@ -47,6 +47,8 @@ export const useAppStore = defineStore('app', () => {
     task?: { id: string; title: string; projectId: string | null } | null
     /** Preselect "start right away" (the Learn view's guided session); unset = the person's last choice. */
     kickoff?: boolean
+    /** Launch with another agent's profile (ADR-0052); a `profileId` instead means Claude Code. */
+    agentProfileId?: string | null
   }>({ open: false })
   /** The push request under review (ADR-0043); null = dialog closed. */
   const pushRequestId = ref<string | null>(null)
@@ -164,9 +166,16 @@ export const useAppStore = defineStore('app', () => {
     projectId?: string | null,
     profileId?: string | null,
     task?: { id: string; title: string; projectId: string | null } | null,
-    opts: { kickoff?: boolean } = {},
+    opts: { kickoff?: boolean; agentProfileId?: string } = {},
   ) {
-    launchDialog.value = { open: true, projectId: task?.projectId ?? projectId, profileId, task: task ?? null, kickoff: task ? opts.kickoff : undefined }
+    launchDialog.value = {
+      open: true,
+      projectId: task?.projectId ?? projectId,
+      profileId,
+      task: task ?? null,
+      kickoff: task ? opts.kickoff : undefined,
+      agentProfileId: opts.agentProfileId,
+    }
   }
 
   return {

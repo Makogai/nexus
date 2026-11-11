@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({ agentsOverview: vi.fn(), agentProfileRegister: v
 vi.mock('../src/lib/ipc', () => ({ api, toIpcError: (e: unknown) => ({ code: 'invalid', message: String(e) }) }))
 
 import AgentProfilesCard from '../src/components/AgentProfilesCard.vue'
+import { useAppStore } from '../src/stores/app'
 import { useProfileStore } from '../src/stores/profiles'
 
 const overview = (profiles: AgentsOverview['profiles'] = []): AgentsOverview => ({
@@ -75,5 +76,14 @@ describe('Other agents', () => {
     expect(w.find('[data-agent-form]').exists()).toBe(false)
     expect(w.find('[data-agent-profile="Codex"]').text()).toContain('~/.codex (your own)')
     expect(useProfileStore().agentProfiles.map((p) => p.id)).toEqual(['cx'])
+  })
+
+  it('launches with a profile from its row, as Claude profiles do', async () => {
+    const saved = { id: 'cx', agent: 'codex' as const, name: 'Codex', homeDir: null, executable: null, extraArgs: [], inheritProviderEnv: false, turnNotifications: true, defaultWorkProfile: null, defaultModel: null, createdAt: 0, updatedAt: 0, lastUsedAt: null, archivedAt: null }
+    api.agentsOverview.mockResolvedValue(overview([saved]))
+    const w = mountCard()
+    await flushPromises()
+    await w.find('[data-agent-launch="Codex"]').trigger('click')
+    expect(useAppStore().launchDialog).toMatchObject({ open: true, agentProfileId: 'cx' })
   })
 })
