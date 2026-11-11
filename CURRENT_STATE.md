@@ -1,7 +1,7 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-11 (session 13: NEXUS 0.5.1 released; 0.5.2 — owner feedback fixes — on
-`fix/macos-watcher-test-race`)._ Read this first,
+_Last updated: 2026-11-11 (session 13: NEXUS 0.5.1 released; 0.5.2 — owner feedback fixes — merged into `main` and
+tagged `v0.5.2`)._ Read this first,
 then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
@@ -237,6 +237,10 @@ notes for 0.5.2 only, linking the 0.5.1 notes for people coming from 0.1.x. No m
 | 35 | Full NX-2 run on `2550ba0`: `cargo test --workspace` · clippy ×2 · `npx vitest run` · typecheck · `npx vite build` · E2E build · CLI build | passed — 359 passed, 1 ignored (core 283, CLI 43 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4) · clean · clean · 177/177 · clean · built · ok · ok |
 | 36 | the 15 desktop suites, first run | agents 16 · run-smoke 28 · task-flow 43 · workbench 54 · portable 50 · sync 18 · attention 27 · mcp-interop 9 · context 12 · usage 18 · constitutions 13 · profiles-kits 9 · restore 12 · workspace-setup 17 — all OK; **workflows FAILED (1)** after 22/24: `taskkill /PID … /T /F` failed when the suite hard-killed NEXUS for crash recovery (its message was discarded) |
 | 37 | `workflows.mjs`' `stopApp` now keeps taskkill's message and requires only that the app is gone (its debugging port closes, else it fails naming taskkill's message) — a process of the tree exiting during the walk is reported as a failure by taskkill (inferred; not reproduced) · `node e2e/workflows.mjs` | WORKFLOWS OK 24/24 (taskkill did not fail this time, so the tolerant path did not run). The other suites still stop the app the old way |
+| 38 | CI `ci.yml` run 42998328527 on `2550ba0` (the 0.5.2 code; `81e59db` after it changes only `workflows.mjs`) | **success**, all five jobs; macOS watcher test ok |
+
+Owner approved the merge with `81e59db` (the release run repeats every CI check): `--no-ff` merge `92ad087`, `release:`
+commit, tag `v0.5.2` (local; the owner pushes).
 
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
@@ -729,13 +733,12 @@ free.
 
 ## Next actions (in order)
 
-1. **Ship 0.5.2** (owner 2026-11-11) = `fix/macos-watcher-test-race`: the macOS watcher test race, *Decline* for a request
-   that cannot be reviewed, Codex launchable from everywhere (*Launch*, a Launch per agent profile, a chosen profile
-   decides the agent), layout of long branch names and commit times. 0.5.1 is released (published 2026-11-11).
-   1. Owner: push the branch again and run CI on it (`gh workflow run ci.yml --ref fix/macos-watcher-test-race`).
-   2. When it is green: merge `--no-ff` into `main`, `release:` commit, tag `v0.5.2`; owner
-      `git push --atomic origin main v0.5.2`, then publishes the draft. NEXUS 0.1.2+ updates itself to 0.5.2.
-   3. Owner: MANUAL_CHECKS 34 (Codex with the owner's own login — confirms `notify` delivers the thread id on 0.166.0)
+1. **Ship 0.5.2** (owner 2026-11-11): the macOS watcher test race, *Decline* for a request that cannot be reviewed, Codex
+   launchable from everywhere (*Launch*, a Launch per agent profile, a chosen profile decides the agent), layout of long
+   branch names and commit times — merged into `main` (`92ad087`) and tagged `v0.5.2` after CI run 42998328527.
+   1. Owner: `git push --atomic origin main v0.5.2` starts the release pipeline (≈ 20 minutes); publish the draft when it
+      is green. NEXUS 0.1.2+ updates itself to 0.5.2.
+   2. Owner: MANUAL_CHECKS 34 (Codex with the owner's own login — confirms `notify` delivers the thread id on 0.166.0)
       and 35 (Dev Environment). Follow-ups in ROADMAP: workspace toolchain baseline, Codex review as a workflow step
       (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first).
    Then define and approve the `nexus` gates under Workflows → Gates (`lint`, `test`, `frontend`, `typecheck`); rule
