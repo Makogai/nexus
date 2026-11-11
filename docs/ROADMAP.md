@@ -219,6 +219,7 @@ run (ADR-0051 §7).
 | G3 | Desktop and CLI: Codex profiles (detect default, register a home), agent choice when launching from a project or task, agent badges, capability explanations; `nexus launch --agent codex`, `nexus agents` | vitest + desktop E2E with `fake-codex` | ✅ (CLI, vitest; desktop E2E `agents.mjs` 16/16) |
 | G4 | Real Codex check by the owner: NEXUS tools listed in a session, thread id recorded after a turn, resume | `docs/MANUAL_CHECKS.md` | ☐ |
 | R1 | Release 0.5.1: this stage, the macOS knowledge-watcher fix, push reviews of a new branch inspect only what the remote lacks, copyable findings; versions, release notes, full verification | CURRENT_STATE 0.5.1 log; CI run 42981710177 green on Windows, Ubuntu and macOS | ✅ merged, tagged `v0.5.1` |
+| R2 | Release 0.5.2 (owner feedback on 0.5.1): Codex launchable from everywhere (*Launch*, a Launch per agent profile, a chosen profile decides the agent), *Decline* for a push request that cannot be reviewed, long branch names and commit times keep their layout, the macOS watcher test race | vitest `agent-profiles`/`components`/`project-page`/`push-request`, desktop E2E `workbench.mjs` +3; CURRENT_STATE 0.5.2 log | in review |
 
 Later: a workspace toolchain baseline in the manifest; Codex review as a workflow step (M26); Gemini CLI, GitHub Copilot
 CLI and OpenCode adapters (each measured first, as Codex was).

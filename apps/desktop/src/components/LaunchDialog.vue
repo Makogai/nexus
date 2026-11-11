@@ -133,8 +133,17 @@ watch(isOpen, (open) => {
   workProfile.value = sel.workProfile
   effort.value = sel.effort
   agent.value = 'claude'
-  // Other agents' profiles (ADR-0052): the last agent used, else Claude Code when it has a profile.
+  // Other agents' profiles (ADR-0052): a profile chosen to launch with decides (a Claude profile means Claude Code);
+  // otherwise the last agent used, else Claude Code when it has a profile.
   const pickAgent = () => {
+    const requested = profiles.agentProfilesById[app.launchDialog.agentProfileId ?? '']
+    if (requested && !requested.archivedAt) {
+      chooseAgent(requested.agent)
+      agentProfileId.value = requested.id
+      applyAgentProfileDefaults()
+      return
+    }
+    if (app.launchDialog.profileId) return
     const last = app.prefs.lastLaunch?.agent
     const wanted = agentChoices.value.find((a) => a.id === last) ?? agentChoices.value[0]
     if (wanted && wanted.id !== 'claude') chooseAgent(wanted.id)

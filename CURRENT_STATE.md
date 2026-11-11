@@ -1,7 +1,7 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-11 (session 13: Agents & Dev Environment, the macOS watcher fix and the push-review fixes merged
-into `main` and tagged `v0.5.1` — the `v0.5.0` release run had failed)._ Read this first,
+_Last updated: 2026-11-11 (session 13: NEXUS 0.5.1 released; 0.5.2 — owner feedback fixes — on
+`fix/macos-watcher-test-race`)._ Read this first,
 then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
@@ -166,6 +166,77 @@ CI on macOS and Ubuntu decides.
 
 Owner approved the merge after row 18: `--no-ff` merge `f7248dd`, `release:` commit, tag `v0.5.1` (local; the owner
 pushes). T18 and the installed-app check run in the release pipeline.
+
+**Release run 42983434559 (`v0.5.1`, `a08eb09`) failed** on *CI checks / Rust (macos-latest)* only — every build, the
+Windows E2E and the other Rust jobs passed; no draft was created. The same watcher test failed at its first assertion
+("temp files, .git and other files are not knowledge") after 0.43 s, while the identical tree had passed it in run
+42981710177. Cause (inferred — the test did not print the event): FSEvents may still report a folder created just before
+the watch began; the test creates `tasks/` right before `arm`, and a created folder rightly counts. Before 0.5.1 every
+macOS event was dropped, so this race could not show. The app is unaffected (one extra refresh that finds nothing).
+Fix on `fix/macos-watcher-test-race`: the test drains after `arm`, and the negative check lists the relevant events it
+saw (`relevant_within`), so a recurrence names its cause.
+Owner chose to re-run the failed job for `v0.5.1` (`gh run rerun 42983434559 --failed`): attempt 2 **success** — macOS
+Rust passed, *Draft release* created **NEXUS v0.5.1** (draft) with the same file set as v0.1.5 and `latest.json` 0.5.1
+with signed entries for windows-x86_64, darwin-aarch64, darwin-x86_64 and linux-x86_64. **Published by the owner
+2026-11-11 09:08 UTC** (`https://github.com/Makogai/nexus/releases/tag/v0.5.1`), now the latest release; `pages.yml` run
+42992650213 redeployed the site (`release.json` says 0.5.1) and `releases/latest/download/latest.json` resolves to v0.5.1.
+
+| # | Command (`CARGO_BUILD_JOBS=2`) | Result |
+| --- | --- | --- |
+| 19 | `cargo test -p nexus-desktop --lib watcher` | 1 passed (Windows) |
+| 20 | same, with a temporary `tasks/b.md` write in the negative step | **FAILED** as intended, the message lists `Create(Any)` and `Modify(Any)` for `tasks\b.md`; write removed |
+| 21 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| 22 | macOS | **not verified** — only CI on macOS can run it, and a race needs more than one green run to mean much |
+
+**Stale push request could not be declined** (owner, after the 0.5.1 push: the NEXUS request for
+`fix/macos-knowledge-watcher` said "no longer checked out" on *Review and push*). The core declines without a review, but
+the dialog's *Decline* waited for one (`!review`) that could never load. Now *Decline* is available once loading ends and
+sends no token; the error says the request can be declined (ADR-0047). Until this ships: switch to the branch, decline,
+switch back.
+
+| # | Command | Result |
+| --- | --- | --- |
+| 23 | `npx vitest run tests/push-request.test.ts` with the new test, before the fix | **1 failed** (Decline did nothing), 9 passed |
+| 24 | same after the fix · `npx vitest run` · `npm run typecheck` | 10/10 · 175/175 (33 files) · clean |
+| 25 | `cargo test -p nexus-core --lib push_request` · `cargo clippy --workspace --all-targets -- -D warnings` | 3/3 · clean |
+| 26 | desktop E2E | not run — no suite drives *Decline*; the Windows E2E job of CI on this branch runs the rest |
+
+**Codex could not be found to launch** (owner on 0.5.1: "i have codex and it added profile too, but it doenst give me any
+options to launch it"). Codex starts only from the launch dialog's *Agent* choice, but every button opening that dialog
+said "Launch Claude", and Codex profiles had no launch button. Owner chose "Launch" everywhere. Now: the buttons and
+commands that open the dialog say **Launch** (top bar, Home, project page, Sessions tab, terminal panel, palette, task
+rows, knowledge task, resume view); each Codex profile row has **Launch**; a profile chosen to launch with decides the
+agent — found on the way: a Claude profile's *Launch with this profile* opened Codex when Codex was used last (vitest seen
+failing: `['codex']` for `['claude']`). Workflow labels keep "Claude" (workflows start Claude only). ADR-0052 §10,
+FIRST_RUN, USER_GUIDE.
+
+| # | Command | Result |
+| --- | --- | --- |
+| 27 | new/changed vitest before the change (`agent-profiles`, `components`, `project-page`) | **4 failed** as intended (no row launch, Claude profile opened Codex, palette and header still "Launch Claude"), 27 passed |
+| 28 | same after · `npx vitest run` · `npm run typecheck` · `npx vite build` | 31/31 · 177/177 (33 files) · clean · built |
+| 29 | E2E build (`--features e2e-webview-debugging`) · `cargo build -p nexus-cli -p fake-claude` | ok · ok |
+| 30 | `agents` · `run-smoke` · `task-flow` · `profiles-kits` · `context` · `constitutions` · `workbench` (the suites that open the launch dialog) | 16 · 28 · 43 · 9 · 12 · 13 · 51 — all OK, first run |
+
+### 0.5.2 (owner: "i do want 0.5.2 :D" — with layout fixes)
+
+**Layout** (owner: on Projects the card's bottom line "breaks into 2 lines if long"; on the Overview "last commit time on
+right breaks into 3 lines"): GitSummary's counts and states (`N changed`, ahead/behind, badges) and the Overview's commit
+time keep one line (`flex: none; white-space: nowrap`) — the branch and the commit summary are what is cut short; the
+facts list wraps words only when nothing else fits (`overflow-wrap: anywhere` instead of `break-all`, which let the
+time shrink to a letter's width). New `data-project-card`, `data-git-branch`, `data-git-changes`, `data-commit-when`.
+`workbench.mjs` +3: a long branch and commit summary, line boxes counted with a DOM Range.
+**Version 0.5.2** in Cargo.toml + lock (the four NEXUS crates), package.json + lock, tauri.conf.json, README; release
+notes for 0.5.2 only, linking the 0.5.1 notes for people coming from 0.1.x. No migrations.
+
+| # | Command | Result |
+| --- | --- | --- |
+| 31 | E2E build with the new checks and the old styles · `node e2e/workbench.mjs` | **WORKBENCH FAILED (3)** as intended — card change count 2 lines, commit time ("just now") 2 lines, Repository change count 2 lines; the other 51 OK |
+| 32 | E2E build with the fix · `node e2e/workbench.mjs` | WORKBENCH OK 54/54 |
+| 33 | `npx vitest run` · `npm run typecheck` | 177/177 · clean |
+| 34 | CI `ci.yml` run 42996106152 on `8a030aa` (before the layout fix and the version) | **success**, all five jobs; macOS ran the watcher test (ok) and the four `knowledge::watch` tests |
+| 35 | Full NX-2 run on `2550ba0`: `cargo test --workspace` · clippy ×2 · `npx vitest run` · typecheck · `npx vite build` · E2E build · CLI build | passed — 359 passed, 1 ignored (core 283, CLI 43 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4) · clean · clean · 177/177 · clean · built · ok · ok |
+| 36 | the 15 desktop suites, first run | agents 16 · run-smoke 28 · task-flow 43 · workbench 54 · portable 50 · sync 18 · attention 27 · mcp-interop 9 · context 12 · usage 18 · constitutions 13 · profiles-kits 9 · restore 12 · workspace-setup 17 — all OK; **workflows FAILED (1)** after 22/24: `taskkill /PID … /T /F` failed when the suite hard-killed NEXUS for crash recovery (its message was discarded) |
+| 37 | `workflows.mjs`' `stopApp` now keeps taskkill's message and requires only that the app is gone (its debugging port closes, else it fails naming taskkill's message) — a process of the tree exiting during the walk is reported as a failure by taskkill (inferred; not reproduced) · `node e2e/workflows.mjs` | WORKFLOWS OK 24/24 (taskkill did not fail this time, so the tolerant path did not run). The other suites still stop the app the old way |
 
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
@@ -658,16 +729,15 @@ free.
 
 ## Next actions (in order)
 
-1. **Ship 0.5.1** (owner 2026-11-10: "id like all this to go together as 0.5.1"): Agents & Dev Environment, the macOS
-   watcher fix (`v0.5.0` failed on macOS and was never released) and the push-review fixes — merged into `main`
-   (`f7248dd`) and tagged `v0.5.1` after CI run 42981710177 was green on all platforms.
-   1. Owner: `git push --atomic origin main v0.5.1` starts the release pipeline (≈ 20 minutes); publish the draft when
-      it is green. NEXUS 0.1.x updates itself to 0.5.1. Decline the stale NEXUS push request for
-      `fix/macos-knowledge-watcher` (merged through the milestone).
-   2. Owner: MANUAL_CHECKS 34 (Codex with the owner's own login — confirms `notify` delivers the thread id on 0.166.0)
+1. **Ship 0.5.2** (owner 2026-11-11) = `fix/macos-watcher-test-race`: the macOS watcher test race, *Decline* for a request
+   that cannot be reviewed, Codex launchable from everywhere (*Launch*, a Launch per agent profile, a chosen profile
+   decides the agent), layout of long branch names and commit times. 0.5.1 is released (published 2026-11-11).
+   1. Owner: push the branch again and run CI on it (`gh workflow run ci.yml --ref fix/macos-watcher-test-race`).
+   2. When it is green: merge `--no-ff` into `main`, `release:` commit, tag `v0.5.2`; owner
+      `git push --atomic origin main v0.5.2`, then publishes the draft. NEXUS 0.1.2+ updates itself to 0.5.2.
+   3. Owner: MANUAL_CHECKS 34 (Codex with the owner's own login — confirms `notify` delivers the thread id on 0.166.0)
       and 35 (Dev Environment). Follow-ups in ROADMAP: workspace toolchain baseline, Codex review as a workflow step
-      (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first). The project page's button
-      still says *Launch Claude* (the dialog then offers Codex) — rename with its tests if the owner wants.
+      (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first).
    Then define and approve the `nexus` gates under Workflows → Gates (`lint`, `test`, `frontend`, `typecheck`); rule
    NX-1 is verified by the `test` gate. Open: context size of running sessions in the task launcher — owner to decide.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a

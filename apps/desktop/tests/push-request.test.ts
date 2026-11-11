@@ -143,6 +143,21 @@ describe('PushRequestDialog', () => {
     expect(app.pushRequestId).toBeNull()
   })
 
+  it('declines a request it cannot review, such as one for a branch that is no longer checked out', async () => {
+    api.pushRequestReview.mockRejectedValue(new Error('fix/old is no longer checked out — switch back to it to push it, or decline the request'))
+    api.pushRequestDecide.mockResolvedValue(request({ branch: 'fix/old', status: 'declined' }))
+    const app = useAppStore()
+    app.pushRequestId = 'r1'
+    const w = mountDialog()
+    await flushPromises()
+    expect(w.find('[data-push-load-error]').text()).toContain('no longer checked out')
+    expect(approve(w).attributes('disabled')).toBeDefined()
+    await w.find('[data-push-decline]').trigger('click')
+    await flushPromises()
+    expect(api.pushRequestDecide).toHaveBeenCalledWith('r1', false, '') // declining needs no reviewed commit
+    expect(app.pushRequestId).toBeNull()
+  })
+
   it('lets the person select and copy the findings that block a push', async () => {
     const findings = [
       { path: 'src/inspect.rs', line: 227, kind: 'secret', severity: 'block' as const, message: 'looks like a private key — credentials never belong in a workspace' },

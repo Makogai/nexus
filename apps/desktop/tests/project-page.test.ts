@@ -104,11 +104,12 @@ describe('project page tabs', () => {
     expect(router.replace).not.toHaveBeenCalled()
   })
 
-  it('keeps the header calm: Launch Claude and Shell, the rest in a menu with their selectors', async () => {
+  it('keeps the header calm: Launch and Shell, the rest in a menu with their selectors', async () => {
     const w = mountPage()
     await flushPromises()
-    const actions = w.findAll('.page-actions .btn').map((b) => b.text())
-    expect(actions).toEqual(['', 'More', 'Shell', 'Launch Claude'].map((t) => expect.stringContaining(t)))
+    const actions = w.findAll('.page-actions .btn').map((b) => b.text().trim())
+    expect(actions).toEqual(['', 'More', 'Shell', 'Launch'].map((t) => expect.stringContaining(t)))
+    expect(actions.at(-1)).toBe('Launch') // any agent: the dialog offers Claude Code and Codex (ADR-0052)
     for (const sel of ['[data-resume-project]', '[data-open-history]', '[data-project-context]', '[data-project-workflow]']) expect(w.find(`.menu ${sel}`).exists()).toBe(true)
     w.unmount()
   })

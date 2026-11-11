@@ -24,8 +24,9 @@ On the welcome screen choose one:
 personal one. NEXUS reads them, never changes them, and launches Claude with the right one.
 
 ## 4. Add a project and launch Claude
-*Projects → Add* a repository folder, then **Launch Claude**. Each session gets NEXUS's tools (tasks, notes, decisions,
-workflow steps) through a session-scoped MCP server — nothing is installed into your Claude configuration.
+*Projects → Add* a repository folder, then **Launch** (Claude Code, or Codex once it has a profile under *Profiles →
+Other agents*). Each session gets NEXUS's tools (tasks, notes, decisions, workflow steps) through a session-scoped MCP
+server — nothing is installed into your Claude or Codex configuration.
 
 ## 5. Set up backups and (optionally) sync
 NEXUS backs up its own data automatically once a day ([Backups](BACKUP_RESTORE.md)). To use the workspace on another

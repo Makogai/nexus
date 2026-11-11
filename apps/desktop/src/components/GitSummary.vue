@@ -10,7 +10,7 @@ defineProps<{ status: GitStatus | null; loading?: boolean; error?: string | null
     <span v-if="loading && !status" class="skeleton" style="width: 140px" />
     <span v-else-if="error" class="faint" :title="error">git unavailable</span>
     <template v-else-if="status && status.isRepo">
-      <span class="branch row">
+      <span class="branch row" data-git-branch>
         <GitBranch />
         <span class="truncate">{{ status.branch ?? (status.detached ? `detached @ ${status.headOid?.slice(0, 7)}` : '—') }}</span>
       </span>
@@ -18,7 +18,7 @@ defineProps<{ status: GitStatus | null; loading?: boolean; error?: string | null
       <span v-if="status.behind" class="ab" title="Commits behind upstream"><ArrowDown />{{ status.behind }}</span>
       <span v-if="status.conflicted" class="badge badge-error" data-git-conflicted>{{ status.conflicted }} conflicted</span>
       <span v-if="status.operation" class="badge badge-warn" data-git-operation>{{ status.operation }} in progress</span>
-      <span v-if="status.staged + status.unstaged + status.untracked > 0" class="changes" :title="`${status.staged} staged · ${status.unstaged} modified · ${status.untracked} untracked`">
+      <span v-if="status.staged + status.unstaged + status.untracked > 0" class="changes" data-git-changes :title="`${status.staged} staged · ${status.unstaged} modified · ${status.untracked} untracked`">
         {{ status.staged + status.unstaged + status.untracked }} changed
       </span>
       <span v-else class="clean">clean</span>
@@ -53,6 +53,14 @@ defineProps<{ status: GitStatus | null; loading?: boolean; error?: string | null
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+/* Only the branch name is cut short; counts and states keep one line. */
+.ab,
+.badge,
+.changes,
+.clean {
+  flex: none;
+  white-space: nowrap;
 }
 .changes {
   color: var(--amber);

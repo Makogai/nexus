@@ -2,7 +2,7 @@
 // Agents beyond Claude Code (ADR-0052): whether each is installed, what NEXUS gives its sessions (full / partial / not
 // available, in words), and its profiles. Registering a profile records a home folder only — NEXUS never writes into it.
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Bot, CircleCheck, CircleDashed, CircleMinus, Plus, TriangleAlert, X } from '@lucide/vue'
+import { Bot, CircleCheck, CircleDashed, CircleMinus, Plus, Sparkles, TriangleAlert, X } from '@lucide/vue'
 import ActionButton from './ActionButton.vue'
 import { useAction } from '../composables/useAction'
 import { useProfileStore } from '../stores/profiles'
@@ -107,6 +107,7 @@ const SUPPORT = { full: CircleCheck, partial: CircleDashed, unavailable: CircleM
           <span class="spacer" />
           <button class="btn btn-sm btn-ghost" :data-agent-edit="p.name" @click="openForm(a, p)">Edit</button>
           <ActionButton class="btn-sm btn-ghost" :data-agent-forget="p.name" :pending="forget.isPending(p.id)" @click="forget.run(p)">Remove</ActionButton>
+          <button class="btn btn-sm btn-primary" :data-agent-launch="p.name" @click="app.openLaunch(null, null, null, { agentProfileId: p.id })"><Sparkles /> Launch</button>
         </div>
       </div>
 

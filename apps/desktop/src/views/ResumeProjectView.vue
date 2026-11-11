@@ -44,9 +44,9 @@ const nextButton = computed(() => {
     case 'resume-session':
       return 'Resume session'
     case 'launch-task':
-      return 'Launch Claude for this task'
+      return 'Launch for this task'
     default:
-      return 'Launch Claude'
+      return 'Launch'
   }
 })
 

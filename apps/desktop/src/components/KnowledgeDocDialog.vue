@@ -284,7 +284,7 @@ const busy = computed(() => saving.pending.value || toggling.pending.value || ap
         <button v-if="doc && !doc.truncated" class="btn" data-doc-edit-start @click="startEdit"><Pencil /> Edit</button>
         <ActionButton v-if="item?.needsApproval" class="btn-primary" :pending="approving.pending.value" :disabled="busy || !doc" pending-label="Approving…" data-doc-approve @click="approving.run()"><template #icon><ShieldCheck /></template> Approve this version</ActionButton>
         <button v-if="task && task.status !== 'done' && item" class="btn" data-run-workflow @click="runWorkflow"><WorkflowIcon /> Run workflow</button>
-        <button v-if="task && task.status !== 'done' && item" class="btn btn-primary" data-launch @click="emit('launch', item)"><Sparkles /> Launch Claude</button>
+        <button v-if="task && task.status !== 'done' && item" class="btn btn-primary" data-launch @click="emit('launch', item)"><Sparkles /> Launch</button>
         <button class="btn" @click="close">Close</button>
       </template>
     </template>

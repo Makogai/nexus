@@ -30,6 +30,9 @@ minutes, also when the remote refused it.
      has, so pushing it again exposes nothing new. The scanner's sources no longer contain such a line either.
    * **Findings can be copied:** the list is selectable and *Copy findings* puts them on the clipboard as text (push
      dialog and the Sync page's commit and push reviews).
+   * **A request that cannot be reviewed can still be declined:** a decline needs no reviewed commit, so *Decline* stays
+     available when the review fails — e.g. the request's branch is no longer checked out, or it was merged and pushed
+     another way. Before, the button waited for a review that could never load and the request stayed listed.
    * **Push is disabled while `behind > 0`**, with a plain explanation: "origin/main has 3 commits you don't have.
      Integrate them first (pull --rebase or merge), resolve any conflicts, run the tests, then push. NEXUS never
      force-pushes."

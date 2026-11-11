@@ -16,7 +16,7 @@ A short tour of each area. Everything stays on your machine unless you push it t
 | **Sync** | The workspace's Git repository: fetch, fast-forward pull, reviewed commit and push. |
 | **Notifications** | Permission prompts, questions, reviews, finished or failed workflows; clicking one opens the right session or view. |
 | **Dev Environment** | Every development tool NEXUS knows (runtimes, package and version managers, build, containers, cloud and database CLIs, AI agents): installed or not, which version, every copy on PATH, and what your projects need. Missing tools offer the official install command and pinned versions your version manager's command — typed into a terminal for you to run. |
-| **Profiles** | Your Claude configurations, their sign-in state and read-only diagnostics. Under *Other agents*: the **OpenAI Codex CLI** — what its sessions get from NEXUS, and its profiles (your own `~/.codex`, or another existing home). Choose *Codex* in the launch dialog to start it with the NEXUS tools, your approved rules and the task. |
+| **Profiles** | Your Claude configurations, their sign-in state and read-only diagnostics. Under *Other agents*: the **OpenAI Codex CLI** — what its sessions get from NEXUS, and its profiles (your own `~/.codex`, or another existing home). Start it with **Launch** on its profile, or choose *Codex* under *Agent* in any launch dialog: it gets the NEXUS tools, your approved rules and the task. |
 | **AI Kits** | Claude Code plugins and skill folders, reviewed by you and enabled per profile. |
 | **Settings** | Appearance, terminal, workspaces, data folder, **backups**, the command-line tool. |
 
