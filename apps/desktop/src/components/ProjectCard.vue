@@ -21,7 +21,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <article class="card project" :class="{ missing: !project.available }" tabindex="0" @click="router.push(`/projects/${project.id}`)" @keydown.enter="router.push(`/projects/${project.id}`)">
+  <article class="card project" :class="{ missing: !project.available }" :data-project-card="project.id" tabindex="0" @click="router.push(`/projects/${project.id}`)" @keydown.enter="router.push(`/projects/${project.id}`)">
     <div class="head">
       <div class="avatar" aria-hidden="true">{{ project.name.slice(0, 1).toUpperCase() }}</div>
       <div class="titles">

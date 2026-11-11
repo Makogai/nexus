@@ -426,7 +426,7 @@ async function unregister() {
               <dd class="row commit">
                 <GitCommitHorizontal />
                 <span class="truncate selectable">{{ git.status.lastCommit.summary }}</span>
-                <span class="faint">{{ relativeTime(git.status.lastCommit.timestampMs) }}</span>
+                <span class="faint when" data-commit-when>{{ relativeTime(git.status.lastCommit.timestampMs) }}</span>
               </dd>
             </template>
             <template v-if="project.remoteUrl">
@@ -681,7 +681,13 @@ async function unregister() {
 .facts dd {
   margin: 0;
   min-width: 0;
-  word-break: break-all;
+  /* Long refs and URLs may break anywhere; words break only when nothing else fits. */
+  overflow-wrap: anywhere;
+}
+/* The summary is cut short, never the time. */
+.commit .when {
+  flex: none;
+  white-space: nowrap;
 }
 .commit svg,
 .ic {

@@ -374,6 +374,25 @@ try {
   await cdp.waitFor(`document.querySelector('[data-draft-decision="done"]')?.innerText.includes('set aside')`, 20000).catch(() => false)
   const none = await until(async () => ((await textOf('[data-learn-drafts]')).includes('No drafts waiting') ? true : null))
   check('Set aside leaves the architecture untouched and the list empty', !!none && readFileSync(join(ctxDir, 'architecture.md'), 'utf8').includes('_Not written yet._'))
+
+  // Long names stay on one line (owner, after 0.5.1): the branch and the commit summary are cut short, never the change
+  // count or the commit time. Lines = distinct line boxes of the element's text.
+  const lines = (sel) => cdp.evaluate(`(() => { const el = document.querySelector(${js(sel)}); if (!el) return 0; const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size })()`)
+  const cutShort = (sel) => cdp.evaluate(`(() => { const el = document.querySelector(${js(sel)}); return !!el && el.scrollWidth > el.clientWidth })()`)
+  git('checkout', '-qb', 'feature/a-branch-name-much-too-long-for-a-project-card-on-the-projects-page')
+  writeFileSync(join(repo, 'src', 'main.ts'), 'export const answer = 43\n')
+  git('commit', '-qam', 'Make the answer configurable through the environment and explain every option in the README for new contributors')
+  await cdp.evaluate(`location.hash = '#/projects'; location.reload(); true`)
+  const card = `[data-project-card="${proj.id}"]`
+  await cdp.waitFor(`document.querySelector('${card} [data-git-branch]')?.innerText.includes('feature/') && !!document.querySelector('${card} [data-git-changes]')`, 20000)
+  const cardLines = await lines(`${card} [data-git-changes]`)
+  check('a project card with a long branch keeps its change count on one line', cardLines === 1 && (await cutShort(`${card} [data-git-branch] .truncate`)), `${cardLines} line(s)`)
+  await cdp.evaluate(`location.hash = '#/projects/${proj.id}'; true`)
+  await cdp.waitFor(`!!document.querySelector('[data-commit-when]') && document.querySelector('[data-project-repository] [data-git-branch]')?.innerText.includes('feature/')`, 20000)
+  const whenLines = await lines('[data-commit-when]')
+  check('…and the Overview keeps the last commit time on one line', whenLines === 1 && (await cutShort('[data-project-repository] .commit .truncate')), `${whenLines} line(s): ${await textOf('[data-commit-when]')}`)
+  const repoLines = await lines('[data-project-repository] [data-git-changes]')
+  check('…and its change count', repoLines === 1, `${repoLines} line(s)`)
 } catch (e) {
   failures++
   console.error(`E2E error: ${e.message}`)
