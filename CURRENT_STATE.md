@@ -1,7 +1,7 @@
 # CURRENT_STATE
 
-_Last updated: 2026-11-11 (session 13: Agents & Dev Environment, the macOS watcher fix and the push-review fixes merged
-into `main` and tagged `v0.5.1` — the `v0.5.0` release run had failed)._ Read this first,
+_Last updated: 2026-11-11 (session 13: NEXUS 0.5.1 released; 0.5.2 — owner feedback fixes — on
+`fix/macos-watcher-test-race`)._ Read this first,
 then `docs/ROADMAP.md`, `docs/PORTABLE_WORKSPACE.md` (audit, gap analysis, milestone plan P0–P8) and ADR-0040 (project workbench).
 
 ## Where we are
@@ -216,6 +216,23 @@ FIRST_RUN, USER_GUIDE.
 | 28 | same after · `npx vitest run` · `npm run typecheck` · `npx vite build` | 31/31 · 177/177 (33 files) · clean · built |
 | 29 | E2E build (`--features e2e-webview-debugging`) · `cargo build -p nexus-cli -p fake-claude` | ok · ok |
 | 30 | `agents` · `run-smoke` · `task-flow` · `profiles-kits` · `context` · `constitutions` · `workbench` (the suites that open the launch dialog) | 16 · 28 · 43 · 9 · 12 · 13 · 51 — all OK, first run |
+
+### 0.5.2 (owner: "i do want 0.5.2 :D" — with layout fixes)
+
+**Layout** (owner: on Projects the card's bottom line "breaks into 2 lines if long"; on the Overview "last commit time on
+right breaks into 3 lines"): GitSummary's counts and states (`N changed`, ahead/behind, badges) and the Overview's commit
+time keep one line (`flex: none; white-space: nowrap`) — the branch and the commit summary are what is cut short; the
+facts list wraps words only when nothing else fits (`overflow-wrap: anywhere` instead of `break-all`, which let the
+time shrink to a letter's width). New `data-project-card`, `data-git-branch`, `data-git-changes`, `data-commit-when`.
+`workbench.mjs` +3: a long branch and commit summary, line boxes counted with a DOM Range.
+**Version 0.5.2** in Cargo.toml + lock (the four NEXUS crates), package.json + lock, tauri.conf.json, README; release
+notes for 0.5.2 only, linking the 0.5.1 notes for people coming from 0.1.x. No migrations.
+
+| # | Command | Result |
+| --- | --- | --- |
+| 31 | E2E build with the new checks and the old styles · `node e2e/workbench.mjs` | **WORKBENCH FAILED (3)** as intended — card change count 2 lines, commit time ("just now") 2 lines, Repository change count 2 lines; the other 51 OK |
+| 32 | E2E build with the fix · `node e2e/workbench.mjs` | WORKBENCH OK 54/54 |
+| 33 | `npx vitest run` · `npm run typecheck` | 177/177 · clean |
 
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
@@ -708,16 +725,15 @@ free.
 
 ## Next actions (in order)
 
-1. **Ship 0.5.1** (owner 2026-11-10: "id like all this to go together as 0.5.1"): Agents & Dev Environment, the macOS
-   watcher fix (`v0.5.0` failed on macOS and was never released) and the push-review fixes — merged into `main`
-   (`f7248dd`) and tagged `v0.5.1` after CI run 42981710177 was green on all platforms.
-   1. Owner: `git push --atomic origin main v0.5.1` starts the release pipeline (≈ 20 minutes); publish the draft when
-      it is green. NEXUS 0.1.x updates itself to 0.5.1. Decline the stale NEXUS push request for
-      `fix/macos-knowledge-watcher` (merged through the milestone).
-   2. Owner: MANUAL_CHECKS 34 (Codex with the owner's own login — confirms `notify` delivers the thread id on 0.166.0)
+1. **Ship 0.5.2** (owner 2026-11-11) = `fix/macos-watcher-test-race`: the macOS watcher test race, *Decline* for a request
+   that cannot be reviewed, Codex launchable from everywhere (*Launch*, a Launch per agent profile, a chosen profile
+   decides the agent), layout of long branch names and commit times. 0.5.1 is released (published 2026-11-11).
+   1. Owner: push the branch again and run CI on it (`gh workflow run ci.yml --ref fix/macos-watcher-test-race`).
+   2. When it is green: merge `--no-ff` into `main`, `release:` commit, tag `v0.5.2`; owner
+      `git push --atomic origin main v0.5.2`, then publishes the draft. NEXUS 0.1.2+ updates itself to 0.5.2.
+   3. Owner: MANUAL_CHECKS 34 (Codex with the owner's own login — confirms `notify` delivers the thread id on 0.166.0)
       and 35 (Dev Environment). Follow-ups in ROADMAP: workspace toolchain baseline, Codex review as a workflow step
-      (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first). The project page's button
-      still says *Launch Claude* (the dialog then offers Codex) — rename with its tests if the owner wants.
+      (M26), Codex skills, Gemini CLI / Copilot CLI / OpenCode adapters (each measured first).
    Then define and approve the `nexus` gates under Workflows → Gates (`lint`, `test`, `frontend`, `typecheck`); rule
    NX-1 is verified by the `test` gate. Open: context size of running sessions in the task launcher — owner to decide.
 2. Owner: create the first personal workspace from the empty repository (`docs/user/PORTABLE_WORKSPACE.md`), add a

@@ -1101,7 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "fake-claude"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "serde_json",
 ]
@@ -2465,7 +2465,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nexus-cli"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "clap",
  "ctrlc",
@@ -2478,7 +2478,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-core"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "dirs",
  "dunce",
@@ -2496,7 +2496,7 @@ dependencies = [
 
 [[package]]
 name = "nexus-desktop"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "nexus-core",
  "notify",
