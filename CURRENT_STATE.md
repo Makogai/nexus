@@ -233,6 +233,10 @@ notes for 0.5.2 only, linking the 0.5.1 notes for people coming from 0.1.x. No m
 | 31 | E2E build with the new checks and the old styles · `node e2e/workbench.mjs` | **WORKBENCH FAILED (3)** as intended — card change count 2 lines, commit time ("just now") 2 lines, Repository change count 2 lines; the other 51 OK |
 | 32 | E2E build with the fix · `node e2e/workbench.mjs` | WORKBENCH OK 54/54 |
 | 33 | `npx vitest run` · `npm run typecheck` | 177/177 · clean |
+| 34 | CI `ci.yml` run 42996106152 on `8a030aa` (before the layout fix and the version) | **success**, all five jobs; macOS ran the watcher test (ok) and the four `knowledge::watch` tests |
+| 35 | Full NX-2 run on `2550ba0`: `cargo test --workspace` · clippy ×2 · `npx vitest run` · typecheck · `npx vite build` · E2E build · CLI build | passed — 359 passed, 1 ignored (core 283, CLI 43 + 6, db_crash 2, git 5, isolation 4, desktop lib 12, pty 4) · clean · clean · 177/177 · clean · built · ok · ok |
+| 36 | the 15 desktop suites, first run | agents 16 · run-smoke 28 · task-flow 43 · workbench 54 · portable 50 · sync 18 · attention 27 · mcp-interop 9 · context 12 · usage 18 · constitutions 13 · profiles-kits 9 · restore 12 · workspace-setup 17 — all OK; **workflows FAILED (1)** after 22/24: `taskkill /PID … /T /F` failed when the suite hard-killed NEXUS for crash recovery (its message was discarded) |
+| 37 | `workflows.mjs`' `stopApp` now keeps taskkill's message and requires only that the app is gone (its debugging port closes, else it fails naming taskkill's message) — a process of the tree exiting during the walk is reported as a failure by taskkill (inferred; not reproduced) · `node e2e/workflows.mjs` | WORKFLOWS OK 24/24 (taskkill did not fail this time, so the tolerant path did not run). The other suites still stop the app the old way |
 
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 

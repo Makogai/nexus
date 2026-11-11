@@ -55,7 +55,15 @@ function startApp() {
   return child
 }
 async function stopApp(child) {
-  execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+  // Hard kill of the whole tree while a gate runs. A process of the tree may exit by itself while taskkill walks it (a
+  // WebView2 helper, the gate's child), which taskkill reports as a failure: what counts is that the app is gone.
+  let killError = ''
+  try {
+    execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'pipe', encoding: 'utf8' })
+  } catch (e) {
+    killError = String(e.stderr || e.stdout || e.message).trim().slice(0, 300)
+    console.log(`note: taskkill reported: ${killError}`)
+  }
   for (let i = 0; i < 60; i++) {
     try {
       await fetch(`http://127.0.0.1:${port}/json`)
@@ -64,6 +72,7 @@ async function stopApp(child) {
     }
     await sleep(300)
   }
+  throw new Error(`the app did not stop${killError ? ` (taskkill: ${killError})` : ''}`)
 }
 async function waitForFile(path, ms = 20000) {
   const deadline = Date.now() + ms
