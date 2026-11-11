@@ -167,6 +167,22 @@ CI on macOS and Ubuntu decides.
 Owner approved the merge after row 18: `--no-ff` merge `f7248dd`, `release:` commit, tag `v0.5.1` (local; the owner
 pushes). T18 and the installed-app check run in the release pipeline.
 
+**Release run 42983434559 (`v0.5.1`, `a08eb09`) failed** on *CI checks / Rust (macos-latest)* only — every build, the
+Windows E2E and the other Rust jobs passed; no draft was created. The same watcher test failed at its first assertion
+("temp files, .git and other files are not knowledge") after 0.43 s, while the identical tree had passed it in run
+42981710177. Cause (inferred — the test did not print the event): FSEvents may still report a folder created just before
+the watch began; the test creates `tasks/` right before `arm`, and a created folder rightly counts. Before 0.5.1 every
+macOS event was dropped, so this race could not show. The app is unaffected (one extra refresh that finds nothing).
+Fix on `fix/macos-watcher-test-race`: the test drains after `arm`, and the negative check lists the relevant events it
+saw (`relevant_within`), so a recurrence names its cause.
+
+| # | Command (`CARGO_BUILD_JOBS=2`) | Result |
+| --- | --- | --- |
+| 19 | `cargo test -p nexus-desktop --lib watcher` | 1 passed (Windows) |
+| 20 | same, with a temporary `tasks/b.md` write in the negative step | **FAILED** as intended, the message lists `Create(Any)` and `Modify(Any)` for `tasks\b.md`; write removed |
+| 21 | `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| 22 | macOS | **not verified** — only CI on macOS can run it, and a race needs more than one green run to mean much |
+
 ## 0.5 alpha — progress (session 12, branch `milestone/v0.5-alpha`, merged and tagged `v0.5.0`)
 
 Task `01a1c4f1` (owner request 2026-11-10): sessions per project on top, feedback for every action, Git pushes that never

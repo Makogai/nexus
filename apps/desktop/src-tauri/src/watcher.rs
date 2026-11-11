@@ -182,7 +182,20 @@ mod tests {
         while f.events.try_recv().is_ok() {}
     }
 
-    /// On macOS the temporary folder is `/var/…` and its changes are reported as `/private/var/…` (`watch::real_names`).
+    /// The changes within `wait` that would refresh the index, described for an assertion message.
+    fn relevant_within(f: &Folders, wait: Duration) -> Vec<String> {
+        let deadline = Instant::now() + wait;
+        let mut seen = Vec::new();
+        while let Ok(ev) = f.events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            if f.relevant(&ev) {
+                seen.push(format!("{ev:?}"));
+            }
+        }
+        seen
+    }
+
+    /// On macOS the temporary folder is `/var/…` and its changes are reported as `/private/var/…` (`watch::real_names`),
+    /// and FSEvents may still report a folder created just before watching began (`tasks`, which rightly counts).
     #[test]
     fn documents_saved_created_moved_or_removed_are_seen_and_nothing_else_is() {
         let t = tempfile::tempdir().unwrap();
@@ -192,13 +205,15 @@ mod tests {
         assert!(f.arm(roots("w1", &ws, &data)), "the workspace folder is watched");
         assert!(!f.arm(roots("w1", &ws, &data)), "the same roots change nothing");
         assert_eq!(f.watched, vec![ws.clone()]);
+        drain(&f);
 
         std::fs::write(ws.join("tasks/.a.md.tmp"), "x").unwrap();
         std::fs::create_dir_all(ws.join(".git")).unwrap();
         std::fs::write(ws.join(".git/index"), "x").unwrap();
         std::fs::write(ws.join("tasks/notes.txt"), "x").unwrap();
         std::fs::write(ws.join("nexus-workspace.json"), "{}").unwrap();
-        assert!(!f.next_change(Duration::from_millis(1500)), "temp files, .git and other files are not knowledge");
+        let seen = relevant_within(&f, Duration::from_millis(1500));
+        assert!(seen.is_empty(), "temp files, .git and other files are not knowledge: {seen:?}");
 
         let started = Instant::now();
         std::fs::write(ws.join("tasks/a.md"), "x").unwrap();
